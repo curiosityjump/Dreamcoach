@@ -1,0 +1,13 @@
+.login { min-height: 100dvh; display: grid; grid-template-columns: minmax(320px, 440px) 1fr; }
+.login-card { padding: 48px 40px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; justify-content: center; }
+.login-brand { display: flex; gap: 14px; align-items: center; }
+.login-brand .brand-mark { width: 44px; height: 44px; border-radius: 12px; }
+.login-brand .brand-mark svg { width: 26px; height: 26px; }
+.login-side { padding: 48px 40px; display: flex; flex-direction: column; gap: 24px; justify-content: center; max-width: 760px; }
+.login-group h3 { font-family: var(--font-body); font-weight: 600; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); }
+.login-accounts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 10px; }
+.login-account { display: flex; align-items: center; gap: 10px; text-align: left; padding: 8px 10px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--surface); transition: all 0.15s; }
+.login-account:hover { border-color: var(--accent); box-shadow: var(--shadow-sm); }
+.login-account-name { display: block; font-weight: 600; font-size: 14px; }
+.login-account-sub { display: block; font-size: 12px; color: var(--muted); }
+@media (max-width: 860px) { .login { grid-template-columns: 1fr; } .login-card { border-right: 0; border-bottom: 1px solid var(--border); padding: 36px 24px; } .login-side { padding: 28px 24px 48px; } }
