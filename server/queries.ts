@@ -215,6 +215,17 @@ const JOURNAL_SELECT = `
   FROM journal_entries j
   JOIN users a ON a.id = j.author_id`;
 
+/**
+ * A journal row is visible when its own flag allows it AND, if it is attached to a
+ * rating/progress entry, that parent is visible too. Takes three `inc` params.
+ * Use this everywhere journal rows are listed OR counted.
+ */
+export const JOURNAL_VISIBLE = (alias = 'j') => `(
+  (${alias}.is_private = 0 OR ? = 1)
+  AND (${alias}.rating_id IS NULL OR EXISTS (SELECT 1 FROM ratings r WHERE r.id = ${alias}.rating_id AND (r.is_private = 0 OR ? = 1)))
+  AND (${alias}.progress_id IS NULL OR EXISTS (SELECT 1 FROM dream_progress p WHERE p.id = ${alias}.progress_id AND (p.is_private = 0 OR ? = 1)))
+)`;
+
 const ACTION_SELECT = `
   SELECT x.*, u.name AS cb_name, u.role AS cb_role
   FROM actions x JOIN users u ON u.id = x.created_by`;
@@ -372,12 +383,7 @@ export function listJournal(
   opts: { from?: string; to?: string; dreamId?: number; category?: RatingCategory; standaloneOnly?: boolean; checkInId?: number; sessionId?: number } = {},
 ): JournalEntry[] {
   // A note attached to a rating/progress entry is only visible if its parent is visible too.
-  const where: string[] = [
-    'j.dreamer_id = ?',
-    '(j.is_private = 0 OR ? = 1)',
-    `(j.rating_id IS NULL OR EXISTS (SELECT 1 FROM ratings r WHERE r.id = j.rating_id AND (r.is_private = 0 OR ? = 1)))`,
-    `(j.progress_id IS NULL OR EXISTS (SELECT 1 FROM dream_progress p WHERE p.id = j.progress_id AND (p.is_private = 0 OR ? = 1)))`,
-  ];
+  const where: string[] = ['j.dreamer_id = ?', JOURNAL_VISIBLE('j')];
   const params: unknown[] = [scope.dreamerId, INC(scope), INC(scope), INC(scope)];
   if (opts.from) { where.push('j.occurred_at >= ?'); params.push(opts.from); }
   if (opts.to) { where.push('j.occurred_at <= ?'); params.push(opts.to); }
@@ -518,14 +524,14 @@ export function getSnapshot(db: DB, scope: Scope): Snapshot {
       `SELECT MAX(t) AS t FROM (
          SELECT MAX(occurred_at) AS t FROM ratings WHERE dreamer_id = ? AND source = 'self' AND (is_private = 0 OR ? = 1)
          UNION ALL SELECT MAX(occurred_at) FROM dream_progress WHERE dreamer_id = ? AND source = 'self' AND (is_private = 0 OR ? = 1)
-         UNION ALL SELECT MAX(occurred_at) FROM journal_entries WHERE dreamer_id = ? AND source = 'self' AND (is_private = 0 OR ? = 1)
+         UNION ALL SELECT MAX(j.occurred_at) FROM journal_entries j WHERE j.dreamer_id = ? AND j.source = 'self' AND ${JOURNAL_VISIBLE('j')}
        )`,
     )
-    .get(scope.dreamerId, inc, scope.dreamerId, inc, scope.dreamerId, inc) as { t: string | null };
+    .get(scope.dreamerId, inc, scope.dreamerId, inc, scope.dreamerId, inc, inc, inc) as { t: string | null };
   const checkIns30 = listCheckIns(db, scope, { from: d30 }).length;
   const journal30 = db
-    .prepare(`SELECT COUNT(*) AS n FROM journal_entries WHERE dreamer_id = ? AND occurred_at >= ? AND (is_private = 0 OR ? = 1)`)
-    .get(scope.dreamerId, d30, inc) as { n: number };
+    .prepare(`SELECT COUNT(*) AS n FROM journal_entries j WHERE j.dreamer_id = ? AND j.occurred_at >= ? AND ${JOURNAL_VISIBLE('j')}`)
+    .get(scope.dreamerId, d30, inc, inc, inc) as { n: number };
   return {
     latest: latestRatings(db, scope),
     dreams: listDreams(db, scope),

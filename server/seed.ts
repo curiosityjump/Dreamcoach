@@ -604,6 +604,31 @@ export function resetAndSeed(db: DB): SeedSummary {
       }
       void prevSessionEnd;
       void totalMonths;
+
+      // ---- Guaranteed demo privacy examples for the main demo dreamers ----
+      // (a private action, a private reflection, a private rating, and a shared rating
+      // with a private note), recorded within the last ten days so they are easy to find.
+      if (['alicia@dreamcoach.demo', 'darnell@dreamcoach.demo', 'grace@dreamcoach.demo'].includes(spec.email)) {
+        const tenDaysAgo = new Date(NOW.getTime() - 10 * DAY);
+        const whenA = at(tenDaysAgo, 20, 10);
+        const r = insAction.run(dreamerId, pick(PRIVATE_ACTIONS), 'Only I can see this one.', 'active', null, null, 1, userId, null, whenA, null, null, whenA);
+        void r;
+        counts.actions++; counts.private++;
+        const whenJ = at(new Date(NOW.getTime() - 6 * DAY), 21, 30);
+        insJournal.run(dreamerId, REFLECTIONS_PRIVATE[0]!, whenJ, 1, 'self', null, null, null, null, null, null, userId, whenJ, whenJ);
+        counts.journal++; counts.private++;
+        const whenC = at(new Date(NOW.getTime() - 4 * DAY), 8, 15);
+        const ciId = Number(db.prepare('INSERT INTO check_ins (dreamer_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?)').run(dreamerId, whenC, userId, whenC).lastInsertRowid);
+        counts.checkIns++;
+        // Private Alignment rating with a note.
+        const pr = insRating.run(dreamerId, 'alignment', clamp(lastCare.alignment - 2, 1, 10), whenC, 'self', null, ciId, userId, 1, whenC, whenC);
+        insJournal.run(dreamerId, NOTES.alignment.low[0]!, whenC, 0, 'self', null, ciId, Number(pr.lastInsertRowid), null, null, 'alignment', userId, whenC, whenC);
+        counts.ratings++; counts.journal++; counts.private++;
+        // Shared Energy rating whose note is private.
+        const sr = insRating.run(dreamerId, 'energy', clamp(lastCare.energy, 1, 10), whenC, 'self', null, ciId, userId, 0, whenC, whenC);
+        insJournal.run(dreamerId, `${NOTES.energy.mid[1]!} ${PRIVATE_NOTES[0]!}`, whenC, 1, 'self', null, ciId, Number(sr.lastInsertRowid), null, null, 'energy', userId, whenC, whenC);
+        counts.ratings++; counts.journal++; counts.private++;
+      }
     }
     return counts;
   });

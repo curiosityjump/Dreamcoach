@@ -8,6 +8,7 @@ import type { Viewer } from './auth.ts';
 import { staffScope } from './privacy.ts';
 import { toUser } from './auth.ts';
 import * as q from './queries.ts';
+import { JOURNAL_VISIBLE } from './queries.ts';
 import { CARE_CATEGORIES, RATING_CATEGORIES, type RatingCategory } from '../shared/care.ts';
 import type { CaseloadEntry, CoachDashboard, CoachDetail, CoachSummary, DirectorDreamerRow, DirectorOverview, MonthPoint, User } from '../shared/types.ts';
 
@@ -173,8 +174,8 @@ function monthSeries(db: DB, viewer: Viewer, ids: number[], startsOn: string): M
     .prepare(`SELECT value, substr(occurred_at,1,7) AS m FROM dream_progress WHERE source = 'session' AND is_private = 0 AND dreamer_id IN (${inList})`)
     .all(...ids) as { value: number; m: string }[];
   const journal = db
-    .prepare(`SELECT substr(occurred_at,1,7) AS m, COUNT(*) AS n FROM journal_entries WHERE source = 'self' AND is_private = 0 AND dreamer_id IN (${inList}) GROUP BY m`)
-    .all(...ids) as { m: string; n: number }[];
+    .prepare(`SELECT substr(j.occurred_at,1,7) AS m, COUNT(*) AS n FROM journal_entries j WHERE j.source = 'self' AND ${JOURNAL_VISIBLE('j')} AND j.dreamer_id IN (${inList}) GROUP BY m`)
+    .all(0, 0, 0, ...ids) as { m: string; n: number }[];
   const actionsCreated = db
     .prepare(`SELECT substr(created_at,1,7) AS m, COUNT(*) AS n FROM actions WHERE is_private = 0 AND dreamer_id IN (${inList}) GROUP BY m`)
     .all(...ids) as { m: string; n: number }[];
