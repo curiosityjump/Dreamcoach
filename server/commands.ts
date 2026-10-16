@@ -172,8 +172,12 @@ export function updateRating(
   const existing = q.getRating(db, scope, id);
   if (!existing) throw new HttpError(404, 'Entry not found.', 'not_found');
   if (patch.isPrivate !== undefined || patch.notePrivate !== undefined) assertOwner(scope, 'privacy');
-  if (patch.value !== undefined && !scope.isOwner && !(scope.isCoachFor && existing.source === 'session')) throw new HttpError(403, 'Not allowed.', 'forbidden');
-  if (patch.note !== undefined && !scope.isOwner && !(scope.isCoachFor && existing.source === 'session')) throw new HttpError(403, 'Not allowed.', 'forbidden');
+  // Values and notes: the dreamer edits their own self entries; the coach edits session entries.
+  // (A dreamer may still change the privacy of a session-recorded entry — that is theirs to decide.)
+  const canEditContent = (scope.isOwner && existing.source === 'self') || (scope.isCoachFor && existing.source === 'session');
+  if ((patch.value !== undefined || patch.note !== undefined) && !canEditContent) {
+    throw new HttpError(403, existing.source === 'session' ? 'Session values are recorded by your coach. You can still make this entry private.' : 'Not allowed.', 'forbidden');
+  }
   const now = nowIso();
   db.transaction(() => {
     db.prepare('UPDATE ratings SET value = COALESCE(?, value), is_private = COALESCE(?, is_private), occurred_at = COALESCE(?, occurred_at), updated_at = ? WHERE id = ?').run(
@@ -224,7 +228,10 @@ export function updateProgress(
   const existing = q.getProgressEntry(db, scope, id);
   if (!existing) throw new HttpError(404, 'Entry not found.', 'not_found');
   if (patch.isPrivate !== undefined || patch.notePrivate !== undefined) assertOwner(scope, 'privacy');
-  if ((patch.value !== undefined || patch.note !== undefined) && !scope.isOwner && !(scope.isCoachFor && existing.source === 'session')) throw new HttpError(403, 'Not allowed.', 'forbidden');
+  const canEditContent = (scope.isOwner && existing.source === 'self') || (scope.isCoachFor && existing.source === 'session');
+  if ((patch.value !== undefined || patch.note !== undefined) && !canEditContent) {
+    throw new HttpError(403, existing.source === 'session' ? 'Session values are recorded by your coach. You can still make this entry private.' : 'Not allowed.', 'forbidden');
+  }
   const now = nowIso();
   db.transaction(() => {
     db.prepare('UPDATE dream_progress SET value = COALESCE(?, value), is_private = COALESCE(?, is_private), occurred_at = COALESCE(?, occurred_at), updated_at = ? WHERE id = ?').run(

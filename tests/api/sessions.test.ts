@@ -126,3 +126,30 @@ test('validation: out-of-range and malformed input is rejected cleanly', async (
   const res = await fetch(`${s.base}/api/dreamers/me/journal`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: dreamer.cookie }, body: '{bad json' });
   assert.equal(res.status, 400);
 });
+
+test('dreamers can change privacy of session-recorded entries but not their values; coaches the reverse', async () => {
+  const dreamer = new Client(s.base);
+  await dreamer.login('marcus@dreamcoach.demo');
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const ratings = (await dreamer.get('/dreamers/me/ratings?category=energy')).body;
+  const sessionRating = ratings.find((r: any) => r.source === 'session');
+  const selfRating = ratings.find((r: any) => r.source === 'self');
+  assert.ok(sessionRating && selfRating);
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${sessionRating.id}`, { value: 10 })).status, 403);
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${sessionRating.id}`, { isPrivate: true })).status, 200);
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${sessionRating.id}`, { isPrivate: false })).status, 200);
+  const edited = await dreamer.patch(`/dreamers/me/ratings/${selfRating.id}`, { value: 3, note: 'edited note', notePrivate: true });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.value, 3);
+  assert.equal(edited.body.note.body, 'edited note');
+  assert.equal(edited.body.note.isPrivate, true);
+  const coach = new Client(s.base);
+  await coach.login('maya@dreamcoach.demo');
+  const id = (await dreamer.get('/dreamers/me/overview')).body.dreamer.id;
+  assert.equal((await coach.patch(`/dreamers/${id}/ratings/${selfRating.id}`, { value: 9 })).status, 403);
+  assert.equal((await coach.patch(`/dreamers/${id}/ratings/${sessionRating.id}`, { value: 9 })).status, 200);
+  assert.equal((await coach.patch(`/dreamers/${id}/ratings/${sessionRating.id}`, { isPrivate: true })).status, 403);
+  // Coach's edit shows for the dreamer.
+  const after = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => r.id === sessionRating.id);
+  assert.equal(after.value, 9);
+});
