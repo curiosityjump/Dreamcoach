@@ -13,7 +13,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: { '/api': 'http://localhost:3000' },
+    proxy: { '/api': process.env.DC_API ?? 'http://localhost:3000' },
   },
   build: { outDir: 'dist', emptyOutDir: true },
 });
