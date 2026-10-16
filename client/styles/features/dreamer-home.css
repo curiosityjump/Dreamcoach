@@ -1,1 +1,131 @@
-/* Styles for the dreamer-home area. Use tokens from tokens.css; prefix classes with a short area prefix to avoid collisions. */
+/* ==========================================================================
+   dreamer-home — HomePage (/home) and MySessionsPage (/sessions, /sessions/:id)
+   All classes are prefixed `dh-`. Colors come from tokens.css; CARE colors are
+   passed in as --dh-color / --dh-tint from CATEGORY_META.
+   ========================================================================== */
+
+/* ---------- Shared bits ---------- */
+.dh-eyebrow { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); line-height: 1.4; }
+.dh-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--muted-2); flex: none; }
+.dh-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.dh-link { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 500; font-size: 13.5px; margin-top: 10px; }
+.dh-link svg { width: 14px; height: 14px; }
+.dh-more { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 13.5px; font-weight: 500; color: var(--accent); min-height: 40px; }
+.dh-more svg { width: 14px; height: 14px; }
+.dh-foot { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.dh-open { margin-bottom: 14px; }
+.dh-private-hint { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-size: 13px; color: var(--private); }
+.dh-private-hint svg { width: 14px; height: 14px; }
+
+/* ---------- Home layout ---------- */
+.dh-page .page-header { align-items: flex-start; }
+.dh-grid { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(0, 1fr); gap: 20px; align-items: start; margin-bottom: 20px; }
+@media (max-width: 920px) { .dh-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .dh-cta { flex: 1 1 auto; }
+  .dh-page .page-actions { width: 100%; }
+  .dh-private-hint { display: flex; margin: 6px 0 0; }
+}
+
+/* ---------- Your dreams ---------- */
+.dh-dreams { display: flex; flex-direction: column; }
+.dh-dreams > * + * { border-top: 1px solid var(--border); }
+.dh-dream { display: block; color: inherit; padding: 14px 0; border-radius: var(--r-sm); transition: background 0.15s; }
+.dh-dream:first-child { padding-top: 0; }
+.dh-dream:last-child { padding-bottom: 0; }
+.dh-dream:hover { text-decoration: none; }
+.dh-dream:hover .dh-dream-title { color: var(--accent); }
+.dh-dream-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.dh-dream-title { font-family: var(--font-display); font-size: 17px; line-height: 1.3; color: var(--ink); margin-top: 2px; transition: color 0.15s; overflow-wrap: anywhere; }
+.dh-dream-pct { font-family: var(--font-display); font-size: 22px; line-height: 1; color: var(--ink); flex: none; }
+.dh-dream-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+.dh-dream-meta .chip svg { width: 11px; height: 11px; }
+
+/* ---------- CARE right now ---------- */
+.dh-care-wheel { margin: -4px auto 6px; padding: 0 30px; max-width: 320px; }
+/* the wheel's outside labels extend past its viewBox at small sizes; let them show */
+.dh-care-wheel svg { overflow: visible; }
+.dh-care-rows, .dh-rating-rows { display: flex; flex-direction: column; }
+.dh-care-rows > * + *, .dh-rating-rows > * + * { border-top: 1px solid var(--border); }
+.dh-care-row, .dh-rating-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; min-height: 44px; color: inherit; }
+.dh-care-row:hover { text-decoration: none; }
+.dh-care-row:hover .dh-care-label { color: var(--accent); }
+.dh-care-swatch { width: 10px; height: 10px; border-radius: 50%; background: var(--dh-color, var(--muted)); flex: none; }
+.dh-care-label, .dh-rating-label { display: block; font-weight: 500; font-size: 14px; color: var(--ink); line-height: 1.3; }
+.dh-care-src { display: block; font-size: 12px; color: var(--muted); line-height: 1.3; }
+.dh-care-delta { min-width: 84px; text-align: right; font-size: 12.5px; }
+.dh-care-val { font-family: var(--font-display); font-size: 20px; min-width: 26px; text-align: right; color: var(--ink); line-height: 1; }
+.dh-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.dh-stats .stat { background: var(--surface-2); }
+.dh-stats .stat-value { font-size: 24px; }
+@media (max-width: 400px) { .dh-care-delta { min-width: 0; } .dh-stats { grid-template-columns: 1fr; } }
+
+/* ---------- Actions ---------- */
+.dh-composer { padding: 12px 14px; margin: -4px 0 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); }
+.dh-composer:last-child { margin-bottom: 0; }
+
+/* ---------- Coaching ---------- */
+.dh-session { display: block; color: inherit; padding: 14px; margin: 0 -4px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--surface-2); transition: border-color 0.15s, box-shadow 0.15s; }
+.dh-session:hover { text-decoration: none; border-color: var(--border-strong); box-shadow: var(--shadow-sm); }
+.dh-session-head { display: flex; align-items: center; gap: 10px; }
+.dh-session-title { font-family: var(--font-display); font-size: 17px; color: var(--ink); line-height: 1.2; }
+.dh-session-sub { font-size: 13px; color: var(--muted); }
+.dh-session-focus, .dh-srow-focus { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; padding: 8px 12px; border-radius: var(--r-sm); background: var(--gold-soft); color: #5c3f0a; font-size: 14px; }
+.dh-session-focus .dh-eyebrow, .dh-srow-focus .dh-eyebrow { color: #8a5e10; }
+.dh-session-notes { margin-top: 12px; font-size: 14px; color: var(--ink-2); white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; }
+
+/* ---------- Sessions page: list rows ---------- */
+.dh-sessions-stack { gap: 20px; }
+.dh-srows { display: flex; flex-direction: column; }
+.dh-srows > * + * { border-top: 1px solid var(--border); }
+.dh-srow { display: block; color: inherit; padding: 16px 0; }
+.dh-srow:first-child { padding-top: 2px; }
+.dh-srow:last-child { padding-bottom: 2px; }
+.dh-srow:hover { text-decoration: none; }
+.dh-srow:hover .dh-srow-title { color: var(--accent); }
+.dh-srow:hover .dh-srow-chev { color: var(--accent); transform: translateX(2px); }
+.dh-srow-head { display: flex; align-items: center; gap: 12px; }
+.dh-srow-title { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-size: 19px; color: var(--ink); line-height: 1.2; transition: color 0.15s; }
+.dh-srow-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.dh-srow-chev { width: 18px; height: 18px; color: var(--muted-2); flex: none; transition: color 0.15s, transform 0.15s; }
+.dh-srow-notes { margin-top: 10px; font-size: 14px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.dh-srow-foot { margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+
+/* value pills: C 7 · A 9 … */
+.dh-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.dh-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: var(--r-pill); background: var(--dh-tint, var(--surface-3)); color: var(--ink); font-size: 13px; line-height: 1.5; border: 1px solid transparent; }
+.dh-pill-k { font-size: 11px; font-weight: 700; color: var(--dh-color, var(--muted)); letter-spacing: 0.02em; }
+.dh-pill-v { font-weight: 600; }
+.dh-pill-d { font-size: 11.5px; color: var(--ink-2); }
+
+/* mini dream values */
+.dh-minis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.dh-mini { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 6px 10px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); }
+.dh-mini-label { font-size: 11.5px; color: var(--muted); }
+.dh-mini-val { font-size: 14px; font-weight: 600; color: var(--ink); }
+@media (max-width: 640px) { .dh-minis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- Sessions page: detail ---------- */
+.dh-back { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 500; color: var(--ink-2); margin-bottom: 14px; min-height: 36px; }
+.dh-back:hover { color: var(--accent); text-decoration: none; }
+.dh-back svg { width: 15px; height: 15px; }
+.dh-title-chip { vertical-align: middle; margin-left: 10px; font-family: var(--font-body); }
+.dh-detail { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 920px) { .dh-detail { grid-template-columns: 1fr; } }
+.dh-focus { padding: 12px 14px; border-radius: var(--r-md); background: var(--gold-soft); color: #5c3f0a; margin-bottom: 14px; }
+.dh-focus .dh-eyebrow { color: #8a5e10; margin-bottom: 2px; }
+.dh-focus-text { font-family: var(--font-display); font-size: 17px; line-height: 1.35; }
+.dh-notes { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.65; color: var(--ink); padding: 14px 16px; border-left: 3px solid var(--accent-soft-2); background: var(--surface-2); border-radius: 0 var(--r-md) var(--r-md) 0; }
+
+/* progress rows in detail */
+.dh-progress-rows { display: flex; flex-direction: column; }
+.dh-progress-rows > * + * { border-top: 1px solid var(--border); }
+.dh-progress-row { display: block; color: inherit; padding: 12px 0; }
+.dh-progress-row:first-child { padding-top: 0; }
+.dh-progress-row:last-child { padding-bottom: 0; }
+.dh-progress-row:hover { text-decoration: none; }
+.dh-progress-row:hover .dh-progress-title { color: var(--accent); }
+.dh-progress-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.dh-progress-title { display: block; font-weight: 500; font-size: 14.5px; color: var(--ink); line-height: 1.3; transition: color 0.15s; }
+.dh-progress-val { font-family: var(--font-display); font-size: 19px; line-height: 1; color: var(--ink); flex: none; }
+.dh-progress-meta { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
