@@ -62,19 +62,19 @@ export const useJournal = (id: DreamerRef, opts: { standalone?: boolean; dreamId
   const s = qs.toString();
   return useQuery<JournalEntry[]>({ queryKey: dk(id, 'journal', s), queryFn: () => get(`/dreamers/${id}/journal${s ? `?${s}` : ''}`) });
 };
-export const useTimeline = (id: DreamerRef, opts: { limit?: number; from?: string; to?: string } = {}) => {
+export const useTimeline = (id: DreamerRef, opts: { limit?: number; from?: string; to?: string; enabled?: boolean } = {}) => {
   const qs = new URLSearchParams();
   if (opts.limit) qs.set('limit', String(opts.limit));
   if (opts.from) qs.set('from', opts.from);
   if (opts.to) qs.set('to', opts.to);
   const s = qs.toString();
-  return useQuery<TimelineItem[]>({ queryKey: dk(id, 'timeline', s), queryFn: () => get(`/dreamers/${id}/timeline${s ? `?${s}` : ''}`) });
+  return useQuery<TimelineItem[]>({ queryKey: dk(id, 'timeline', s), queryFn: () => get(`/dreamers/${id}/timeline${s ? `?${s}` : ''}`), enabled: opts.enabled });
 };
 export const useCheckIns = (id: DreamerRef) => useQuery<CheckIn[]>({ queryKey: dk(id, 'check-ins'), queryFn: () => get(`/dreamers/${id}/check-ins`) });
 export const useSessions = (id: DreamerRef) => useQuery<CoachingSession[]>({ queryKey: dk(id, 'sessions'), queryFn: () => get(`/dreamers/${id}/sessions`) });
 export const useSession = (id: DreamerRef, sid: number | null, opts?: { refetchInterval?: number }) =>
   useQuery<CoachingSession>({ queryKey: dk(id, 'session', sid), queryFn: () => get(`/dreamers/${id}/sessions/${sid}`), enabled: sid != null, ...opts });
-export const useGrid = (id: DreamerRef) => useQuery<SessionGrid>({ queryKey: dk(id, 'grid'), queryFn: () => get(`/dreamers/${id}/grid`) });
+export const useGrid = (id: DreamerRef, opts?: { refetchInterval?: number; enabled?: boolean }) => useQuery<SessionGrid>({ queryKey: dk(id, 'grid'), queryFn: () => get(`/dreamers/${id}/grid`), ...opts });
 
 /* ---------- Staff reads ---------- */
 export const useCoachDashboard = () => useQuery<CoachDashboard>({ queryKey: ['coach', 'dashboard'], queryFn: () => get('/coach/dashboard') });

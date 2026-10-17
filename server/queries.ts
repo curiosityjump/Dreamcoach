@@ -549,8 +549,11 @@ export function getSnapshot(db: DB, scope: Scope): Snapshot {
 export function getTimeline(db: DB, scope: Scope, opts: { limit?: number; from?: string; to?: string } = {}): TimelineItem[] {
   const items: TimelineItem[] = [];
   const dreams = new Map(listDreams(db, scope).map((d) => [d.id, d.title]));
-  for (const r of listRatings(db, scope, { from: opts.from, to: opts.to })) items.push({ kind: 'rating', at: r.occurredAt, item: r });
+  // Session-recorded ratings/progress are represented by their session item (which carries all
+  // values, focus and notes), so the feed shows one row per coaching session instead of ten.
+  for (const r of listRatings(db, scope, { from: opts.from, to: opts.to })) if (r.sessionId == null) items.push({ kind: 'rating', at: r.occurredAt, item: r });
   for (const p of listProgress(db, scope)) {
+    if (p.sessionId != null) continue;
     if (opts.from && p.occurredAt < opts.from) continue;
     if (opts.to && p.occurredAt > opts.to) continue;
     items.push({ kind: 'progress', at: p.occurredAt, item: p, dreamTitle: dreams.get(p.dreamId) ?? 'Dream' });

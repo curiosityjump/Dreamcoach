@@ -71,15 +71,20 @@ export function Field({ label, hint, error, children, htmlFor }: { label?: React
 export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} />;
 }
-export function TextArea({ autoGrow = true, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { autoGrow?: boolean }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
+export function TextArea({ autoGrow = true, ref: outerRef, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { autoGrow?: boolean; ref?: React.Ref<HTMLTextAreaElement> }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     if (!autoGrow || !ref.current) return;
     const el = ref.current;
     el.style.height = 'auto';
     el.style.height = `${Math.min(480, el.scrollHeight + 2)}px`;
   }, [props.value, autoGrow]);
-  return <textarea ref={ref} rows={props.rows ?? 3} {...props} />;
+  const setRef = (el: HTMLTextAreaElement | null) => {
+    ref.current = el;
+    if (typeof outerRef === 'function') outerRef(el);
+    else if (outerRef && typeof outerRef === 'object') (outerRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+  };
+  return <textarea ref={setRef} rows={props.rows ?? 3} {...props} />;
 }
 
 /* ---------- Rating input 0–10 ---------- */

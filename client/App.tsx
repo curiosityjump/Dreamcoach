@@ -1,5 +1,6 @@
 import { createBrowserRouter, RouterProvider } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ApiRequestError } from '@/api/client';
 import { AuthProvider } from '@/auth/AuthContext';
 import { ToastProvider } from '@/components/toast';
 import { BareShell, DreamerShell, RoleRedirect, StaffShell } from '@/app/Shell';
@@ -24,7 +25,7 @@ import { NotFoundPage } from '@/features/shared/NotFoundPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 10_000, refetchOnWindowFocus: true, retry: (count, err) => !(err instanceof Error && /401|404|403/.test(err.message)) && count < 2 },
+    queries: { staleTime: 10_000, refetchOnWindowFocus: true, retry: (count, err) => !(err instanceof ApiRequestError && [400, 401, 403, 404].includes(err.status)) && count < 2 },
   },
 });
 
