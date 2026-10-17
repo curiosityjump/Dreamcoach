@@ -97,7 +97,7 @@ const DREAMERS: DreamerSpec[] = [
   },
   {
     name: 'Tamsin Reyes', email: 'tamsin@dreamcoach.demo', coach: 'maya@dreamcoach.demo',
-    about: 'Leasing Consultant · 1 year', engagement: 'light', joinedMonthsAgo: 8, missedMonths: [5, 2],
+    about: 'Leasing Consultant · 1 year', engagement: 'light', joinedMonthsAgo: 8, missedMonths: [5, 1, 0],
     care: { contribution: [5, 6], alignment: [5, 6], relationships: [6, 7], energy: [5, 6] }, commitment: [6, 7], satisfaction: [5, 7],
     dreams: [
       { title: 'Get promoted to Assistant Property Manager', description: 'Lead a site team within the year.', start: 10, end: 45, actions: ['Ask my manager what the APM role requires', 'Shadow the APM on month-end reporting', 'Complete the Fair Housing refresher'] },
@@ -174,7 +174,7 @@ const DREAMERS: DreamerSpec[] = [
   },
   {
     name: 'Theo Lindqvist', email: 'theo@dreamcoach.demo', coach: 'priya@dreamcoach.demo',
-    about: 'IT Support Specialist · 3 years', engagement: 'light', joinedMonthsAgo: 8, missedMonths: [4],
+    about: 'IT Support Specialist · 3 years', engagement: 'light', joinedMonthsAgo: 8, missedMonths: [4, 0],
     care: { contribution: [6, 7], alignment: [5, 6], relationships: [4, 6], energy: [5, 6] }, commitment: [6, 7], satisfaction: [5, 7],
     dreams: [
       { title: 'Earn the Network+ certification', description: 'Then Security+ next year.', start: 30, end: 80, actions: ['Book the exam for July', 'Do one practice lab each weekend'] },
