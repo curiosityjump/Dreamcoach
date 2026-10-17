@@ -57,11 +57,11 @@ const staffLabel = (u: User) => (u.role === 'director' ? `${u.name} · Director`
 
 /* ---------- Cells ---------- */
 
-function CoachCell({ coach }: { coach: DirectorDreamerRow['dreamer']['coach'] }) {
+function CoachCell({ coach, avatar }: { coach: DirectorDreamerRow['dreamer']['coach']; avatar?: boolean }) {
   if (!coach) return <span className="muted">No coach assigned</span>;
   return (
     <span className="dir-coach-cell">
-      <Avatar initials={coach.initials} size="sm" tone="gold" />
+      {avatar && <Avatar initials={coach.initials} size="sm" tone="gold" />}
       <span>{coach.name}</span>
     </span>
   );
@@ -250,7 +250,7 @@ function DreamersCards({ rows, actions }: { rows: DirectorDreamerRow[]; actions:
             <RowMenu row={r} actions={actions} />
           </div>
           <dl className="dir-card-facts">
-            <div><dt>Coach</dt><dd><CoachCell coach={r.dreamer.coach} /></dd></div>
+            <div><dt>Coach</dt><dd><CoachCell coach={r.dreamer.coach} avatar /></dd></div>
             <div><dt>Sessions</dt><dd className="tnum">{plural(r.sessionsCompleted, 'completed session')}</dd></div>
             <div><dt>Last session</dt><dd><LastSessionCell snapshot={r.snapshot} /></dd></div>
             <div><dt>Last self activity</dt><dd><WhenCell iso={r.snapshot.lastSelfCheckIn} sub={r.snapshot.lastSelfCheckIn ? 'self check-in' : undefined} /></dd></div>

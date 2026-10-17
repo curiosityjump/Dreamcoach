@@ -113,10 +113,10 @@ function CoachesTable({ coaches }: { coaches: CoachSummary[] }) {
             <Th className="num" sub="45 days">Participation</Th>
             <Th className="num" sub="between sessions, 30d">Engaged</Th>
             <Th className="num" sub="first → latest session">CARE change</Th>
-            <Th className="num" sub="latest, 0–10">Commitment / satisfaction</Th>
+            <Th className="num" sub="latest, 0–10">Commitment /<br />satisfaction</Th>
             <Th className="num" sub="avg progress">Dreams</Th>
             <Th className="num">Achieved</Th>
-            <Th className="num" sub="actions over 30 days old">Follow-through</Th>
+            <Th className="num" sub="actions older than 30d">Follow-through</Th>
             <th scope="col"><span className="sr-only">Open</span></th>
           </tr>
         </thead>

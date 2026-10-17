@@ -141,7 +141,8 @@
 .dir-card-facts dd { margin: 0; }
 .dir-card-facts .dir-dreams { min-width: 0; }
 .dir-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
-@media (max-width: 400px) { .dir-card-facts { grid-template-columns: 1fr; } }
+@media (max-width: 340px) { .dir-card-facts { grid-template-columns: 1fr; } }
+.dir-card-facts .dir-care { flex-wrap: wrap; gap: 4px 10px; }
 
 /* ---------- Row menu (portal) ---------- */
 .dir-row-menu { display: inline-flex; }
@@ -210,3 +211,8 @@
 .dir-dreamers-table .dir-care-avg { font-size: 18px; }
 .dir-sticky-col { position: sticky; right: 0; background: var(--surface); box-shadow: -1px 0 0 var(--border); width: 48px; }
 .dir-row:hover .dir-sticky-col { background: var(--surface-2); }
+
+/* Wide dreamers table: the dreamer column stays put on the left while the rest scrolls. */
+.dir-dreamers-table th:first-child, .dir-dreamers-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: 1px 0 0 var(--border); }
+.dir-dreamers-table .dir-row:hover td:first-child { background: var(--surface-2); }
+.dir-dreamers-table th { z-index: 2; }
