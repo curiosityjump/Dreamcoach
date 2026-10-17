@@ -7,3 +7,4 @@ playwright-report/
 .playwright/
 *.log
 .DS_Store
+scripts-tmp/
