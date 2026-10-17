@@ -22,7 +22,7 @@ import { fmtDate, num, pct, plural, relativeTime } from '@/lib/format';
 type SortKey = 'name' | 'lastSession' | 'lastActivity';
 type SortDir = 'asc' | 'desc';
 
-const SORT_LABEL: Record<SortKey, string> = { name: 'Name', lastSession: 'Last session', lastActivity: 'Last activity' };
+const SORT_LABEL: Record<SortKey, string> = { name: 'Name', lastSession: 'Last session', lastActivity: 'Last self activity' };
 const STATUS_LABEL: Record<DreamerStatus, string | null> = { active: null, paused: 'Paused', completed: 'Completed program' };
 
 const time = (iso: string | null | undefined) => (iso ? Date.parse(iso) : 0);
@@ -33,7 +33,7 @@ function sortCaseload(list: CaseloadEntry[], key: SortKey, dir: SortDir): Caselo
     let d = 0;
     if (key === 'name') d = a.dreamer.name.localeCompare(b.dreamer.name);
     else if (key === 'lastSession') d = time(a.snapshot.lastSession?.occurredAt) - time(b.snapshot.lastSession?.occurredAt);
-    else d = time(a.lastActivityAt) - time(b.lastActivityAt);
+    else d = time(a.snapshot.lastSelfCheckIn) - time(b.snapshot.lastSelfCheckIn);
     return d * sign || a.dreamer.name.localeCompare(b.dreamer.name);
   });
 }
@@ -125,7 +125,7 @@ function RowActions({ entry, size = 'sm' }: { entry: CaseloadEntry; size?: 'sm' 
       {open ? (
         <Link to={sessionPath(id, open.id)} className={`btn btn-primary${size === 'sm' ? ' btn-sm' : ''}`} onClick={stop} data-testid="caseload-continue-session"><IconPlay /> Continue session</Link>
       ) : (
-        <Button variant="primary" size={size} onClick={onStart} loading={start.isPending} disabled={entry.dreamer.status !== 'active' && entry.dreamer.status !== 'paused'} data-testid="caseload-start-session"><IconPlay /> Start session</Button>
+        <Button variant="primary" size={size} onClick={onStart} loading={start.isPending} data-testid="caseload-start-session"><IconPlay /> Start session</Button>
       )}
     </span>
   );

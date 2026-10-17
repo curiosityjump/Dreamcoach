@@ -380,23 +380,37 @@ function ActionsTab({ id, dreams }: { id: number; dreams: Dream[] }) {
 const ratingPoints = (entries: RatingEntry[]): TrendPoint[] => entries.map((e) => ({ at: e.occurredAt, value: e.value, source: e.source, note: e.note?.body ?? null }));
 const progressPoints = (entries: ProgressEntry[]): TrendPoint[] => entries.map((e) => ({ at: e.occurredAt, value: e.value, source: e.source, note: e.note?.body ?? null }));
 
-function EntryList({ entries, color, tint, unit = '' }: { entries: (RatingEntry | ProgressEntry)[]; color: string; tint: string; unit?: string }) {
-  if (entries.length === 0) return <p className="muted small">No entries yet.</p>;
+const ENTRY_PREVIEW = 12;
+
+function EntryList({ entries, color, tint, unit = '', noun = 'entries' }: { entries: (RatingEntry | ProgressEntry)[]; color: string; tint: string; unit?: string; noun?: string }) {
+  const [showAll, setShowAll] = useState(false);
+  const sorted = useMemo(() => newestFirst(entries), [entries]);
+  if (sorted.length === 0) return <p className="muted small">No entries yet.</p>;
+  const visible = showAll ? sorted : sorted.slice(0, ENTRY_PREVIEW);
   return (
-    <ol className="cv-entries" data-testid="history-entries" style={{ '--cv-color': color, '--cv-tint': tint } as CSSProperties}>
-      {newestFirst(entries).map((e) => (
-        <li key={e.id} className="cv-entry" data-testid="history-entry" data-source={e.source}>
-          <span className="cv-val tnum">{e.value}{unit}</span>
-          <div className="cv-entry-body">
-            <div className="cv-entry-meta">
-              <SourceChip source={e.source} coachName={e.source === 'session' ? e.recordedBy.name : undefined} />
-              <time dateTime={e.occurredAt} className="muted small">{fmtDateTime(e.occurredAt)}</time>
+    <>
+      <ol className="cv-entries" data-testid="history-entries" style={{ '--cv-color': color, '--cv-tint': tint } as CSSProperties}>
+        {visible.map((e) => (
+          <li key={e.id} className="cv-entry" data-testid="history-entry" data-source={e.source}>
+            <span className="cv-val tnum">{e.value}{unit}</span>
+            <div className="cv-entry-body">
+              <div className="cv-entry-meta">
+                <SourceChip source={e.source} coachName={e.source === 'session' ? e.recordedBy.name : undefined} />
+                <time dateTime={e.occurredAt} className="muted small">{fmtDateTime(e.occurredAt)}</time>
+              </div>
+              {e.note && <div className="note-block" data-testid="history-note">{e.note.body}</div>}
             </div>
-            {e.note && <div className="note-block" data-testid="history-note">{e.note.body}</div>}
-          </div>
-        </li>
-      ))}
-    </ol>
+          </li>
+        ))}
+      </ol>
+      {sorted.length > ENTRY_PREVIEW && (
+        <div className="cv-more">
+          <Button variant="secondary" size="sm" onClick={() => setShowAll((v) => !v)} aria-expanded={showAll} data-testid="history-show-all">
+            {showAll ? `Show the latest ${ENTRY_PREVIEW}` : `Show all ${sorted.length} ${noun}`}
+          </Button>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -443,7 +457,7 @@ function CareHistory({ id, dreams }: { id: number; dreams: Dream[] }) {
             {hist.data.entries.length > 0 && <span className="muted small tnum">{plural(sessionCount, 'session rating')} · {plural(selfCount, 'self check-in')}</span>}
           </div>
           <h4 className="cv-list-head">Entries</h4>
-          <EntryList entries={hist.data.entries} color={m.color} tint={m.tint} />
+          <EntryList key={cat} entries={hist.data.entries} color={m.color} tint={m.tint} noun="ratings" />
           <Reflections id={id} entries={hist.data.reflections} dreams={dreams} title="Reflections written at check-in" />
         </>
       )}
@@ -481,7 +495,7 @@ function DreamsHistory({ id, dreams }: { id: number; dreams: Dream[] }) {
           <TrendChart points={progressPoints(hist.data.entries)} max={100} unit="%" color="var(--gold)" height={240} emptyLabel="No progress recorded yet" />
           <div className="cv-chart-foot"><SourceLegend color={color} /></div>
           <h4 className="cv-list-head">Progress updates</h4>
-          <EntryList entries={hist.data.entries} color="var(--gold)" tint="var(--gold-soft)" unit="%" />
+          <EntryList key={dream.id} entries={hist.data.entries} color="var(--gold)" tint="var(--gold-soft)" unit="%" noun="updates" />
           <Reflections id={id} entries={hist.data.reflections} dreams={dreams} title="Reflections about this dream" />
         </>
       )}
@@ -507,10 +521,13 @@ function HistoryTab({ id, dreams }: { id: number; dreams: Dream[] }) {
    ====================================================================== */
 
 type ReflectionFilter = { kind: 'all' } | { kind: 'dream'; dreamId: number } | { kind: 'category'; category: RatingCategory };
+const REFLECTIONS_PAGE = 20;
 
 function ReflectionsTab({ id, dreams }: { id: number; dreams: Dream[] }) {
   const journal = useJournal(id);
-  const [filter, setFilter] = useState<ReflectionFilter>({ kind: 'all' });
+  const [filter, setFilterState] = useState<ReflectionFilter>({ kind: 'all' });
+  const [shown, setShown] = useState(REFLECTIONS_PAGE);
+  const setFilter = (f: ReflectionFilter) => { setFilterState(f); setShown(REFLECTIONS_PAGE); };
   const entries = journal.data ?? [];
   const dreamsWith = bySlot(dreams).filter((d) => entries.some((e) => e.dreamId === d.id));
   const catsWith = RATING_CATEGORIES.filter((c) => entries.some((e) => e.category === c));
@@ -518,16 +535,18 @@ function ReflectionsTab({ id, dreams }: { id: number; dreams: Dream[] }) {
     const v = filter.kind === 'all' ? entries : filter.kind === 'dream' ? entries.filter((e) => e.dreamId === filter.dreamId) : entries.filter((e) => e.category === filter.category);
     return newestFirst(v);
   }, [entries, filter]);
+  const page = useMemo(() => visible.slice(0, shown), [visible, shown]);
+  const remaining = visible.length - page.length;
   const days = useMemo(() => {
     const out: { key: string; at: string; items: JournalEntry[] }[] = [];
-    for (const e of visible) {
+    for (const e of page) {
       const key = dayKey(e.occurredAt);
       const last = out[out.length - 1];
       if (last && last.key === key) last.items.push(e);
       else out.push({ key, at: e.occurredAt, items: [e] });
     }
     return out;
-  }, [visible]);
+  }, [page]);
 
   const chip = (active: boolean, onClick: () => void, children: ReactNode, testId: string, style?: CSSProperties) => (
     <button key={testId} type="button" className="chip chip-button cv-filter-chip" aria-pressed={active} onClick={onClick} data-testid={testId} style={style}>{children}</button>
@@ -552,16 +571,25 @@ function ReflectionsTab({ id, dreams }: { id: number; dreams: Dream[] }) {
           {entries.length === 0 ? 'Reflections and notes the dreamer writes will appear here.' : 'Try another dream or CARE area, or show all.'}
         </EmptyState>
       ) : (
-        <div className="cv-days">
-          {days.map((day) => (
-            <section key={day.key} className="cv-day" data-testid="reflections-day">
-              <h4 className="cv-day-head">{dayHeading(day.at)}</h4>
-              <div className="cv-cards-list">
-                {day.items.map((e) => <JournalEntryCard key={e.id} entry={e} dreamerRef={id} mode="staff" dreams={dreams} dateFormat="time" />)}
-              </div>
-            </section>
-          ))}
-        </div>
+        <>
+          <div className="cv-days">
+            {days.map((day) => (
+              <section key={day.key} className="cv-day" data-testid="reflections-day">
+                <h4 className="cv-day-head">{dayHeading(day.at)}</h4>
+                <div className="cv-cards-list">
+                  {day.items.map((e) => <JournalEntryCard key={e.id} entry={e} dreamerRef={id} mode="staff" dreams={dreams} dateFormat="time" />)}
+                </div>
+              </section>
+            ))}
+          </div>
+          {remaining > 0 && (
+            <div className="cv-more">
+              <Button variant="secondary" onClick={() => setShown((n) => n + REFLECTIONS_PAGE)} data-testid="reflections-show-more">
+                Show {Math.min(REFLECTIONS_PAGE, remaining)} more <span className="cv-more-count tnum">{remaining} earlier</span>
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </Card>
   );

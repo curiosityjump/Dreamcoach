@@ -17,6 +17,9 @@
 .cv-achieved { display: inline-flex; align-items: center; gap: 4px; color: var(--success); font-weight: 600; font-size: 12.5px; }
 
 /* value badge in lists (tinted square with the category color ring) */
+.cv-more { display: flex; justify-content: center; margin-top: 14px; }
+.cv-more-count { color: var(--muted); font-weight: 400; margin-left: 2px; }
+
 .cv-val { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; height: 40px; padding: 0 6px; border-radius: 12px; background: var(--cv-tint, var(--surface-3)); color: var(--ink); font-family: var(--font-display); font-size: 19px; font-weight: 500; flex: none; box-shadow: inset 0 0 0 1.5px var(--cv-color, var(--border-strong)); }
 
 /* ==========================================================================
@@ -24,6 +27,10 @@
    ========================================================================== */
 .cv-stats { margin-bottom: 20px; }
 .cv-caseload .card-head { align-items: center; }
+@media (max-width: 640px) {
+  .cv-caseload .card-head { flex-direction: column; align-items: stretch; }
+  .cv-caseload .card-head .row { justify-content: flex-start; }
+}
 .cv-sort { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .cv-sort select { width: auto; min-height: 34px; padding: 4px 28px 4px 10px; font-size: 13px; }
 
@@ -32,9 +39,11 @@
 .cv-th { display: inline-flex; align-items: center; gap: 4px; }
 .cv-sort-icon { width: 14px; height: 14px; transition: transform 0.15s; }
 .cv-sort-icon.is-asc { transform: rotate(180deg); }
-.cv-table th, .cv-table td { padding-left: 10px; padding-right: 10px; }
+.cv-table th, .cv-table td { padding-left: 8px; padding-right: 8px; }
+.cv-table th:first-child, .cv-table td:first-child { padding-left: 4px; }
+.cv-table th:last-child, .cv-table td:last-child { padding-right: 4px; }
 .cv-table td { padding-top: 12px; padding-bottom: 12px; }
-.cv-table td:first-child { min-width: 180px; max-width: 230px; }
+.cv-table td:first-child { min-width: 170px; max-width: 215px; }
 .cv-table .cv-cell-stack > span:first-child { white-space: nowrap; }
 .cv-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
@@ -55,10 +64,12 @@
 .cv-actions-num { font-size: 15px; }
 .cv-actions-cell { white-space: nowrap; }
 .cv-row-actions { display: inline-flex; gap: 6px; justify-content: flex-end; align-items: center; }
+.cv-open-link { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background 0.15s, border-color 0.15s; }
+.cv-open-link:hover { background: var(--surface-2); border-color: var(--muted-2); text-decoration: none; }
 
 /* Table on laptops, cards on phones and tablets. */
 .cv-cards { display: none; }
-@media (max-width: 1000px) {
+@media (max-width: 1080px) {
   .cv-table-wrap { display: none; }
   .cv-cards { display: grid; gap: 12px; }
 }
