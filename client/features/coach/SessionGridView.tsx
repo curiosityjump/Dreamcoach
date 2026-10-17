@@ -1,11 +1,18 @@
 /**
- * CONTRACT — the spreadsheet-like coaching grid (months as columns; CARE, dreams,
- * commitment, satisfaction as rows). Used by the live SessionWorkspacePage
- * (editable current column) and read-only by StaffDreamerPage and MySessionsPage.
- * The coach-session agent owns the implementation.
+ * The spreadsheet-like coaching grid: one column per coaching session (oldest →
+ * newest), rows for the four CARE categories, the four dreams, Commitment and
+ * Satisfaction. Used by the live SessionWorkspacePage (the current session's
+ * column is editable) and read-only by StaffDreamerPage and MySessionsPage.
+ *
+ * Only coaching-session values live here — self check-ins are shown elsewhere so
+ * the two sources never blur together. The server already returns only what the
+ * viewer may see, so an empty cell is simply an empty cell.
  */
-import type { SessionGrid } from '@shared/types';
-import type { RatingCategory } from '@shared/care';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, PROGRESS_MAX, PROGRESS_MIN, RATING_MAX, RATING_MIN, type RatingCategory } from '@shared/care';
+import type { CoachingSession, SessionGrid } from '@shared/types';
+import { CategoryChip } from '@/components/ui';
+import { fmtDate, fmtMonth } from '@/lib/format';
 
 export interface SessionGridViewProps {
   grid: SessionGrid;
@@ -25,6 +32,320 @@ export interface SessionGridViewProps {
   compact?: boolean;
 }
 
-export function SessionGridView(_props: SessionGridViewProps) {
-  return <div className="muted small">Session grid — implementation pending.</div>;
+type RowDef =
+  | { kind: 'rating'; key: string; category: RatingCategory }
+  | { kind: 'progress'; key: string; dreamId: number; slotLabel: string; title: string };
+
+const ratingOf = (s: CoachingSession, c: RatingCategory): number | null => s.ratings[c] ?? null;
+const progressOf = (s: CoachingSession, dreamId: number): number | null => s.progress[dreamId] ?? null;
+
+function TinyDelta({ now, prev, suffix = '' }: { now: number | null; prev: number | null; suffix?: string }) {
+  if (now == null || prev == null) return null;
+  const d = now - prev;
+  if (d === 0) return null;
+  const cls = d > 0 ? 'cs-delta-up' : 'cs-delta-down';
+  return (
+    <span className={`cs-delta ${cls} tnum`} aria-label={`${d > 0 ? 'up' : 'down'} ${Math.abs(d)}${suffix} from the previous session`}>
+      {d > 0 ? '+' : '−'}{Math.abs(d)}{suffix}
+    </span>
+  );
+}
+
+/**
+ * Compact number cell for the editable column. Keeps its own text while typing,
+ * commits on change (after a short pause), on blur and on Enter; an empty field
+ * clears the value. Arrow keys adjust by one.
+ */
+function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cellId, trailing }: {
+  value: number | null;
+  min: number;
+  max: number;
+  onCommit: (v: number | null) => void;
+  label: string;
+  suffix?: string;
+  testId: string;
+  cellId: string;
+  /** Rendered after the input (e.g. the delta vs. the previous session). */
+  trailing?: ReactNode;
+}) {
+  const [text, setText] = useState(value == null ? '' : String(value));
+  const focused = useRef(false);
+  const timer = useRef<number | null>(null);
+  const lastSent = useRef<number | null>(value);
+
+  // Reflect server changes when the coach isn't mid-edit.
+  useEffect(() => {
+    if (!focused.current) {
+      setText(value == null ? '' : String(value));
+      lastSent.current = value;
+    }
+  }, [value]);
+
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
+
+  const parse = (t: string): number | null | undefined => {
+    const trimmed = t.trim();
+    if (trimmed === '') return null;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) return undefined;
+    return Math.max(min, Math.min(max, Math.round(n)));
+  };
+
+  const commit = (t: string) => {
+    if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
+    const parsed = parse(t);
+    if (parsed === undefined) return;
+    if (parsed === lastSent.current) return;
+    lastSent.current = parsed;
+    onCommit(parsed);
+  };
+
+  const scheduleCommit = (t: string) => {
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => commit(t), 450);
+  };
+
+  const onChange = (raw: string) => {
+    const parsed = parse(raw);
+    if (parsed === undefined) { setText(raw); return; }
+    const shown = parsed == null ? '' : String(parsed);
+    // Keep what was typed unless it had to be clamped (e.g. "12" → "10").
+    setText(parsed != null && Number(raw) !== parsed ? shown : raw);
+    scheduleCommit(shown);
+  };
+
+  const step = (delta: number) => {
+    const cur = parse(text);
+    const base = cur == null ? (delta > 0 ? min - 1 : max + 1) : cur;
+    const next = Math.max(min, Math.min(max, base + delta));
+    setText(String(next));
+    commit(String(next));
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowUp') { e.preventDefault(); step(1); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); step(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); commit(text); moveDown(e.currentTarget); }
+    else if (e.key === 'Escape') { setText(value == null ? '' : String(value)); e.currentTarget.blur(); }
+  };
+
+  return (
+    <span className="cs-cell-edit">
+      <input
+        type="number"
+        inputMode="numeric"
+        className="cs-input tnum"
+        min={min}
+        max={max}
+        step={1}
+        value={text}
+        placeholder="–"
+        aria-label={label}
+        data-testid={testId}
+        data-cs-cell={cellId}
+        onFocus={(e) => { focused.current = true; e.currentTarget.select(); }}
+        onBlur={() => { focused.current = false; commit(text); }}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+      />
+      {suffix && <span className="cs-input-suffix" aria-hidden>{suffix}</span>}
+      {trailing}
+    </span>
+  );
+}
+
+/** Enter behaves like Tab: move to the next editable cell in the column. */
+function moveDown(from: HTMLInputElement) {
+  const all = Array.from(from.closest('table')?.querySelectorAll<HTMLInputElement>('input[data-cs-cell]') ?? []);
+  const i = all.indexOf(from);
+  const next = all[i + 1];
+  if (next) next.focus();
+}
+
+export function SessionGridView({ grid, currentSessionId, editable, onRating, onProgress, onSelectSession, maxColumns, showDeltas, compact }: SessionGridViewProps) {
+  const allSessions = grid.sessions;
+  const sessions = useMemo(() => (maxColumns && maxColumns > 0 && allSessions.length > maxColumns ? allSessions.slice(-maxColumns) : allSessions), [allSessions, maxColumns]);
+  const prevOf = useMemo(() => {
+    const m = new Map<number, CoachingSession | null>();
+    allSessions.forEach((s, i) => m.set(s.id, i > 0 ? allSessions[i - 1]! : null));
+    return m;
+  }, [allSessions]);
+
+  const dreams = useMemo(() => [...grid.dreams].sort((a, b) => a.slot - b.slot), [grid.dreams]);
+  const rows: RowDef[] = useMemo(
+    () => [
+      ...CARE_CATEGORIES.map((c): RowDef => ({ kind: 'rating', key: `r-${c}`, category: c })),
+      ...dreams.map((d): RowDef => ({ kind: 'progress', key: `p-${d.id}`, dreamId: d.id, slotLabel: d.slotLabel, title: d.title })),
+      ...PROGRAM_CATEGORIES.map((c): RowDef => ({ kind: 'rating', key: `r-${c}`, category: c })),
+    ],
+    [dreams],
+  );
+
+  // Keep the current (or newest) column in view when there are many months.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const targetId = currentSessionId ?? sessions[sessions.length - 1]?.id ?? null;
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || targetId == null) return;
+    const snap = () => {
+      const cell = wrap.querySelector<HTMLElement>(`[data-cs-col="${targetId}"]`);
+      const corner = wrap.querySelector<HTMLElement>('.cs-corner');
+      if (!cell || !corner) return;
+      const stickyW = corner.offsetWidth;
+      const needed = cell.offsetLeft + cell.offsetWidth - wrap.clientWidth;
+      if (needed <= 0) { wrap.scrollLeft = 0; return; }
+      // Snap so whole columns show next to the sticky labels (no half-hidden month).
+      const cols = Array.from(wrap.querySelectorAll<HTMLElement>('th[data-cs-col]'));
+      const first = cols.find((c) => c.offsetLeft - stickyW >= needed) ?? cell;
+      wrap.scrollLeft = first.offsetLeft - stickyW;
+    };
+    snap();
+    // Re-snap when the container or table changes width (rotation, sidebar collapse,
+    // web fonts arriving) — but never while the coach is typing in a cell.
+    const table = wrap.querySelector('table');
+    let lastW = `${wrap.clientWidth}/${table?.offsetWidth ?? 0}`;
+    const ro = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => {
+          const w = `${wrap.clientWidth}/${table?.offsetWidth ?? 0}`;
+          if (w === lastW) return;
+          lastW = w;
+          if (wrap.contains(document.activeElement)) return;
+          snap();
+        })
+      : null;
+    ro?.observe(wrap);
+    if (table) ro?.observe(table);
+    return () => ro?.disconnect();
+  }, [targetId, sessions.length]);
+
+  if (sessions.length === 0) {
+    return <div className="cs-grid-empty muted small" data-testid="session-grid-empty">No coaching sessions yet. The first session starts the grid.</div>;
+  }
+
+  const canEdit = !!editable && currentSessionId != null;
+  const sectionHead = (label: string, cols: number): ReactNode => (
+    <tr className="cs-section-row">
+      <th scope="rowgroup" className="cs-sticky cs-section">{label}</th>
+      <td colSpan={cols} className="cs-section" aria-hidden />
+    </tr>
+  );
+
+  const renderCell = (row: RowDef, s: CoachingSession) => {
+    const isCur = s.id === currentSessionId;
+    const prev = prevOf.get(s.id) ?? null;
+    if (row.kind === 'rating') {
+      const v = ratingOf(s, row.category);
+      const pv = prev ? ratingOf(prev, row.category) : null;
+      if (isCur && canEdit) {
+        return (
+          <GridNumberInput
+            value={v}
+            min={RATING_MIN}
+            max={RATING_MAX}
+            label={`${CATEGORY_META[row.category].label} rating, session ${s.number}`}
+            onCommit={(nv) => onRating?.(row.category, nv)}
+            testId={`grid-rating-${row.category}`}
+            cellId={`rating-${row.category}`}
+            trailing={showDeltas ? <TinyDelta now={v} prev={pv} /> : null}
+          />
+        );
+      }
+      return (
+        <span className="cs-val tnum" data-testid={isCur ? `grid-rating-${row.category}` : undefined}>
+          {v == null ? <span className="cs-none" aria-label="not recorded">–</span> : v}
+          {showDeltas && <TinyDelta now={v} prev={pv} />}
+        </span>
+      );
+    }
+    const v = progressOf(s, row.dreamId);
+    const pv = prev ? progressOf(prev, row.dreamId) : null;
+    if (isCur && canEdit) {
+      return (
+        <GridNumberInput
+          value={v}
+          min={PROGRESS_MIN}
+          max={PROGRESS_MAX}
+          suffix="%"
+          label={`Progress on ${row.title}, session ${s.number}`}
+          onCommit={(nv) => onProgress?.(row.dreamId, nv)}
+          testId={`grid-progress-${row.dreamId}`}
+          cellId={`progress-${row.dreamId}`}
+          trailing={showDeltas ? <TinyDelta now={v} prev={pv} suffix="%" /> : null}
+        />
+      );
+    }
+    return (
+      <span className="cs-val tnum" data-testid={isCur ? `grid-progress-${row.dreamId}` : undefined}>
+        {v == null ? <span className="cs-none" aria-label="not recorded">–</span> : `${v}%`}
+        {showDeltas && <TinyDelta now={v} prev={pv} suffix="%" />}
+      </span>
+    );
+  };
+
+  const cls = ['cs-grid-wrap', compact && 'cs-compact', canEdit && 'cs-editing'].filter(Boolean).join(' ');
+
+  return (
+    <div className={cls} ref={wrapRef} data-testid="session-grid">
+      <table className="cs-grid">
+        <thead>
+          <tr>
+            <th scope="col" className="cs-sticky cs-corner"><span className="sr-only">Measure</span></th>
+            {sessions.map((s) => {
+              const isCur = s.id === currentSessionId;
+              const inner = (
+                <>
+                  <span className="cs-col-month">{fmtMonth(s.occurredAt)}</span>
+                  <span className="cs-col-meta">
+                    <span className="cs-col-num tnum">S{s.number}</span>
+                    {s.status === 'in_progress' && <span className="cs-col-dot" title="In progress" aria-label="in progress" />}
+                  </span>
+                </>
+              );
+              return (
+                <th key={s.id} scope="col" className={`cs-col${isCur ? ' cs-cur' : ''}`} data-cs-col={s.id} title={`Session ${s.number} · ${fmtDate(s.occurredAt, { month: 'short', day: 'numeric', year: 'numeric' })}${s.status === 'in_progress' ? ' · in progress' : ''}`}>
+                  {onSelectSession ? (
+                    <button type="button" className="cs-col-btn" onClick={() => onSelectSession(s.id)} aria-current={isCur ? 'true' : undefined} data-testid={`grid-col-${s.id}`}>
+                      {inner}
+                    </button>
+                  ) : (
+                    <span className="cs-col-label" aria-current={isCur ? 'true' : undefined} data-testid={`grid-col-${s.id}`}>{inner}</span>
+                  )}
+                </th>
+              );
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {sectionHead('CARE', sessions.length)}
+          {rows.filter((r) => r.kind === 'rating' && (CARE_CATEGORIES as readonly string[]).includes(r.category)).map((row) => (
+            <tr key={row.key} className="cs-row" data-testid={`grid-row-${row.key}`}>
+              <th scope="row" className="cs-sticky cs-label">{row.kind === 'rating' && <CategoryChip category={row.category} short={compact} />}</th>
+              {sessions.map((s) => <td key={s.id} className={`cs-cell${s.id === currentSessionId ? ' cs-cur' : ''}`}>{renderCell(row, s)}</td>)}
+            </tr>
+          ))}
+          {sectionHead('Dreams', sessions.length)}
+          {rows.filter((r) => r.kind === 'progress').map((row) => (
+            <tr key={row.key} className="cs-row" data-testid={`grid-row-${row.key}`}>
+              <th scope="row" className="cs-sticky cs-label">
+                {row.kind === 'progress' && (
+                  <span className="cs-dream-label">
+                    <span className="cs-dream-slot">{row.slotLabel}</span>
+                    <span className="cs-dream-title" title={row.title}>{row.title}</span>
+                  </span>
+                )}
+              </th>
+              {sessions.map((s) => <td key={s.id} className={`cs-cell${s.id === currentSessionId ? ' cs-cur' : ''}`}>{renderCell(row, s)}</td>)}
+            </tr>
+          ))}
+          {sectionHead('Program', sessions.length)}
+          {rows.filter((r) => r.kind === 'rating' && (PROGRAM_CATEGORIES as readonly string[]).includes(r.category)).map((row) => (
+            <tr key={row.key} className="cs-row" data-testid={`grid-row-${row.key}`}>
+              <th scope="row" className="cs-sticky cs-label">{row.kind === 'rating' && <CategoryChip category={row.category} short={compact} />}</th>
+              {sessions.map((s) => <td key={s.id} className={`cs-cell${s.id === currentSessionId ? ' cs-cur' : ''}`}>{renderCell(row, s)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }

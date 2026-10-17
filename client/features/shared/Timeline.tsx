@@ -160,8 +160,10 @@ function RatingRow({ entry: r, mode, compact, showDate }: { entry: RatingEntry }
         <span className="dj-tl-text">Rated <b>{m.label}</b> <span className="dj-tl-value tnum" data-testid="timeline-rating-value">{r.value}</span></span>
         <SourceChip source={r.source} coachName={!compact && r.source === 'session' ? r.recordedBy.name : undefined} />
         {isDreamer && r.isPrivate && <PrivateChip compact={compact} />}
-        <When at={r.occurredAt} showDate={showDate} />
-        {isDreamer && <Link to={`/care/${r.category}`} className="dj-tl-link" data-testid="timeline-care-link">History</Link>}
+        <span className="dj-tl-end">
+          <When at={r.occurredAt} showDate={showDate} />
+          {isDreamer && <Link to={`/care/${r.category}`} className="dj-tl-link" data-testid="timeline-care-link">History</Link>}
+        </span>
       </div>
       <NoteBlock note={r.note} mode={mode} />
     </Row>
@@ -177,7 +179,7 @@ function ProgressRow({ entry: p, dreamTitle, mode, compact, showDate }: { entry:
         <span className="dj-tl-text">Updated {title} to <span className="dj-tl-value tnum">{p.value}%</span></span>
         <SourceChip source={p.source} coachName={!compact && p.source === 'session' ? p.recordedBy.name : undefined} />
         {isDreamer && p.isPrivate && <PrivateChip compact={compact} />}
-        <When at={p.occurredAt} showDate={showDate} />
+        <span className="dj-tl-end"><When at={p.occurredAt} showDate={showDate} /></span>
       </div>
       <NoteBlock note={p.note} mode={mode} />
     </Row>
@@ -207,7 +209,7 @@ function ActionRow({ action: a, event, mode, dreams, compact, showDate }: { acti
         {a.category && <CategoryChip category={a.category} short={compact} />}
         {a.sessionId != null && <Chip className="chip-session" title="Chosen together in a coaching session">Coaching session</Chip>}
         {isDreamer && a.isPrivate && <PrivateChip compact={compact} />}
-        <When at={event === 'completed' && a.completedAt ? a.completedAt : event === 'archived' && a.archivedAt ? a.archivedAt : a.createdAt} showDate={showDate} />
+        <span className="dj-tl-end"><When at={event === 'completed' && a.completedAt ? a.completedAt : event === 'archived' && a.archivedAt ? a.archivedAt : a.createdAt} showDate={showDate} /></span>
       </div>
     </Row>
   );
@@ -221,8 +223,10 @@ function SessionRow({ session: s, dreamerRef, mode, compact, showDate }: { sessi
       <div className="dj-tl-head">
         <span className="dj-tl-text">Coaching session <b>{s.number}</b> with {compact ? firstName(s.coach.name) : s.coach.name}</span>
         {s.status === 'in_progress' && <Chip className="chip-warning">In progress</Chip>}
-        <When at={s.occurredAt} showDate={showDate} />
-        <Link to={to} className="dj-tl-link" data-testid="timeline-session-link">{isDreamer ? 'Open' : 'Sessions'}</Link>
+        <span className="dj-tl-end">
+          <When at={s.occurredAt} showDate={showDate} />
+          <Link to={to} className="dj-tl-link" data-testid="timeline-session-link">{isDreamer ? 'Open' : 'Sessions'}</Link>
+        </span>
       </div>
       {s.focus && !compact && (
         <div className="dj-tl-focus"><span className="dj-tl-eyebrow">Focus</span><span>{s.focus}</span></div>

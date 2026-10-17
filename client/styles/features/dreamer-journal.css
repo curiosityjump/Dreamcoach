@@ -24,7 +24,8 @@
 .dj-tl-value { font-weight: 600; font-variant-numeric: tabular-nums; }
 .dj-tl-dream { color: var(--ink); font-weight: 600; }
 .dj-tl-dream:hover { color: var(--accent); }
-.dj-tl-when { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dj-tl-end { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.dj-tl-when { color: var(--muted); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dj-tl-link { font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap; min-height: 24px; display: inline-flex; align-items: center; }
 .dj-tl .note-block { margin-top: 6px; }
 .dj-note-lock { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--private); }
@@ -125,8 +126,8 @@ a.dj-chip-dream:hover { text-decoration: none; border-color: var(--border-strong
 .dj-composer textarea:focus { background: var(--surface); }
 .dj-composer-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 .dj-composer-actions { display: flex; gap: 8px; margin-left: auto; }
-.dj-composer-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
-.dj-composer-hint svg { width: 13px; height: 13px; flex: none; }
+.dj-composer-hint { display: flex; align-items: flex-start; gap: 6px; line-height: 1.5; }
+.dj-composer-hint svg { width: 13px; height: 13px; flex: none; margin-top: 3px; }
 
 .dj-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; }
 .dj-toolbar .segmented button { min-height: 36px; padding: 6px 14px; }
@@ -172,5 +173,4 @@ a.dj-chip-dream:hover { text-decoration: none; border-color: var(--border-strong
   .dj-filter-chip, .dj-text-btn { flex: none; }
   .dj-composer-actions { width: 100%; justify-content: flex-end; }
   .dj-chip-text { max-width: 150px; }
-  .dj-tl-when { margin-left: 0; }
 }

@@ -157,7 +157,7 @@ export function JournalPage() {
         </div>
         {active.isSuccess && (
           <span className="dj-count muted small tnum" data-testid="journal-count">
-            {hasMore ? `Showing ${Math.min(shownCount, total)} of ${total}` : view === 'reflections' ? plural(total, 'reflection') : plural(total, 'moment')}
+            {hasMore ? `Showing ${Math.min(shownCount, total)} of ${total}` : view === 'reflections' ? plural(total, 'reflection') : plural(total, 'entry', 'entries')}
             {filtering && total > 0 ? ' · filtered' : ''}
           </span>
         )}
@@ -204,16 +204,16 @@ export function JournalPage() {
         </Card>
       )}
 
-      {active.isSuccess && total > 0 && (
+      {active.isSuccess && total > PAGE && (
         <div className="dj-more">
           {hasMore ? (
             <>
               <Button variant="secondary" onClick={() => setShownCount((n) => n + PAGE)} data-testid="journal-load-more">Show {Math.min(PAGE, total - shownCount)} more</Button>
-              <span className="muted tiny tnum">{total - shownCount} earlier {view === 'reflections' ? 'reflections' : 'moments'}</span>
+              <span className="muted tiny tnum">{total - shownCount} earlier {view === 'reflections' ? 'reflections' : 'entries'}</span>
             </>
-          ) : total > PAGE ? (
+          ) : (
             <span className="muted tiny" data-testid="journal-end">That’s everything — back to where your story began.</span>
-          ) : null}
+          )}
         </div>
       )}
     </div>
@@ -416,8 +416,11 @@ function Composer({ dreams, coachName, expanded, autoFocus, onOpen, onClose, can
           </div>
         </div>
         <p className="dj-composer-hint muted tiny" data-testid="journal-composer-hint">
-          {isPrivate ? <><IconLock /> Only you can see this reflection.</> : <><IconUnlock /> {who === 'your coach' ? 'Your coach' : who} can read this — switch to Private to keep it to yourself.</>}
-          <span className="hide-mobile"> · Cmd/Ctrl + Enter saves.</span>
+          {isPrivate ? <IconLock /> : <IconUnlock />}
+          <span>
+            {isPrivate ? 'Only you can see this reflection.' : `${who === 'your coach' ? 'Your coach' : who} can read this — switch to Private to keep it to yourself.`}
+            <span className="hide-mobile"> · Cmd/Ctrl + Enter saves.</span>
+          </span>
         </p>
         {error && <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>}
       </form>
