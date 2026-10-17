@@ -51,7 +51,7 @@ function CareAcrossTeam({ latest }: { latest: DirectorOverview['totals']['careLa
   const careAvg = careVals.length ? careVals.reduce((a, b) => a + b, 0) / careVals.length : null;
   return (
     <Card className="dir-wheel-card" data-testid="director-wheel">
-      <CardHead title="CARE across the team" sub="Average of each dreamer’s latest ratings" />
+      <CardHead title="Where the team is now" sub="Average of each dreamer’s latest ratings" />
       {!has ? (
         <EmptyState icon={<IconInfo />} title="No ratings yet">The team’s CARE picture appears once sessions record ratings.</EmptyState>
       ) : (
@@ -111,13 +111,12 @@ function CoachesTable({ coaches }: { coaches: CoachSummary[] }) {
             <Th className="num" sub="active / total">Dreamers</Th>
             <Th className="num" sub="last 30 days">Sessions</Th>
             <Th className="num" sub="45 days">Participation</Th>
-            <Th className="num" sub="30 days">Engaged between sessions</Th>
-            <Th className="num" sub="since first session">CARE change</Th>
-            <Th className="num" sub="latest, 0–10">Commitment</Th>
-            <Th className="num" sub="latest, 0–10">Satisfaction</Th>
-            <Th className="num" sub="latest">Dream progress</Th>
-            <Th className="num">Dreams achieved</Th>
-            <Th className="num" sub="actions older than 30 days">Follow-through</Th>
+            <Th className="num" sub="between sessions, 30d">Engaged</Th>
+            <Th className="num" sub="first → latest session">CARE change</Th>
+            <Th className="num" sub="latest, 0–10">Commitment / satisfaction</Th>
+            <Th className="num" sub="avg progress">Dreams</Th>
+            <Th className="num">Achieved</Th>
+            <Th className="num" sub="actions over 30 days old">Follow-through</Th>
             <th scope="col"><span className="sr-only">Open</span></th>
           </tr>
         </thead>
@@ -138,8 +137,7 @@ function CoachesTable({ coaches }: { coaches: CoachSummary[] }) {
               <td className="num tnum">{pct(c.participation45d)}</td>
               <td className="num"><span className="tnum">{c.engagedBetweenSessions30d}</span><span className="muted"> of {c.activeDreamers}</span></td>
               <td className="num"><CareChangeValue change={c.careChange} /></td>
-              <td className="num tnum">{num(c.avgCommitment)}</td>
-              <td className="num tnum">{num(c.avgSatisfaction)}</td>
+              <td className="num tnum">{num(c.avgCommitment)} <span className="dir-slash">/</span> {num(c.avgSatisfaction)}</td>
               <td className="num tnum">{pct(c.avgDreamProgress)}</td>
               <td className="num tnum">{c.dreamsAchieved}</td>
               <td className="num">{c.followThrough ? <RateWithN rate={c.followThrough.rate} n={c.followThrough.n} /> : <span className="muted">—</span>}</td>
@@ -230,7 +228,7 @@ export function DirectorOverviewPage() {
         <div className="dir-care-grid">
           <CareAcrossTeam latest={totals.careLatest} />
           <TrendCard title="CARE ratings by month" definition="Average of the CARE ratings recorded in coaching sessions each month, per area." rows={rows} testId="director-chart-care">
-            <CareLinesChart rows={rows} />
+            <CareLinesChart rows={rows} height={300} />
           </TrendCard>
         </div>
       </section>
@@ -242,7 +240,7 @@ export function DirectorOverviewPage() {
         </div>
         <div className="grid grid-3 dir-trend-grid">
           <TrendCard title="Sessions & self check-ins" definition="Completed coaching sessions and self check-ins recorded each month across the team." rows={rows} testId="director-chart-sessions">
-            <SessionsChart rows={rows} scope="team" />
+            <SessionsChart rows={rows} />
           </TrendCard>
           <TrendCard title="Dream progress by month" definition="Average dream progress recorded in coaching sessions each month." rows={rows} testId="director-chart-dreams">
             <DreamProgressChart rows={rows} />

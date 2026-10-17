@@ -10,7 +10,7 @@ import { CARE_CATEGORIES, CATEGORY_META } from '@shared/care';
 import type { CaseloadEntry, CoachSummary, DreamerStatus, LatestRating, Snapshot } from '@shared/types';
 import { Avatar, Bar, Chip, Stat } from '@/components/ui';
 import { IconInfo } from '@/components/icons';
-import { fmtDate, num, pct, plural, relativeTime, signed } from '@/lib/format';
+import { fmtDate, fmtDateTime, num, pct, plural, relativeTime, signed } from '@/lib/format';
 import type { RatingCategory } from '@shared/care';
 
 /* ---------- Dates ---------- */
@@ -165,14 +165,17 @@ export function PersonCell({ initials, name, about, status, tone }: { initials: 
     </span>
   );
 }
-export function LastSessionCell({ snapshot }: { snapshot: Snapshot }) {
+/** "Session 9 · 2 days ago" plus an "In progress" chip when one is open. `compact` drops the session number (for tables that already show the count). */
+export function LastSessionCell({ snapshot, compact }: { snapshot: Snapshot; compact?: boolean }) {
   const last = snapshot.lastSession;
   const open = snapshot.openSession;
-  if (!last && !open) return <span className="muted">No sessions yet</span>;
+  if (!last && !open) return <span className="muted">{compact ? '—' : 'No sessions yet'}</span>;
   return (
     <span className="dir-cell-stack">
-      {last && <span><span className="dir-strong">Session {last.number}</span> <span className="muted">· {relativeTime(last.occurredAt)}</span></span>}
-      {open && <span className="row" style={{ gap: 6 }}><Chip className="chip-warning">In progress</Chip><span className="muted tiny">since {fmtDate(open.occurredAt)}</span></span>}
+      {last && (compact
+        ? <span className="dir-when" title={fmtDateTime(last.occurredAt)}>{relativeTime(last.occurredAt)}</span>
+        : <span><span className="dir-strong">Session {last.number}</span> <span className="muted">· {relativeTime(last.occurredAt)}</span></span>)}
+      {open && <span className="row" style={{ gap: 6 }}><Chip className="chip-warning">In progress</Chip>{!compact && <span className="muted tiny">since {fmtDate(open.occurredAt)}</span>}</span>}
     </span>
   );
 }

@@ -36,17 +36,19 @@ export function DirectorRowMenu({ items, label, testId }: { items: RowMenuItem[]
       close();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    // Scroll events arrive asynchronously (next frame), so a scroll that happened just before the
+    // opening tap would otherwise close the menu immediately. Follow the button instead of closing.
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
     };
-  }, [open]);
+  }, [open, place]);
 
   const stop = (e: MouseEvent) => e.stopPropagation();
 

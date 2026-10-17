@@ -133,7 +133,7 @@ const CHART_H = 200;
 
 /* ---------- (a) Sessions & self check-ins per month ---------- */
 
-export function SessionsChart({ rows, scope }: { rows: Row[]; scope: string }) {
+export function SessionsChart({ rows }: { rows: Row[] }) {
   if (!rows.length) return <NoMonths />;
   return (
     <>
@@ -141,7 +141,7 @@ export function SessionsChart({ rows, scope }: { rows: Row[]; scope: string }) {
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: -18 }} barGap={2} barCategoryGap="28%">
             <CartesianGrid stroke="var(--grid)" vertical={false} />
-            <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={18} />
+            <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={10} />
             <YAxis allowDecimals={false} tick={TICK} axisLine={false} tickLine={false} width={40} />
             <Tooltip
               cursor={{ fill: 'var(--surface-3)', opacity: 0.7 }}
@@ -161,24 +161,24 @@ export function SessionsChart({ rows, scope }: { rows: Row[]; scope: string }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <Legend items={[{ color: SESSION_COLOR, label: `Coaching sessions (${scope})` }, { color: SELF_COLOR, label: 'Self check-ins' }]} />
+      <Legend items={[{ color: SESSION_COLOR, label: 'Coaching sessions' }, { color: SELF_COLOR, label: 'Self check-ins' }]} />
     </>
   );
 }
 
 /* ---------- (b) Average CARE per month, four lines ---------- */
 
-export function CareLinesChart({ rows }: { rows: Row[] }) {
+export function CareLinesChart({ rows, height = CHART_H + 20 }: { rows: Row[]; height?: number }) {
   if (!rows.length) return <NoMonths />;
   const any = rows.some((r) => CARE_CATEGORIES.some((c) => r[c] != null));
   if (!any) return <EmptyState icon={<IconChart />} title="No session ratings yet">CARE trends appear once coaching sessions record ratings.</EmptyState>;
   return (
     <>
-      <div className="dir-chart" style={{ height: CHART_H + 20 }}>
+      <div className="dir-chart" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
             <CartesianGrid stroke="var(--grid)" vertical={false} />
-            <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={18} />
+            <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={10} />
             <YAxis domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} tick={TICK} axisLine={false} tickLine={false} width={40} />
             <Tooltip
               cursor={{ stroke: 'var(--axis)' }}
@@ -196,7 +196,7 @@ export function CareLinesChart({ rows }: { rows: Row[] }) {
               }}
             />
             {CARE_CATEGORIES.map((c: CareCategory) => (
-              <Line key={c} type="monotone" dataKey={c} name={CATEGORY_META[c].label} stroke={CATEGORY_META[c].color} strokeWidth={2} dot={{ r: 3.5, strokeWidth: 2, stroke: 'var(--surface)', fill: CATEGORY_META[c].color }} activeDot={{ r: 5.5, strokeWidth: 2, stroke: 'var(--surface)' }} connectNulls isAnimationActive={false} />
+              <Line key={c} type="monotone" dataKey={c} name={CATEGORY_META[c].label} stroke={CATEGORY_META[c].color} strokeWidth={2} dot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)', fill: CATEGORY_META[c].color }} activeDot={{ r: 6, strokeWidth: 2, stroke: 'var(--surface)' }} connectNulls isAnimationActive={false} />
             ))}
           </LineChart>
         </ResponsiveContainer>
@@ -226,7 +226,7 @@ export function DreamProgressChart({ rows }: { rows: Row[] }) {
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={rows} margin={{ top: 16, right: 20, bottom: 0, left: -12 }}>
           <CartesianGrid stroke="var(--grid)" vertical={false} />
-          <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={18} />
+          <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={10} />
           <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(v: number) => `${v}%`} tick={TICK} axisLine={false} tickLine={false} width={44} />
           <Tooltip
             cursor={{ stroke: 'var(--axis)' }}
@@ -240,7 +240,7 @@ export function DreamProgressChart({ rows }: { rows: Row[] }) {
               );
             }}
           />
-          <Line type="monotone" dataKey="dreamProgress" name="Average dream progress" stroke={DREAM_COLOR} strokeWidth={2} dot={{ r: 3.5, strokeWidth: 2, stroke: 'var(--surface)', fill: DREAM_COLOR }} activeDot={{ r: 5.5, strokeWidth: 2, stroke: 'var(--surface)' }} connectNulls isAnimationActive={false}>
+          <Line type="monotone" dataKey="dreamProgress" name="Average dream progress" stroke={DREAM_COLOR} strokeWidth={2} dot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)', fill: DREAM_COLOR }} activeDot={{ r: 6, strokeWidth: 2, stroke: 'var(--surface)' }} connectNulls isAnimationActive={false}>
             <LabelList dataKey="dreamProgress" content={(p) => <EndLabel {...(p as { x?: number | string; y?: number | string; value?: unknown; index?: number })} lastIndex={lastIndex} />} />
           </Line>
         </LineChart>
@@ -259,7 +259,7 @@ export function ActionsChart({ rows }: { rows: Row[] }) {
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: -18 }} barGap={2} barCategoryGap="28%">
             <CartesianGrid stroke="var(--grid)" vertical={false} />
-            <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={18} />
+            <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={10} />
             <YAxis allowDecimals={false} tick={TICK} axisLine={false} tickLine={false} width={40} />
             <Tooltip
               cursor={{ fill: 'var(--surface-3)', opacity: 0.7 }}
@@ -291,7 +291,7 @@ export function DirectorTrendGrid({ months, scope, testPrefix }: { months: Month
   return (
     <div className="grid grid-2 dir-trend-grid">
       <TrendCard title="Sessions & self check-ins" definition={`Completed coaching sessions and self check-ins recorded each month${scope === 'team' ? ' across the team' : ' in this caseload'}.`} rows={rows} testId={`${testPrefix}-chart-sessions`}>
-        <SessionsChart rows={rows} scope={scope === 'team' ? 'team' : 'caseload'} />
+        <SessionsChart rows={rows} />
       </TrendCard>
       <TrendCard title="CARE ratings by month" definition="Average of the CARE ratings recorded in coaching sessions each month, per area." rows={rows} testId={`${testPrefix}-chart-care`}>
         <CareLinesChart rows={rows} />
