@@ -18,7 +18,7 @@ export default defineConfig({
     launchOptions: executablePath ? { executablePath } : {},
   },
   webServer: {
-    command: 'DC_PORT=3100 DC_DB=data/e2e.db DC_RESET_DB=1 npx tsx server/index.ts',
+    command: 'npm run build >/dev/null && DC_PORT=3100 DC_DB=data/e2e.db DC_RESET_DB=1 npx tsx server/index.ts',
     url: 'http://localhost:3100/api/health',
     reuseExistingServer: false,
     timeout: 120_000,

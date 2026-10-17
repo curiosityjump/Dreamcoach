@@ -69,10 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [qc]);
 
   const lockPrivate = useCallback(async () => {
-    // Drop cached data immediately so nothing private lingers on screen while refetching.
+    // Lock server-side first, then reset every dreamer query: active ones drop their data and
+    // refetch immediately under the locked session, inactive ones lose their cached data.
+    // (removeQueries would leave mounted observers showing stale private data.)
     const a = await post<AuthState>('/auth/privacy/lock');
-    qc.removeQueries({ queryKey: ['dreamer'] });
     setAuth(a);
+    await qc.resetQueries({ queryKey: ['dreamer'] });
     await qc.invalidateQueries();
     return a;
   }, [qc]);
