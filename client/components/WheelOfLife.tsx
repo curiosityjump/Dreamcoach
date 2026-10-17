@@ -82,7 +82,7 @@ export function WheelOfLife({
       ref={ref}
       viewBox={`0 0 ${size} ${size}`}
       width="100%"
-      style={{ maxWidth: size, display: 'block', margin: '0 auto', touchAction: 'none', cursor: interactive ? 'crosshair' : undefined, userSelect: 'none' }}
+      style={{ maxWidth: size, display: 'block', margin: '0 auto', overflow: 'visible', touchAction: 'none', cursor: interactive ? 'crosshair' : undefined, userSelect: 'none' }}
       role={interactive ? 'group' : 'img'}
       aria-label={`CARE wheel: ${ORDER.map((c) => `${CATEGORY_META[c].label} ${values[c] ?? '—'}`).join(', ')}`}
       onPointerDown={(e) => { if (!interactive) return; (e.target as Element).setPointerCapture?.(e.pointerId); setDragging(true); handle(e, true); }}

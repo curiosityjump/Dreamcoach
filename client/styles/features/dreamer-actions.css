@@ -1,1 +1,126 @@
-/* Styles for the dreamer-actions area. Use tokens from tokens.css; prefix classes with a short area prefix to avoid collisions. */
+/* ==========================================================================
+   dreamer-actions — ActionsPage (/actions) and the shared ActionList /
+   ActionComposer (features/shared/ActionItems.tsx), which also render inside
+   Home, dream detail, session pages and staff views. All classes are prefixed
+   `da-`. Colors come from tokens.css; CARE colors arrive as --da-color/--da-tint.
+   ========================================================================== */
+
+/* ---------- List & groups ---------- */
+.da-list { display: flex; flex-direction: column; gap: 18px; }
+.da-list-add { padding-bottom: 14px; border-bottom: 1px dashed var(--border); }
+.da-group { min-width: 0; }
+.da-group-head {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 4px;
+  font-family: var(--font-body); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+}
+.da-count { font-weight: 500; color: var(--muted-2); letter-spacing: 0; }
+.segmented button[aria-pressed='true'] .da-count { color: var(--muted); }
+.da-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.da-rows > li + li { border-top: 1px solid var(--border); }
+
+/* ---------- Row ---------- */
+.da-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 13px 0; transition: opacity 0.15s; }
+.da-rows > li:first-child { padding-top: 2px; }
+.da-rows > li:last-child { padding-bottom: 2px; }
+.da-row.is-busy { opacity: 0.7; }
+.da-check { padding-top: 1px; }
+.da-check.is-busy { pointer-events: none; }
+.da-body { min-width: 0; }
+.da-title { font-weight: 600; font-size: 15px; line-height: 1.45; color: var(--ink); overflow-wrap: anywhere; }
+.da-row.is-completed .da-title { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--border-strong); text-decoration-thickness: 1px; }
+.da-row.is-archived .da-title { color: var(--ink-2); font-weight: 500; }
+.da-details { margin-top: 3px; color: var(--ink-2); font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.da-row.is-completed .da-details, .da-row.is-archived .da-details { color: var(--muted); }
+.da-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-top: 7px; font-size: 12.5px; color: var(--muted); min-height: 0; }
+.da-meta:empty { display: none; }
+.da-date { white-space: nowrap; }
+.da-meta .chip { max-width: 100%; }
+.da-meta .chip svg { width: 11px; height: 11px; }
+.da-chip-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.da-chip-link { color: var(--ink-2); border: 1px solid transparent; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+.da-chip-link:hover { text-decoration: none; border-color: var(--border-strong); color: var(--ink); background: var(--surface); }
+.da-chip-link svg, .da-chip-dream svg { color: var(--gold); }
+.da-expand {
+  border: 0; background: transparent; padding: 0 2px; min-height: 0; font-size: 12.5px; font-weight: 500; color: var(--accent); border-radius: 4px;
+}
+.da-expand:hover { text-decoration: underline; }
+.da-menu { margin: -6px -6px 0 0; }
+.da-menu .menu { min-width: 210px; }
+.da-menu-danger, .da-menu-danger svg { color: var(--danger); }
+.da-menu-danger:hover { background: var(--danger-soft); }
+
+/* compact (sidebars, home, session pages) */
+.da-compact { gap: 14px; }
+.da-compact .da-row { padding: 9px 0; gap: 10px; }
+.da-compact .da-rows > li:first-child { padding-top: 0; }
+.da-compact .da-rows > li:last-child { padding-bottom: 0; }
+.da-compact .da-title { font-size: 14px; font-weight: 500; line-height: 1.4; }
+.da-compact .da-details { font-size: 13px; margin-top: 2px; }
+.da-compact .da-meta { margin-top: 4px; font-size: 12px; gap: 4px 8px; }
+.da-compact .da-chip-text { max-width: 160px; }
+
+/* ---------- Inline edit form ---------- */
+.da-edit { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); }
+.da-edit .field > label { font-size: 12.5px; }
+.da-edit-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; padding-top: 2px; }
+.da-link-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 560px) { .da-link-fields { grid-template-columns: 1fr; } }
+
+/* ---------- Composer ---------- */
+.da-composer { display: flex; flex-direction: column; gap: 10px; }
+.da-composer-main { display: flex; gap: 8px; align-items: center; }
+.da-composer-main input { flex: 1; min-width: 0; }
+.da-composer-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.da-composer-cancel { margin-left: auto; }
+.da-text-btn {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 8px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--accent); font-size: 13px; font-weight: 500; white-space: nowrap;
+}
+.da-text-btn:hover { background: var(--accent-soft); }
+.da-text-btn svg { width: 14px; height: 14px; }
+.da-select {
+  width: auto; max-width: 100%; min-height: 32px; padding: 4px 28px 4px 11px; border-radius: var(--r-pill);
+  border: 1px solid var(--border); background-color: var(--surface); color: var(--ink-2); font-size: 12.5px; font-weight: 500;
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23777d86' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 12px;
+  text-overflow: ellipsis; transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+.da-select:hover { border-color: var(--border-strong); }
+.da-select:focus { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); }
+.da-select.is-set { color: var(--ink); background-color: var(--da-tint, var(--surface-3)); border-color: var(--da-color, var(--border-strong)); }
+.da-select-dream { max-width: 260px; }
+.da-select-dream.is-set { background-color: var(--gold-soft); border-color: var(--gold); }
+@media (max-width: 420px) {
+  .da-select-dream { max-width: 100%; flex: 1 1 100%; }
+}
+
+/* ---------- Page (/actions) ---------- */
+.da-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; }
+.da-tabs .segmented button { min-height: 36px; padding: 6px 14px; display: inline-flex; align-items: center; gap: 4px; }
+.da-stats { margin: 0; color: var(--muted); font-size: 13.5px; }
+.da-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 16px; }
+.da-filter-label { font-size: 12.5px; font-weight: 500; color: var(--muted); margin-right: 2px; }
+.da-filter-chip {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 34px; max-width: 240px; padding: 0 12px; border-radius: var(--r-pill);
+  border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 500;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.da-filter-chip:hover { border-color: var(--border-strong); color: var(--ink); }
+.da-filter-chip[aria-pressed='true'] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.da-filter-chip .chip-dot { background: var(--da-color, var(--muted)); }
+.da-filter-cat[aria-pressed='true'] { background: var(--da-tint); border-color: var(--da-color); color: var(--ink); }
+.da-filter-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.da-composer-card { margin-bottom: 16px; }
+.da-composer-card .card-head { margin-bottom: 12px; }
+.da-filter-summary { margin: 0 0 10px; }
+@media (max-width: 640px) {
+  .da-tabs, .da-tabs .segmented { width: 100%; display: flex; }
+  .da-tabs .segmented button { flex: 1; justify-content: center; padding: 6px 8px; }
+  /* phones: one scrollable rail instead of a tall stack of chips; "Clear" moves to the front */
+  .da-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 calc(-1 * var(--gutter)) 14px; padding: 2px var(--gutter) 4px; -webkit-overflow-scrolling: touch; }
+  .da-filters::-webkit-scrollbar { display: none; }
+  .da-filters > * { flex: none; }
+  .da-filters .da-text-btn { order: -1; }
+  .da-filter-chip { max-width: 220px; }
+}

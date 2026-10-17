@@ -90,6 +90,7 @@ export function RatingInput({
   compact,
   label,
   allowClear,
+  disabled,
 }: {
   value: number | null;
   onChange: (v: number | null) => void;
@@ -97,16 +98,18 @@ export function RatingInput({
   compact?: boolean;
   label?: string;
   allowClear?: boolean;
+  disabled?: boolean;
 }) {
   const meta = category ? CATEGORY_META[category] : null;
   const style = meta ? ({ '--rating-color': meta.color, '--rating-tint': meta.tint } as React.CSSProperties) : undefined;
   return (
-    <div className={`rating-input${compact ? ' compact' : ''}`} role="radiogroup" aria-label={label ?? (meta ? `${meta.label} rating` : 'Rating')} style={style}>
+    <div className={`rating-input${compact ? ' compact' : ''}`} role="radiogroup" aria-label={label ?? (meta ? `${meta.label} rating` : 'Rating')} aria-busy={disabled || undefined} style={style}>
       {Array.from({ length: 11 }, (_, i) => (
         <button
           key={i}
           type="button"
           role="radio"
+          disabled={disabled}
           aria-checked={value === i}
           className={value != null && i < value ? 'below' : ''}
           onClick={() => onChange(allowClear && value === i ? null : i)}
@@ -266,9 +269,9 @@ export function Bar({ value, color, large, label }: { value: number | null; colo
 }
 
 /* ---------- Checkbox (round) ---------- */
-export function Check({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+export function Check({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
-    <button type="button" className="check" role="checkbox" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}>
+    <button type="button" className="check" role="checkbox" aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)}>
       {checked && <IconCheck />}
     </button>
   );

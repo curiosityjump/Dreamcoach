@@ -1,12 +1,25 @@
 /**
- * CONTRACT — shared action-item components used by the dreamer Actions page, the
- * staff dreamer page and the live session workspace. The dreamer-actions agent
- * owns the implementation; other pages code against these props.
+ * Shared action-item components used by the dreamer Actions page, the staff
+ * dreamer page and the live session workspace.
+ *
+ * Privacy: the server only ever returns rows the viewer may see, so nothing here
+ * filters by `isPrivate`. `isPrivate` can only be true on the dreamer's own rows
+ * while their session is unlocked; staff mode shows no privacy UI or wording at all.
  */
-import type { ActionItem, Dream } from '@shared/types';
-import type { DreamerRef } from '@/api/hooks';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { Link } from 'react-router';
+import { CARE_CATEGORIES, CATEGORY_META, isCareCategory, type CareCategory } from '@shared/care';
+import type { ActionItem, ActionStatus, Dream } from '@shared/types';
+import { useCreateAction, useDeleteAction, useDreams, useUpdateAction, type DreamerRef } from '@/api/hooks';
+import { errorMessage } from '@/api/client';
+import { useAuth } from '@/auth/AuthContext';
+import { useToast } from '@/components/toast';
+import { Button, CategoryChip, Check, Chip, ConfirmDialog, Dropdown, EmptyState, Field, PrivacyToggle, PrivateChip, TextArea } from '@/components/ui';
+import { IconArchive, IconEdit, IconInfo, IconList, IconLock, IconMore, IconPlus, IconRotate, IconStar, IconTrash, IconUnlock } from '@/components/icons';
+import { firstName, fmtDate } from '@/lib/format';
 
 export type ActionMode = 'dreamer' | 'staff';
+type DreamRef = Pick<Dream, 'id' | 'title' | 'slot'>;
 
 export interface ActionListProps {
   /** 'me' for the dreamer's own pages, numeric id for staff pages. */
@@ -14,7 +27,7 @@ export interface ActionListProps {
   /** Already-fetched actions (any statuses); the list filters by `filter`. */
   actions: ActionItem[];
   /** The dreamer's dreams, for linking/labels. */
-  dreams: Pick<Dream, 'id' | 'title' | 'slot'>[];
+  dreams: DreamRef[];
   /** dreamer: privacy toggle + delete available. staff: coach controls only (no privacy UI). */
   mode: ActionMode;
   /** Inside a live session: new actions are tagged with this session. */
@@ -29,14 +42,9 @@ export interface ActionListProps {
   emptyBody?: string;
 }
 
-/** Full-featured list: complete/reopen, edit (title, details, dream, category), set aside/restore, privacy (dreamer mode), delete (dreamer mode). */
-export function ActionList(_props: ActionListProps) {
-  return <div className="muted small">Actions list — implementation pending.</div>;
-}
-
 export interface ActionComposerProps {
   dreamerRef: DreamerRef;
-  dreams: Pick<Dream, 'id' | 'title' | 'slot'>[];
+  dreams: DreamRef[];
   mode: ActionMode;
   sessionId?: number | null;
   /** Preselect a dream or category (e.g. from a dream detail page). */
@@ -47,7 +55,461 @@ export interface ActionComposerProps {
   autoFocus?: boolean;
 }
 
+/* ---------- Shared helpers ---------- */
+
+const STATUS_LABEL: Record<ActionStatus, string> = { active: 'Active', completed: 'Completed', archived: 'Set aside' };
+const PRIVATE_HIDDEN_MSG = 'Saved as private — private entries are currently hidden.';
+
+interface DreamLabel { title: string; slotLabel: string }
+
+/**
+ * Callers pass `{ id, title, slot }`; the program's slot label ("6–12 month dream")
+ * makes selects much easier to scan, so enrich from the (already cached) dreams query.
+ */
+function useDreamLabels(dreamerRef: DreamerRef, dreams: DreamRef[]) {
+  const full = useDreams(dreamerRef);
+  return useMemo(() => {
+    const map = new Map<number, DreamLabel>();
+    for (const d of dreams) {
+      const fetched = full.data?.find((x) => x.id === d.id);
+      const given = (d as Partial<Dream>).slotLabel;
+      map.set(d.id, { title: d.title, slotLabel: fetched?.slotLabel ?? given ?? `Dream ${d.slot}` });
+    }
+    return map;
+  }, [dreams, full.data]);
+}
+
+const sortDreams = (dreams: DreamRef[]) => [...dreams].sort((a, b) => a.slot - b.slot);
+
+/** The pair of optional link controls (dream + CARE area). Shared by the composer and the edit form. */
+function LinkSelects({ dreams, labels, dreamId, category, onDreamId, onCategory, disabled, compact, idPrefix }: {
+  dreams: DreamRef[];
+  labels: Map<number, DreamLabel>;
+  dreamId: number | null;
+  category: CareCategory | null;
+  onDreamId: (v: number | null) => void;
+  onCategory: (v: CareCategory | null) => void;
+  disabled?: boolean;
+  /** Pill-shaped inline selects (composer) instead of labelled fields (edit form). */
+  compact?: boolean;
+  idPrefix: string;
+}) {
+  const dreamSelect = (
+    <select
+      id={`${idPrefix}-dream`}
+      className={compact ? `da-select da-select-dream${dreamId != null ? ' is-set' : ''}` : undefined}
+      value={dreamId ?? ''}
+      onChange={(e) => onDreamId(e.target.value ? Number(e.target.value) : null)}
+      disabled={disabled}
+      aria-label={compact ? 'Link to a dream' : undefined}
+      data-testid="action-dream-select"
+    >
+      <option value="">{compact ? 'Link to a dream' : 'Not linked to a dream'}</option>
+      {dreams.map((d) => (
+        <option key={d.id} value={d.id}>{labels.get(d.id)?.slotLabel ?? `Dream ${d.slot}`} · {d.title}</option>
+      ))}
+    </select>
+  );
+  const categorySelect = (
+    <select
+      id={`${idPrefix}-category`}
+      className={compact ? `da-select${category ? ' is-set' : ''}` : undefined}
+      value={category ?? ''}
+      onChange={(e) => onCategory(isCareCategory(e.target.value) ? e.target.value : null)}
+      disabled={disabled}
+      aria-label={compact ? 'CARE area' : undefined}
+      style={compact && category ? ({ '--da-color': CATEGORY_META[category].color, '--da-tint': CATEGORY_META[category].tint } as React.CSSProperties) : undefined}
+      data-testid="action-category-select"
+    >
+      <option value="">{compact ? 'CARE area' : 'No CARE area'}</option>
+      {CARE_CATEGORIES.map((c) => (
+        <option key={c} value={c}>{CATEGORY_META[c].label}</option>
+      ))}
+    </select>
+  );
+  if (compact) return <>{dreamSelect}{categorySelect}</>;
+  return (
+    <div className="da-link-fields">
+      <Field label="Dream" htmlFor={`${idPrefix}-dream`}>{dreamSelect}</Field>
+      <Field label="CARE area" htmlFor={`${idPrefix}-category`}>{categorySelect}</Field>
+    </div>
+  );
+}
+
+/* ---------- Composer ---------- */
+
 /** The "Add an action" form (title, optional details, dream/category link, privacy in dreamer mode). */
-export function ActionComposer(_props: ActionComposerProps) {
-  return <div className="muted small">Action composer — implementation pending.</div>;
+export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDreamId, defaultCategory, onDone, onCancel, autoFocus }: ActionComposerProps) {
+  const { auth } = useAuth();
+  const { toast } = useToast();
+  const create = useCreateAction(dreamerRef);
+  const sorted = useMemo(() => sortDreams(dreams), [dreams]);
+  const labels = useDreamLabels(dreamerRef, dreams);
+  const id = useId();
+  const titleRef = useRef<HTMLInputElement>(null);
+
+  const [title, setTitle] = useState('');
+  const [details, setDetails] = useState('');
+  const [showDetails, setShowDetails] = useState(false);
+  const [dreamId, setDreamId] = useState<number | null>(defaultDreamId ?? null);
+  const [category, setCategory] = useState<CareCategory | null>(defaultCategory ?? null);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const trimmed = title.trim();
+  const canSubmit = trimmed.length > 0 && !create.isPending;
+
+  const submit = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!canSubmit) return;
+    setError(null);
+    create.mutate(
+      {
+        title: trimmed,
+        details: details.trim() || undefined,
+        dreamId,
+        category,
+        sessionId: sessionId ?? undefined,
+        ...(mode === 'dreamer' ? { isPrivate } : {}),
+      },
+      {
+        onSuccess: (action) => {
+          setTitle('');
+          setDetails('');
+          setShowDetails(false);
+          setDreamId(defaultDreamId ?? null);
+          setCategory(defaultCategory ?? null);
+          setIsPrivate(false);
+          if (mode === 'dreamer' && action.isPrivate) toast(auth?.privateUnlocked ? 'Added as a private action — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
+          else toast('Action added.');
+          onDone?.(action);
+          titleRef.current?.focus();
+        },
+        onError: (err) => setError(errorMessage(err)),
+      },
+    );
+  };
+
+  const onDetailsKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
+    if (e.key === 'Escape' && onCancel) onCancel();
+  };
+
+  return (
+    <form className={`da-composer da-composer-${mode}`} onSubmit={submit} data-testid="action-composer" aria-busy={create.isPending || undefined}>
+      <div className="da-composer-main">
+        <input
+          ref={titleRef}
+          id={`${id}-title`}
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Escape' && onCancel) onCancel(); }}
+          placeholder={mode === 'dreamer' ? 'What’s one small step you could take?' : 'A next step chosen together…'}
+          aria-label="Action title"
+          maxLength={300}
+          autoFocus={autoFocus}
+          disabled={create.isPending}
+          autoComplete="off"
+          data-testid="action-title-input"
+        />
+        <Button type="submit" variant="primary" disabled={!canSubmit} loading={create.isPending} data-testid="add-action">
+          <IconPlus /> Add
+        </Button>
+      </div>
+      {showDetails && (
+        <TextArea
+          value={details}
+          onChange={(e) => setDetails(e.target.value)}
+          onKeyDown={onDetailsKey}
+          placeholder="Details — why this matters, where to start, anything to remember"
+          aria-label="Action details"
+          rows={2}
+          maxLength={4000}
+          autoFocus
+          disabled={create.isPending}
+          data-testid="action-details-input"
+        />
+      )}
+      <div className="da-composer-options">
+        {!showDetails && (
+          <button type="button" className="da-text-btn" onClick={() => setShowDetails(true)} disabled={create.isPending} data-testid="action-details-toggle">
+            <IconPlus /> Add details
+          </button>
+        )}
+        <LinkSelects dreams={sorted} labels={labels} dreamId={dreamId} category={category} onDreamId={setDreamId} onCategory={setCategory} disabled={create.isPending} compact idPrefix={`${id}-link`} />
+        {mode === 'dreamer' && (
+          <span data-testid="action-privacy-toggle"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>
+        )}
+        {onCancel && (
+          <Button type="button" variant="ghost" size="sm" className="da-composer-cancel" onClick={onCancel} disabled={create.isPending} data-testid="action-cancel">
+            Cancel
+          </Button>
+        )}
+      </div>
+      {error && (
+        <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>
+      )}
+    </form>
+  );
+}
+
+/* ---------- List ---------- */
+
+/** Full-featured list: complete/reopen, edit (title, details, dream, category), set aside/restore, privacy (dreamer mode), delete (dreamer mode). */
+export function ActionList({ dreamerRef, actions, dreams, mode, sessionId, filter = 'active', showAdd, compact, emptyTitle, emptyBody }: ActionListProps) {
+  const sorted = useMemo(() => sortDreams(dreams), [dreams]);
+  const labels = useDreamLabels(dreamerRef, dreams);
+
+  const visible = filter === 'all' ? actions : actions.filter((a) => a.status === filter);
+  const groups: { status: ActionStatus; items: ActionItem[] }[] =
+    filter === 'all'
+      ? (['active', 'completed', 'archived'] as ActionStatus[]).map((status) => ({ status, items: visible.filter((a) => a.status === status) })).filter((g) => g.items.length > 0)
+      : [{ status: filter, items: visible }];
+
+  return (
+    <div className={`da-list${compact ? ' da-compact' : ''}`} data-testid="action-list" data-mode={mode}>
+      {showAdd && (
+        <div className="da-list-add">
+          <ActionComposer dreamerRef={dreamerRef} dreams={sorted} mode={mode} sessionId={sessionId} />
+        </div>
+      )}
+      {visible.length === 0 ? (
+        <EmptyState icon={<IconList />} title={emptyTitle ?? 'Nothing here right now'}>
+          {emptyBody ?? 'Actions you choose will show up here. They’re yours to keep, change, or set aside.'}
+        </EmptyState>
+      ) : (
+        groups.map((g) => (
+          <section key={g.status} className="da-group" data-testid={`action-group-${g.status}`}>
+            {filter === 'all' && (
+              <h4 className="da-group-head">{STATUS_LABEL[g.status]} <span className="da-count tnum">{g.items.length}</span></h4>
+            )}
+            <ul className="da-rows">
+              {g.items.map((a) => (
+                <ActionRow key={a.id} action={a} dreamerRef={dreamerRef} mode={mode} dreams={sorted} labels={labels} compact={!!compact} />
+              ))}
+            </ul>
+          </section>
+        ))
+      )}
+    </div>
+  );
+}
+
+/* ---------- Row ---------- */
+
+function ActionRow({ action, dreamerRef, mode, dreams, labels, compact }: {
+  action: ActionItem;
+  dreamerRef: DreamerRef;
+  mode: ActionMode;
+  dreams: DreamRef[];
+  labels: Map<number, DreamLabel>;
+  compact: boolean;
+}) {
+  const { auth } = useAuth();
+  const { toast } = useToast();
+  const update = useUpdateAction(dreamerRef);
+  const remove = useDeleteAction(dreamerRef);
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  // Reflect the server's latest answer (or the in-flight change) immediately, before the list refetches.
+  const shown = useMemo(() => {
+    let a = action;
+    if (update.data && update.data.id === action.id && update.data.updatedAt >= action.updatedAt) a = update.data;
+    if (update.isPending && update.variables && update.variables.actionId === action.id) {
+      const v = update.variables;
+      a = { ...a, ...(v.status ? { status: v.status } : {}), ...(v.isPrivate !== undefined ? { isPrivate: v.isPrivate } : {}) };
+    }
+    return a;
+  }, [action, update.data, update.isPending, update.variables]);
+
+  const busy = update.isPending || remove.isPending;
+  const isDreamer = mode === 'dreamer';
+  const dream = shown.dreamId != null ? dreams.find((d) => d.id === shown.dreamId) : undefined;
+  const dreamTitle = dream?.title ?? (shown.dreamId != null ? labels.get(shown.dreamId)?.title : undefined);
+  const hasDetails = shown.details.trim().length > 0;
+  const showDetails = hasDetails && (!compact || expanded);
+  const addedBySomeoneElse = shown.sessionId == null && auth != null && shown.createdBy.id !== auth.user.id;
+
+  const patch = (body: Omit<Parameters<typeof update.mutate>[0], 'actionId'>, message: string, kind: 'success' | 'info' | 'private' = 'success', after?: () => void) =>
+    update.mutate({ actionId: action.id, ...body }, {
+      onSuccess: () => { toast(message, kind); after?.(); },
+      onError: (e) => toast(errorMessage(e), 'error'),
+    });
+
+  const onCheck = (checked: boolean) => {
+    if (checked) patch({ status: 'completed' }, 'Done — nicely.');
+    else patch({ status: 'active' }, isDreamer ? 'Reopened — back on your list.' : 'Reopened.');
+  };
+  const setAside = () => patch({ status: 'archived' }, isDreamer ? 'Set aside — you can bring it back any time.' : 'Set aside.', 'info');
+  const restore = () => patch({ status: 'active' }, isDreamer ? 'Back on your list.' : 'Restored.');
+  const makePrivate = () => patch({ isPrivate: true }, auth?.privateUnlocked ? 'Now private — only you can see this.' : PRIVATE_HIDDEN_MSG, 'private');
+  const share = () => patch({ isPrivate: false }, 'Shared with your coach.');
+  const confirmRemove = () =>
+    remove.mutate(action.id, {
+      onSuccess: () => { setConfirmDelete(false); toast('Action deleted.', 'info'); },
+      onError: (e) => { setConfirmDelete(false); toast(errorMessage(e), 'error'); },
+    });
+
+  const dateLine: ReactNode =
+    shown.status === 'completed' && shown.completedAt ? `Completed ${fmtDate(shown.completedAt)}`
+    : shown.status === 'archived' && shown.archivedAt ? `Set aside ${fmtDate(shown.archivedAt)}`
+    : !compact ? `Added ${fmtDate(shown.createdAt)}`
+    : null;
+
+  return (
+    <li
+      className={`da-row is-${shown.status}${busy ? ' is-busy' : ''}${editing ? ' is-editing' : ''}`}
+      data-testid="action-item"
+      data-action-id={action.id}
+      data-status={shown.status}
+      aria-busy={busy || undefined}
+    >
+      <div className={`da-check${busy ? ' is-busy' : ''}`} data-testid="action-check">
+        <Check checked={shown.status === 'completed'} onChange={onCheck} label={shown.status === 'completed' ? `Reopen “${shown.title}”` : `Mark “${shown.title}” complete`} />
+      </div>
+
+      <div className="da-body">
+        {editing ? (
+          <ActionEditForm
+            action={shown}
+            dreams={dreams}
+            labels={labels}
+            pending={update.isPending}
+            onCancel={() => setEditing(false)}
+            onSave={(body) => patch(body, 'Saved.', 'success', () => setEditing(false))}
+          />
+        ) : (
+          <>
+            <div className="da-title" data-testid="action-title">{shown.title}</div>
+            {showDetails && <div className="da-details" data-testid="action-details">{shown.details}</div>}
+            <div className="da-meta">
+              {dreamTitle != null && shown.dreamId != null && (
+                isDreamer ? (
+                  <Link to={`/dreams/${shown.dreamId}`} className="chip da-chip-link" title={dreamTitle} data-testid="action-dream-link">
+                    <IconStar /><span className="da-chip-text">{dreamTitle}</span>
+                  </Link>
+                ) : (
+                  <Chip className="da-chip-dream" title={dreamTitle}><IconStar /><span className="da-chip-text">{dreamTitle}</span></Chip>
+                )
+              )}
+              {shown.category && <CategoryChip category={shown.category} />}
+              {shown.sessionId != null && (
+                <Chip className="chip-session" title="This action was chosen together in a coaching session">
+                  {compact ? 'Coaching session' : <><span className="hide-mobile">Chosen in a coaching session</span><span className="only-mobile">Coaching session</span></>}
+                </Chip>
+              )}
+              {addedBySomeoneElse && <Chip className="chip-muted">Added by {firstName(shown.createdBy.name)}</Chip>}
+              {isDreamer && shown.isPrivate && <PrivateChip />}
+              {compact && hasDetails && (
+                <button type="button" className="da-expand" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded} data-testid="action-details-expand">
+                  {expanded ? 'Hide details' : 'Details'}
+                </button>
+              )}
+              {dateLine && <span className="da-date" data-testid="action-date">{dateLine}</span>}
+            </div>
+          </>
+        )}
+      </div>
+
+      {!editing && (
+        <div className="da-menu">
+          <Dropdown
+            trigger={(open) => (
+              <Button variant="ghost" icon size="sm" aria-label={`Options for “${shown.title}”`} aria-haspopup="menu" aria-expanded={open} disabled={busy} data-testid="action-menu">
+                <IconMore />
+              </Button>
+            )}
+          >
+            <button type="button" className="menu-item" onClick={() => setEditing(true)} data-testid="action-edit"><IconEdit /> Edit</button>
+            {shown.status === 'active' && <button type="button" className="menu-item" onClick={setAside} data-testid="action-archive"><IconArchive /> Set aside</button>}
+            {shown.status === 'completed' && <button type="button" className="menu-item" onClick={() => onCheck(false)} data-testid="action-reopen"><IconRotate /> Reopen</button>}
+            {shown.status === 'archived' && <button type="button" className="menu-item" onClick={restore} data-testid="action-restore"><IconRotate /> Restore</button>}
+            {isDreamer && (shown.isPrivate
+              ? <button type="button" className="menu-item" onClick={share} data-testid="action-share"><IconUnlock /> Share with coach</button>
+              : <button type="button" className="menu-item" onClick={makePrivate} data-testid="action-make-private"><IconLock /> Make private</button>)}
+            {isDreamer && (
+              <>
+                <div className="divider" />
+                <button type="button" className="menu-item da-menu-danger" onClick={() => setConfirmDelete(true)} data-testid="action-delete"><IconTrash /> Delete</button>
+              </>
+            )}
+          </Dropdown>
+        </div>
+      )}
+
+      {isDreamer && (
+        <ConfirmDialog
+          open={confirmDelete}
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={confirmRemove}
+          title="Delete this action?"
+          body={<>“{shown.title}” will be gone for good. If you might come back to it, <b>Set aside</b> keeps it without the pressure.</>}
+          confirmLabel="Delete"
+          danger
+          loading={remove.isPending}
+        />
+      )}
+    </li>
+  );
+}
+
+/* ---------- Inline edit form ---------- */
+
+function ActionEditForm({ action, dreams, labels, pending, onSave, onCancel }: {
+  action: ActionItem;
+  dreams: DreamRef[];
+  labels: Map<number, DreamLabel>;
+  pending: boolean;
+  onSave: (body: { title: string; details: string; dreamId: number | null; category: CareCategory | null }) => void;
+  onCancel: () => void;
+}) {
+  const id = useId();
+  const [title, setTitle] = useState(action.title);
+  const [details, setDetails] = useState(action.details);
+  const [dreamId, setDreamId] = useState<number | null>(action.dreamId);
+  const [category, setCategory] = useState<CareCategory | null>(action.category);
+  const titleRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { titleRef.current?.focus(); titleRef.current?.select(); }, []);
+
+  const trimmed = title.trim();
+  const dirty = trimmed !== action.title || details.trim() !== action.details || dreamId !== action.dreamId || category !== action.category;
+  const canSave = trimmed.length > 0 && !pending;
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!canSave) return;
+    if (!dirty) { onCancel(); return; }
+    onSave({ title: trimmed, details: details.trim(), dreamId, category });
+  };
+  const onKey = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+  };
+
+  return (
+    <form className="da-edit" onSubmit={submit} onKeyDown={onKey} data-testid="action-edit-form" aria-busy={pending || undefined}>
+      <Field label="Action" htmlFor={`${id}-title`}>
+        <input ref={titleRef} id={`${id}-title`} type="text" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required disabled={pending} data-testid="action-edit-title" />
+      </Field>
+      <Field label="Details" hint="Optional — why it matters, where to start.">
+        <TextArea
+          value={details}
+          onChange={(e) => setDetails(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit(); } }}
+          rows={2}
+          maxLength={4000}
+          disabled={pending}
+          aria-label="Details"
+          data-testid="action-edit-details"
+        />
+      </Field>
+      <LinkSelects dreams={dreams} labels={labels} dreamId={dreamId} category={category} onDreamId={setDreamId} onCategory={setCategory} disabled={pending} idPrefix={`${id}-link`} />
+      <div className="da-edit-actions">
+        <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={pending} data-testid="action-edit-cancel">Cancel</Button>
+        <Button type="submit" variant="primary" size="sm" disabled={!canSave} loading={pending} data-testid="action-edit-save">Save</Button>
+      </div>
+    </form>
+  );
 }

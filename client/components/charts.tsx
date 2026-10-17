@@ -39,10 +39,10 @@ export function TrendChart({ points, max = 10, color, height = 240, unit = '', e
   return (
     <div style={{ width: '100%', height }}>
       <ResponsiveContainer>
-        <LineChart data={data} margin={{ top: 12, right: 16, bottom: 4, left: -16 }}>
+        <LineChart data={data} margin={{ top: 12, right: 16, bottom: 4, left: max === 100 || unit ? -2 : -16 }}>
           {showGrid && <CartesianGrid stroke="var(--grid)" vertical={false} />}
           <XAxis dataKey="t" type="number" domain={domain} scale="time" tickFormatter={(v: number) => fmtDate(new Date(v).toISOString())} tick={{ fontSize: 11, fill: 'var(--muted)' }} axisLine={{ stroke: 'var(--axis)' }} tickLine={false} minTickGap={36} />
-          <YAxis domain={[0, max]} ticks={max === 10 ? [0, 2, 4, 6, 8, 10] : [0, 25, 50, 75, 100]} tick={{ fontSize: 11, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={44} tickFormatter={(v: number) => `${v}${unit}`} />
+          <YAxis domain={[0, max]} ticks={max === 10 ? [0, 2, 4, 6, 8, 10] : [0, 25, 50, 75, 100]} tick={{ fontSize: 11, fill: 'var(--muted)' }} axisLine={false} tickLine={false} width={max === 100 || unit ? 52 : 44} tickFormatter={(v: number) => `${v}${unit}`} />
           {highlightAt && <ReferenceLine x={ts(highlightAt)} stroke="var(--axis)" strokeDasharray="3 3" />}
           <Tooltip
             cursor={{ stroke: 'var(--axis)', strokeDasharray: '3 3' }}
