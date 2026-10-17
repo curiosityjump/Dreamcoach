@@ -1,1 +1,176 @@
-/* Styles for the dreamer-journal area. Use tokens from tokens.css; prefix classes with a short area prefix to avoid collisions. */
+/* ==========================================================================
+   dreamer-journal — JournalPage (/journal) and the shared TimelineFeed /
+   JournalEntryCard (features/shared/Timeline.tsx), which also render inside
+   Home, dream detail, category history and staff views. All classes are
+   prefixed `dj-`. Colors come from tokens.css; CARE colors arrive as
+   --dj-color / --dj-tint from CATEGORY_META.
+   ========================================================================== */
+
+/* ---------- Timeline feed ---------- */
+.dj-tl { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.dj-tl-day { min-width: 0; }
+.dj-tl-day-head, .dj-day-head {
+  margin: 0 0 6px; font-family: var(--font-body); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+}
+.dj-tl-list { list-style: none; margin: 0; padding: 0; }
+.dj-tl-item { padding: 10px 0; }
+.dj-tl-list > li:first-child { padding-top: 2px; }
+.dj-tl-list > li:first-child::before { top: 30px; }
+.dj-tl-list > li:last-child { padding-bottom: 2px; }
+.dj-tl-body { min-width: 0; padding-top: 3px; }
+.dj-tl-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 14.5px; line-height: 1.45; color: var(--ink); }
+.dj-tl-text { overflow-wrap: anywhere; }
+.dj-tl-text b { font-weight: 600; }
+.dj-tl-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.dj-tl-dream { color: var(--ink); font-weight: 600; }
+.dj-tl-dream:hover { color: var(--accent); }
+.dj-tl-when { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dj-tl-link { font-size: 12.5px; font-weight: 500; color: var(--accent); white-space: nowrap; min-height: 24px; display: inline-flex; align-items: center; }
+.dj-tl .note-block { margin-top: 6px; }
+.dj-note-lock { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--private); }
+.dj-note-lock svg { width: 11px; height: 11px; }
+.dj-tl-focus { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font-size: 14px; color: var(--ink-2); }
+.dj-tl-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); flex: none; }
+
+/* dots: tinted disc with an icon or a category swatch */
+.dj-tl-dot { background: var(--dj-tint, var(--surface-3)); color: var(--dj-color, var(--ink-2)); }
+.dj-tl-swatch { width: 10px; height: 10px; border-radius: 50%; background: var(--dj-color, var(--muted)); }
+.dj-dot-gold { --dj-tint: var(--gold-soft); --dj-color: #8a5e10; }
+.dj-dot-success { --dj-tint: var(--success-soft); --dj-color: var(--success); }
+.dj-dot-accent { --dj-tint: var(--accent-soft); --dj-color: var(--accent); }
+.dj-dot-ink { --dj-tint: var(--surface-3); --dj-color: var(--ink-2); }
+.dj-dot-muted { --dj-tint: var(--surface-3); --dj-color: var(--muted); }
+
+/* compact (home "Recently", sidebars) */
+.dj-tl-compact { gap: 12px; }
+.dj-tl-compact .dj-tl-item { padding: 7px 0; grid-template-columns: 22px 1fr; gap: 10px; }
+.dj-tl-compact .dj-tl-item::before { left: 10px; top: 30px; bottom: -7px; }
+.dj-tl-compact .dj-tl-list > li:first-child::before { top: 24px; }
+.dj-tl-compact .dj-tl-dot { width: 22px; height: 22px; }
+.dj-tl-compact .dj-tl-dot svg { width: 12px; height: 12px; }
+.dj-tl-compact .dj-tl-swatch { width: 8px; height: 8px; }
+.dj-tl-compact .dj-tl-body { padding-top: 1px; }
+.dj-tl-compact .dj-tl-head { font-size: 13.5px; gap: 3px 6px; }
+.dj-tl-compact .dj-tl-when, .dj-tl-compact .dj-tl-link { font-size: 12px; }
+.dj-tl-compact .note-block { margin-top: 4px; padding: 6px 10px; font-size: 13px; }
+.dj-tl-compact .chip { font-size: 11.5px; padding: 1px 7px; }
+
+/* ---------- Journal entry card ---------- */
+.dj-entry {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 6px; align-items: start;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+.dj-entry.is-busy { opacity: 0.65; }
+.dj-entry.is-private { border-left: 3px solid var(--private); padding-left: 12px; }
+.dj-entry-main { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.dj-entry-body { font-size: 15px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.dj-entry-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 12.5px; color: var(--muted); min-height: 24px; }
+.dj-entry-when { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dj-entry-context { color: var(--ink-2); }
+a.dj-entry-context:hover { color: var(--accent); }
+.dj-entry-meta .chip { max-width: 100%; }
+.dj-chip-dream { color: var(--ink-2); }
+.dj-chip-dream svg { color: var(--gold); width: 11px; height: 11px; }
+a.dj-chip-dream { border: 1px solid transparent; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+a.dj-chip-dream:hover { text-decoration: none; border-color: var(--border-strong); color: var(--ink); background: var(--surface); }
+.dj-chip-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.dj-entry-menu { margin: -6px -8px 0 0; }
+.dj-entry-menu .menu { min-width: 210px; }
+.dj-menu-danger, .dj-menu-danger svg { color: var(--danger); }
+.dj-menu-danger:hover { background: var(--danger-soft); }
+
+/* within the timeline the card sits beside its dot */
+.dj-tl-journal .dj-entry { background: var(--surface-2); }
+.dj-tl-compact .dj-entry, .dj-entry-compact { background: transparent; border: 0; border-radius: 0; padding: 0; }
+.dj-tl-compact .dj-entry.is-private, .dj-entry-compact.is-private { border-left: 0; padding-left: 0; }
+.dj-entry-compact .dj-entry-body, .dj-tl-compact .dj-entry-body { font-size: 14px; line-height: 1.5; }
+.dj-entry-compact .dj-entry-meta, .dj-tl-compact .dj-entry-meta { font-size: 12px; gap: 3px 6px; min-height: 0; }
+.dj-entry-compact .dj-entry-main, .dj-tl-compact .dj-entry-main { gap: 5px; }
+.dj-entry-compact .dj-chip-text { max-width: 160px; }
+.dj-entry-compact .dj-entry-menu { margin-top: -4px; }
+
+/* ---------- Inline edit form ---------- */
+.dj-edit { display: flex; flex-direction: column; gap: 10px; }
+.dj-edit textarea { background: var(--surface); font-size: 15px; line-height: 1.6; }
+.dj-edit-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.dj-edit-actions { display: flex; gap: 8px; margin-left: auto; }
+
+/* ---------- Pill selects (composer + edit form) ---------- */
+.dj-select {
+  width: auto; max-width: 100%; min-height: 32px; padding: 4px 28px 4px 11px; border-radius: var(--r-pill);
+  border: 1px solid var(--border); background-color: var(--surface); color: var(--ink-2); font-size: 12.5px; font-weight: 500;
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23777d86' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 12px;
+  text-overflow: ellipsis; transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+}
+.dj-select:hover { border-color: var(--border-strong); }
+.dj-select:focus { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); }
+.dj-select.is-set { color: var(--ink); background-color: var(--dj-tint, var(--surface-3)); border-color: var(--dj-color, var(--border-strong)); }
+.dj-select-dream { max-width: 240px; }
+.dj-select-dream.is-set { background-color: var(--gold-soft); border-color: var(--gold); }
+
+/* ---------- Page (/journal) ---------- */
+.dj-page .page-header { margin-bottom: 18px; }
+.dj-composer-card { margin-bottom: 20px; }
+.dj-composer-open {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 8px; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted); font-size: 15px; text-align: left; transition: background 0.15s, color 0.15s;
+}
+.dj-composer-open svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.dj-composer-open:hover { background: var(--surface-2); color: var(--ink); }
+.dj-composer { display: flex; flex-direction: column; gap: 10px; }
+.dj-composer textarea { min-height: 112px; font-size: 16px; line-height: 1.6; border-color: var(--border); background: var(--surface-2); }
+.dj-composer textarea:focus { background: var(--surface); }
+.dj-composer-options { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.dj-composer-actions { display: flex; gap: 8px; margin-left: auto; }
+.dj-composer-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.dj-composer-hint svg { width: 13px; height: 13px; flex: none; }
+
+.dj-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-bottom: 12px; }
+.dj-toolbar .segmented button { min-height: 36px; padding: 6px 14px; }
+.dj-count { white-space: nowrap; }
+
+.dj-filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+.dj-search { position: relative; }
+.dj-search svg { position: absolute; left: 13px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.dj-search input { padding-left: 38px; border-radius: var(--r-pill); border-color: var(--border); background: var(--surface); }
+.dj-search input::-webkit-search-cancel-button { cursor: pointer; }
+.dj-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.dj-filter-chip {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 34px; max-width: 240px; padding: 0 12px; border-radius: var(--r-pill);
+  border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 500;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.dj-filter-chip svg { width: 13px; height: 13px; flex: none; }
+.dj-filter-chip:hover { border-color: var(--border-strong); color: var(--ink); }
+.dj-filter-chip[aria-pressed='true'] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.dj-filter-dream svg { color: var(--gold); }
+.dj-filter-chip .chip-dot { background: var(--dj-color, var(--muted)); }
+.dj-filter-cat[aria-pressed='true'] { background: var(--dj-tint); border-color: var(--dj-color); color: var(--ink); }
+.dj-filter-private svg { color: var(--private); }
+.dj-filter-private[aria-pressed='true'] { background: var(--private-soft); border-color: #cdbff0; color: var(--private); }
+.dj-filter-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dj-text-btn {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 0 10px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--accent); font-size: 13px; font-weight: 500; white-space: nowrap;
+}
+.dj-text-btn:hover { background: var(--accent-soft); }
+
+.dj-day { margin-bottom: 22px; }
+.dj-day:last-child { margin-bottom: 0; }
+.dj-day-list { display: flex; flex-direction: column; gap: 10px; }
+.dj-more { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--border); text-align: center; }
+
+@media (max-width: 640px) {
+  .dj-toolbar .segmented { width: 100%; display: flex; }
+  .dj-toolbar .segmented button { flex: 1; }
+  /* phones: one scrollable rail instead of a tall stack of chips */
+  .dj-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 calc(-1 * var(--gutter)); padding: 2px var(--gutter); }
+  .dj-chips::-webkit-scrollbar { display: none; }
+  .dj-filter-chip, .dj-text-btn { flex: none; }
+  .dj-composer-actions { width: 100%; justify-content: flex-end; }
+  .dj-chip-text { max-width: 150px; }
+  .dj-tl-when { margin-left: 0; }
+}
