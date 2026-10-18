@@ -217,12 +217,18 @@ export function SessionGridView({ grid, currentSessionId, editable, onRating, on
       const corner = wrap.querySelector<HTMLElement>('.cs-corner');
       if (!cell || !corner) return;
       const stickyW = corner.offsetWidth;
+      wrap.style.paddingRight = '';
       const needed = cell.offsetLeft + cell.offsetWidth - wrap.clientWidth;
       if (needed <= 0) { wrap.scrollLeft = 0; return; }
       // Snap so whole columns show next to the sticky labels (no half-hidden month).
       const cols = Array.from(wrap.querySelectorAll<HTMLElement>('th[data-cs-col]'));
       const first = cols.find((c) => c.offsetLeft - stickyW >= needed) ?? cell;
-      wrap.scrollLeft = first.offsetLeft - stickyW;
+      const want = first.offsetLeft - stickyW;
+      // When the table is only slightly wider than the view the browser can't scroll that far,
+      // so pad the end by the difference rather than leave a month half under the labels.
+      const overshoot = want - (wrap.scrollWidth - wrap.clientWidth);
+      if (overshoot > 0) wrap.style.paddingRight = `${overshoot}px`;
+      wrap.scrollLeft = want;
     };
     snap();
     // Re-snap when the container or table changes width (rotation, sidebar collapse,
