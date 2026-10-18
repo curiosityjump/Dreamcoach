@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS coaching_sessions (
   completed_at TEXT,
   notes TEXT NOT NULL DEFAULT '',
   focus TEXT NOT NULL DEFAULT '',
+  actions_reviewed INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -168,6 +169,9 @@ export function openDatabase(file: string): DB {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  // Columns added after the first release; CREATE TABLE IF NOT EXISTS leaves older databases without them.
+  const sessionCols = (db.prepare('PRAGMA table_info(coaching_sessions)').all() as { name: string }[]).map((c) => c.name);
+  if (!sessionCols.includes('actions_reviewed')) db.exec('ALTER TABLE coaching_sessions ADD COLUMN actions_reviewed INTEGER NOT NULL DEFAULT 0');
   return db;
 }
 

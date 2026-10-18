@@ -9,6 +9,8 @@ export const SESSION_COOKIE = 'dc_session';
 export const SESSION_IDLE_MS = 24 * 60 * 60 * 1000;
 /** "Show Private" lasts this long without activity before private entries hide again. */
 export const PRIVATE_UNLOCK_MS = 30 * 60 * 1000;
+/** Request header carrying milliseconds since the person last interacted with the page. */
+export const IDLE_HEADER = 'x-dc-idle';
 const MAX_FAILURES = 5;
 const LOCKOUT_MS = 60 * 1000;
 
@@ -81,7 +83,13 @@ export function destroyAuthSession(db: DB, token: string): void {
 }
 
 /** Loads a session, applying idle expiry and the private-unlock timeout. Returns null if invalid. */
-export function touchAuthSession(db: DB, token: string): AuthSessionRow | null {
+/**
+ * `idleMs` is how long ago the person last touched the page (the client's x-dc-idle header). Background
+ * requests — polling, focus refetches, expiry checks — report a growing idle time, so they never keep
+ * private entries showing; the unlock window slides from the last real interaction. Without the header
+ * (other API clients) every request counts as activity.
+ */
+export function touchAuthSession(db: DB, token: string, idleMs?: number): AuthSessionRow | null {
   const row = db.prepare('SELECT * FROM auth_sessions WHERE token = ?').get(token) as AuthSessionRow | undefined;
   if (!row) return null;
   const now = Date.now();
@@ -93,7 +101,9 @@ export function touchAuthSession(db: DB, token: string): AuthSessionRow | null {
   if (unlockedUntil && new Date(unlockedUntil).getTime() <= now) {
     unlockedUntil = null; // timed out — relock
   } else if (unlockedUntil) {
-    unlockedUntil = new Date(now + PRIVATE_UNLOCK_MS).toISOString(); // sliding window while active
+    // Sliding window from the last interaction; never shortened by a late background request.
+    const slid = now - Math.max(0, idleMs ?? 0) + PRIVATE_UNLOCK_MS;
+    if (slid > new Date(unlockedUntil).getTime()) unlockedUntil = new Date(slid).toISOString();
   }
   const nowS = new Date(now).toISOString();
   const expires = new Date(now + SESSION_IDLE_MS).toISOString();
@@ -146,9 +156,9 @@ export function toUser(row: { id: number; email: string; name: string; role: str
   return { id: row.id, email: row.email, name: row.name, role: row.role as Role, initials: initials(row.name), createdAt: row.created_at };
 }
 
-export function loadViewer(db: DB, token: string | undefined): Viewer | null {
+export function loadViewer(db: DB, token: string | undefined, idleMs?: number): Viewer | null {
   if (!token) return null;
-  const sess = touchAuthSession(db, token);
+  const sess = touchAuthSession(db, token, idleMs);
   if (!sess) return null;
   const user = db.prepare('SELECT id, email, name, role, created_at FROM users WHERE id = ?').get(sess.user_id) as
     | { id: number; email: string; name: string; role: string; created_at: string }
@@ -167,7 +177,8 @@ export function loadViewer(db: DB, token: string | undefined): Viewer | null {
 
 export function attachViewer(req: Request, _res: Response, next: NextFunction): void {
   const token = req.cookies?.[SESSION_COOKIE] as string | undefined;
-  req.viewer = loadViewer(req.db, token) ?? undefined;
+  const idle = Number(req.get(IDLE_HEADER));
+  req.viewer = loadViewer(req.db, token, Number.isFinite(idle) && req.get(IDLE_HEADER) ? idle : undefined) ?? undefined;
   next();
 }
 

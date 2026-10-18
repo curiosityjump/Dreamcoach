@@ -694,7 +694,7 @@ export function resetAndSeed(db: DB): SeedSummary {
 
         const sessionId = Number(
           db
-            .prepare(`INSERT INTO coaching_sessions (dreamer_id, coach_user_id, status, occurred_at, completed_at, notes, focus, created_at, updated_at) VALUES (?, ?, 'completed', ?, ?, '', '', ?, ?)`)
+            .prepare(`INSERT INTO coaching_sessions (dreamer_id, coach_user_id, status, occurred_at, completed_at, notes, focus, actions_reviewed, created_at, updated_at) VALUES (?, ?, 'completed', ?, ?, '', '', 1, ?, ?)`)
             .run(dreamerId, coachUserId, occurredAt, completedAt, occurredAt, completedAt).lastInsertRowid,
         );
         counts.sessions++;

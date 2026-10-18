@@ -451,7 +451,7 @@ export function updateSession(
   db: DB,
   scope: Scope,
   sessionId: number,
-  patch: { notes?: string; focus?: string; occurredAt?: string; status?: 'in_progress' | 'completed' },
+  patch: { notes?: string; focus?: string; occurredAt?: string; status?: 'in_progress' | 'completed'; actionsReviewed?: boolean },
 ): CoachingSession {
   const s = q.getSession(db, scope, sessionId);
   if (!s) throw new HttpError(404, 'Session not found.', 'not_found');
@@ -461,10 +461,11 @@ export function updateSession(
   const completedAt = status === 'completed' ? (s.completedAt ?? now) : null;
   const occurredAt = patch.occurredAt ? new Date(patch.occurredAt).toISOString() : null;
   db.transaction(() => {
-    db.prepare('UPDATE coaching_sessions SET notes = COALESCE(?, notes), focus = COALESCE(?, focus), occurred_at = COALESCE(?, occurred_at), status = ?, completed_at = ?, updated_at = ? WHERE id = ?').run(
+    db.prepare('UPDATE coaching_sessions SET notes = COALESCE(?, notes), focus = COALESCE(?, focus), occurred_at = COALESCE(?, occurred_at), actions_reviewed = COALESCE(?, actions_reviewed), status = ?, completed_at = ?, updated_at = ? WHERE id = ?').run(
       patch.notes ?? null,
       patch.focus ?? null,
       occurredAt,
+      patch.actionsReviewed === undefined ? null : patch.actionsReviewed ? 1 : 0,
       status,
       completedAt,
       now,

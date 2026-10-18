@@ -137,6 +137,11 @@ export interface JournalEntry {
   author: { id: number; name: string; role: Role };
   createdAt: string;
   updatedAt: string;
+  /**
+   * Owner-only, present only while private entries are shown: this note is attached to a private rating
+   * or progress update, so it is private along with it whatever its own flag says.
+   */
+  parentPrivate?: boolean;
 }
 
 export interface ActionItem {
@@ -170,6 +175,8 @@ export interface CoachingSession {
   notes: string;
   /** Focus for the coming period, chosen together (free text). */
   focus: string;
+  /** The coach ticked "Review previous actions" in the session flow (the one step not inferred from data). */
+  actionsReviewed: boolean;
   ratings: Partial<Record<RatingCategory, number>>;
   progress: Record<number, number>; // dreamId -> value
   /**

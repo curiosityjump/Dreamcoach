@@ -213,7 +213,7 @@ dreamersRouter.patch('/:id/sessions/:sid', (req, res) => {
   const scope = resolveScope(req, res, req.params.id as string);
   if (!scope) return;
   const body = z
-    .object({ notes: z.string().max(20000).optional(), focus: z.string().max(2000).optional(), occurredAt: z.string().datetime().optional(), status: z.enum(['in_progress', 'completed']).optional() })
+    .object({ notes: z.string().max(20000).optional(), focus: z.string().max(2000).optional(), occurredAt: z.string().datetime().optional(), status: z.enum(['in_progress', 'completed']).optional(), actionsReviewed: z.boolean().optional() })
     .safeParse(req.body);
   if (!body.success) return bad(res, body.error);
   res.json(cmd.updateSession(req.db, scope, Number(req.params.sid), body.data));

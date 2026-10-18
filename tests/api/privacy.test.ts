@@ -41,6 +41,24 @@ test('unlock times out server-side', async () => {
   assert.equal(me.body.privateUnlocked, false);
 });
 
+test('background requests never keep private entries showing; real activity slides the unlock', async () => {
+  const dreamer = new Client(s.base);
+  await dreamer.login('grace@dreamcoach.demo');
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const until = () => (s.db.prepare(`SELECT private_unlocked_until AS u FROM auth_sessions WHERE token = ?`).get(dreamer.cookie.split('=')[1]) as { u: string | null }).u;
+  const me = (idleMs: number) => fetch(`${s.base}/api/auth/me`, { headers: { cookie: dreamer.cookie, 'x-dc-idle': String(idleMs) } }).then((r) => r.json() as Promise<any>);
+  // Two minutes left on the unlock.
+  const twoMin = new Date(Date.now() + 2 * 60_000).toISOString();
+  s.db.prepare(`UPDATE auth_sessions SET private_unlocked_until = ? WHERE token = ?`).run(twoMin, dreamer.cookie.split('=')[1]);
+  // A poll from a page nobody has touched for 29 minutes does not extend it…
+  assert.equal((await me(29 * 60_000)).privateUnlocked, true);
+  assert.equal(until(), twoMin);
+  // …but a request made right after an interaction does.
+  await me(0);
+  assert.ok(Date.parse(until()!) > Date.now() + 29 * 60_000);
+  await dreamer.post('/auth/privacy/lock');
+});
+
 test('staff cannot unlock private entries', async () => {
   const coach = new Client(s.base);
   await coach.login('maya@dreamcoach.demo');

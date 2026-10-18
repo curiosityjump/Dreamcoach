@@ -108,6 +108,7 @@ interface SessionRow {
   completed_at: string | null;
   notes: string;
   focus: string;
+  actions_reviewed: number;
 }
 
 /* ---------- mappers ---------- */
@@ -231,7 +232,7 @@ const ACTION_SELECT = `
   FROM actions x JOIN users u ON u.id = x.created_by`;
 
 const SESSION_SELECT = `
-  SELECT s.id, s.dreamer_id, s.coach_user_id, c.name AS coach_name, s.status, s.occurred_at, s.completed_at, s.notes, s.focus
+  SELECT s.id, s.dreamer_id, s.coach_user_id, c.name AS coach_name, s.status, s.occurred_at, s.completed_at, s.notes, s.focus, s.actions_reviewed
   FROM coaching_sessions s JOIN users c ON c.id = s.coach_user_id`;
 
 /* ---------- Program & profile ---------- */
@@ -463,6 +464,7 @@ function mapSession(db: DB, scope: Scope, s: SessionRow, number: number): Coachi
     completedAt: s.completed_at,
     notes: s.notes,
     focus: s.focus,
+    actionsReviewed: !!s.actions_reviewed,
     ratings: r,
     progress: p,
     ...(scope.includePrivate ? { privateRatings, privateProgress } : {}),

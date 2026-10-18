@@ -9,6 +9,14 @@ export class ApiRequestError extends Error {
 
 export const UNAUTHENTICATED_EVENT = 'dc:unauthenticated';
 
+// The server keeps private entries showing for 30 minutes after the last *interaction*, so every request
+// says how long ago that was; polling and other background reads then never extend the unlock.
+let lastInteraction = Date.now();
+if (typeof window !== 'undefined') {
+  const mark = () => { lastInteraction = Date.now(); };
+  for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const) window.addEventListener(ev, mark, { capture: true, passive: true });
+}
+
 let readsHeld: Promise<unknown> | null = null;
 
 /** Reads wait until `until` settles, so none can reach the server first (e.g. before it has hidden private entries). */
@@ -26,7 +34,7 @@ export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   if (method === 'GET' && readsHeld) await readsHeld;
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+    headers: { 'x-dc-idle': String(Date.now() - lastInteraction), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   });

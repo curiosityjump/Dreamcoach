@@ -25,6 +25,7 @@ import { SessionGridView } from '@/features/coach/SessionGridView';
 import { StatusChip } from '@/features/coach/CoachDashboardPage';
 import { IconArrowLeft, IconCheck, IconCompass, IconEdit, IconInfo, IconMessage, IconPen, IconPlay, IconStar, IconUsers, IconWheel } from '@/components/icons';
 import { dayHeading, dayKey, fmtDate, fmtDateTime, plural, relativeTime } from '@/lib/format';
+import { sessionBaseline } from '@/lib/sessionDelta';
 
 const TABS = ['overview', 'sessions', 'actions', 'history', 'reflections'] as const;
 type Tab = (typeof TABS)[number];
@@ -84,27 +85,6 @@ function sessionWheel(s: CoachingSession | undefined): WheelValues | null {
   const v: WheelValues = {};
   for (const c of CARE_CATEGORIES) v[c] = s.ratings[c] ?? null;
   return CARE_CATEGORIES.some((c) => v[c] != null) ? v : null;
-}
-
-/**
- * What an Overview value's change is measured against: always a coaching session, named in the label,
- * so the figure agrees with the session grid. A value recorded in session N is compared with the
- * session before it (as the grid's column is); a self check-in since then with the latest session.
- */
-function sessionBaseline(sessions: CoachingSession[], at: string, fromSession: boolean, valueOf: (s: CoachingSession) => number | undefined): { value: number; label: string } | null {
-  if (fromSession) {
-    const i = sessions.findIndex((s) => s.occurredAt === at);
-    const prev = i > 0 ? sessions[i - 1]! : null;
-    const v = prev ? valueOf(prev) : undefined;
-    return prev && v != null ? { value: v, label: `vs S${prev.number}` } : null;
-  }
-  const t = Date.parse(at);
-  for (let j = sessions.length - 1; j >= 0; j--) {
-    const s = sessions[j]!;
-    const v = valueOf(s);
-    if (Date.parse(s.occurredAt) <= t && v != null) return { value: v, label: `since S${s.number}` };
-  }
-  return null;
 }
 
 function BaselineDelta({ value, base, suffix = '' }: { value: number; base: { value: number; label: string } | null; suffix?: string }) {
