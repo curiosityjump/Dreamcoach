@@ -25,10 +25,10 @@ to fill the form.
 
 ## Tour 1 — the dreamer (sign in as Alicia)
 
-1. **Home** — greeting, the four dreams with progress and change since last update,
-   the CARE wheel from her latest readings, active actions (check one off right
-   here), the last coaching session with Maya's focus and notes, and a recent
-   activity feed.
+1. **Home** — greeting, the four dreams with progress and how far each has moved
+   since a coaching session (labelled, e.g. "▲ 6 pts since S9"), the CARE wheel
+   from her latest readings, active actions (check one off right here), the last
+   coaching session with Maya's focus and notes, and a recent activity feed.
 2. **Dreams** — open *Run the Riverfront Half Marathon*. Edit the title or
    description inline, read the progress history (solid dots = coaching sessions,
    hollow = self check-ins), hover points for the note behind each number, and use
@@ -37,18 +37,21 @@ to fill the form.
 3. **Actions** — Active / Completed / Set aside. Add an action, link it to a dream or
    CARE area, complete it (gentle "Done — nicely."), reopen it, set one aside and
    restore it. Use the ⋯ menu to make an action private.
-4. **CARE** — click or drag inside a quadrant of the wheel to set a new rating; a
-   save panel appears so you can add a note and choose what to share. Tick
-   *Compare with last coaching session* to overlay the dashed outline. Rate
-   Commitment or Satisfaction with one tap. Scroll for all four areas over time.
+4. **CARE** — click or drag inside a quadrant of the wheel (on a phone: tap; a
+   vertical swipe still scrolls) to set a new rating; a save panel appears so you
+   can add a note and choose what to share — on phones a bar at the bottom keeps
+   the unsaved change and *Save* in view. Tick *Compare with last coaching
+   session* to overlay the dashed outline. For Commitment or Satisfaction, pick a
+   number, optionally add a note, then *Save*. Scroll for all areas over time.
 5. **CARE → Energy → History** — the single-area view: trend, the "ranged x–y" line,
-   and every entry with its note and the reflections written alongside it. Edit or
-   delete your own self entries from the ⋯ menu.
+   and every entry with its note and the reflections written alongside it. From
+   the ⋯ menu: edit or delete your own self entries, add your own note to a value
+   Maya recorded in a session, or make any entry private.
 6. **Check in** (top-right) — pick any subset of areas and dreams, rate them, add
    notes, write a reflection; every piece has its own privacy switch. Save.
 7. **Journal** — write a reflection (tag it with a dream or area), switch between
    *Reflections* and *Everything*, search and filter.
-8. **Sessions** (Home → *All sessions*) — the months-side-by-side grid of every
+8. **Sessions** (in the navigation) — the months-side-by-side grid of every
    coaching session plus Maya's notes and the actions chosen each time.
 
 ### Privacy, hands-on
@@ -56,11 +59,18 @@ to fill the form.
   after sign-in. The lists you see are exactly what Maya sees.
 - Click **Show private**, enter a wrong password (refused), then `dream2026`. Private
   entries appear with a purple lock chip — including a private action, a private
-  reflection, a private Alignment rating, and a *shared* Energy rating whose note
-  is private (4–10 days ago).
+  reflection, a private rating, and a *shared* rating whose note is private (in
+  the last week or two, after her latest session). Current values that come from
+  a private entry carry the same chip on Home and CARE.
 - Click **Hide private** — everything private disappears instantly, with no
   placeholders or counts. Sign out and back in: hidden again.
-- Private entries also hide automatically after 30 idle minutes.
+- Private entries also hide automatically after 30 minutes without interaction
+  (a page that is merely left open — even a live session page — doesn't count),
+  with a short notice. Hiding in one tab hides every open tab.
+- Try making something private while private entries are hidden: it simply
+  disappears from view with a toast. If a shared rating already carries a
+  private note you can't currently see, *Add a note* asks you to show private
+  entries first rather than overwrite it.
 
 ## Tour 2 — the coach (sign in as Maya)
 
@@ -72,27 +82,35 @@ to fill the form.
    shared notes), **Reflections** (shared only). You will find no trace of her
    private entries anywhere — not even a count.
 3. **Start session** — the live workspace. Type numbers into the highlighted
-   column (Tab moves down), review previous actions (complete, set aside, edit),
-   add new actions chosen together, write the focus and notes (autosaved). The
-   right-hand *Session flow* checklist mirrors the six-step sequence; *Since last
-   session* shows Alicia's shared self check-ins and reflections since last time.
+   column (Tab or Enter moves down, arrows move between cells, Escape cancels an
+   edit), review previous actions — last session's focus and notes sit on top,
+   and anything Alicia completed since then is listed too — complete, set aside
+   or edit them, add new actions chosen together, write the focus and notes
+   (autosaved). The right-hand *Session flow* checklist mirrors the six-step
+   sequence (tick *Review previous actions* yourself; the rest fill in from the
+   data); *Since last session* shows Alicia's shared self check-ins and
+   reflections since last time.
 4. **Present** — opens a clean screen-share view in a new tab: wheel today vs last
    session, dream progress with deltas, CARE over the program, commitment and
    satisfaction. It updates live as you type in the workspace tab.
-5. **Complete session** — the record is final (reopen or *Edit values* if needed).
-   Sign in as Alicia: Home and History already show the new values with a
-   "Coaching session" label.
+5. **Complete session** — the record is final (reopen or *Edit values* if needed;
+   an empty session asks before completing and offers *Delete* instead). Sign in
+   as Alicia: Home and History already show the new values with a "Coaching
+   session" label.
 
 ## Tour 3 — the Director (sign in as Jordan)
 
 1. **Team** — totals (dreamers, sessions, participation, engagement between
    sessions, dreams achieved, CARE change since first session with n), CARE across
    the team, month-by-month trends, and the coaches table. Read the caveat: these
-   are context, not rankings; *How these are calculated* spells out each metric.
+   are context, not rankings; *How these are calculated* spells out each metric —
+   sessions are credited to the coach who ran them, every other per-coach figure
+   describes their current caseload.
 2. Click a coach → caseload and trends for that coach. Click a dreamer → the same
    dreamer view the coach has.
 3. **All dreamers** — search, filter by coach or status, sort; reassign a dreamer to
-   another coach or mark them paused from the row menu.
+   another coach (their past sessions stay credited to whoever ran them) or mark
+   them paused from the row menu, and watch the coach pages and metrics follow.
 4. **My coaching** — Jordan's own caseload (Sam Whitaker) with the same live
    workspace coaches use.
 
