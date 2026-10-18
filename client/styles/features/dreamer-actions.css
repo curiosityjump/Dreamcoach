@@ -13,7 +13,7 @@
   display: flex; align-items: center; gap: 8px; margin: 0 0 4px;
   font-family: var(--font-body); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
 }
-.da-count { font-weight: 500; color: var(--muted-2); letter-spacing: 0; }
+.da-count { font-weight: 500; color: var(--muted); letter-spacing: 0; }
 .segmented button[aria-pressed='true'] .da-count { color: var(--muted); }
 .da-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .da-rows > li + li { border-top: 1px solid var(--border); }

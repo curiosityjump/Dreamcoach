@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { CATEGORY_META, type RatingCategory } from '@shared/care';
 import type { EntrySource } from '@shared/types';
@@ -170,7 +170,7 @@ export function PercentInput({ value, onChange, color, label, disabled }: { valu
 export function PrivacyToggle({ value, onChange, size, labels }: { value: boolean; onChange: (v: boolean) => void; size?: 'sm'; labels?: [string, string] }) {
   const [shared, priv] = labels ?? ['Shared with coach', 'Private'];
   return (
-    <button type="button" className="privacy-toggle" aria-pressed={value} onClick={() => onChange(!value)} title={value ? 'Only you can see this. Click to share with your coach.' : 'Your coach can see this. Click to make it private.'} style={size === 'sm' ? { minHeight: 26, fontSize: 12 } : undefined}>
+    <button type="button" className={`privacy-toggle${size === 'sm' ? ' privacy-toggle-sm' : ''}`} aria-pressed={value} onClick={() => onChange(!value)} title={value ? 'Only you can see this. Click to share with your coach.' : 'Your coach can see this. Click to make it private.'}>
       {value ? <IconLock /> : <IconUnlock />}
       <span>{value ? priv : shared}</span>
     </button>
@@ -367,8 +367,20 @@ export function useClickOutside(ref: React.RefObject<HTMLElement | null>, onOuts
 
 export function Dropdown({ trigger, children, align = 'right' }: { trigger: (open: boolean) => ReactNode; children: ReactNode; align?: 'left' | 'right' }) {
   const [open, setOpen] = useState(false);
+  const [up, setUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => setOpen(false), open);
+  // Open upwards when the menu would run under the phone's bottom nav (or off the screen) and there is room above.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!open || !menu) { setUp(false); return; }
+    const nav = document.querySelector<HTMLElement>('.mobile-nav');
+    const floor = nav && getComputedStyle(nav).display !== 'none' ? nav.getBoundingClientRect().top : window.innerHeight;
+    const r = menu.getBoundingClientRect();
+    const trigger = ref.current!.getBoundingClientRect();
+    setUp(r.bottom > floor - 8 && trigger.top - r.height - 12 > 0);
+  }, [open]);
   // Choosing an item hands focus back to the trigger, so a dialog the item opens can return it there.
   const choose = () => { ref.current?.querySelector<HTMLElement>('button, a[href]')?.focus(); setOpen(false); };
   // Escape closes (back to the trigger), the arrow keys move through the items, and tabbing away closes.
@@ -388,7 +400,7 @@ export function Dropdown({ trigger, children, align = 'right' }: { trigger: (ope
     <div className="user-menu" ref={ref} onKeyDown={onKeyDown} onBlur={open ? onBlur : undefined}>
       <div onClick={() => setOpen((o) => !o)}>{trigger(open)}</div>
       {open && (
-        <div className="menu" style={align === 'left' ? { left: 0, right: 'auto' } : undefined} onClick={choose}>
+        <div ref={menuRef} className={`menu${up ? ' menu-up' : ''}`} style={align === 'left' ? { left: 0, right: 'auto' } : undefined} onClick={choose}>
           {children}
         </div>
       )}

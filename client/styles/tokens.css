@@ -11,7 +11,7 @@
   /* ink */
   --ink: #1f2328;
   --ink-2: #474d55;
-  --muted: #777d86;
+  --muted: #646a72; /* small text: ≥ 4.5:1 on every surface, --bg-deep included */
   --muted-2: #a2a7ae;
   /* brand */
   --accent: #2a6f6a;
@@ -22,10 +22,10 @@
   --gold: #d9a441;
   --gold-soft: #faf0dc;
   --plum: #6250d6;
-  /* status (icon + label always accompany) */
-  --success: #1a7f5a;
+  /* status (icon + label always accompany; dark enough for small text on their soft tints) */
+  --success: #177351;
   --success-soft: #e3f3ec;
-  --warning: #b7791f;
+  --warning: #956218;
   --warning-soft: #fbf1dc;
   --danger: #b4382c;
   --danger-soft: #f9e6e3;

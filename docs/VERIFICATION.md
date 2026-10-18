@@ -1,7 +1,7 @@
 # Verification
 
 How each requirement in the brief was verified. "API test" = `tests/api/*.test.ts`
-(48 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
+(53 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
 journey in `tests/e2e/journey.spec.ts` (6 serial steps, fresh database on :3100).
 "Manual" = exercised in Chromium with screenshots in `docs/screenshots/`.
 

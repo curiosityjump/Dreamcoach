@@ -106,7 +106,9 @@
 /* value pills: C 7 · A 9 … */
 .dh-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .dh-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: var(--r-pill); background: var(--dh-tint, var(--surface-3)); color: var(--ink); font-size: 13px; line-height: 1.5; border: 1px solid transparent; }
-.dh-pill-k { font-size: 11px; font-weight: 700; color: var(--dh-color, var(--muted)); letter-spacing: 0.02em; }
+/* the letter is small text: a darker shade of the category colour (textShade, set for the page background),
+   a touch darker again because some tints are a little deeper than the page */
+.dh-pill-k { font-size: 11px; font-weight: 700; color: var(--dh-ink, var(--muted)); color: color-mix(in srgb, var(--dh-ink, var(--muted)) 92%, #000); letter-spacing: 0.02em; }
 .dh-pill-v { font-weight: 600; }
 .dh-pill-d { font-size: 11.5px; color: var(--ink-2); }
 

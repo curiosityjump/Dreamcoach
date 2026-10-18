@@ -32,6 +32,14 @@
 .dj-note-lock svg { width: 11px; height: 11px; }
 .dj-tl-focus { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; font-size: 14px; color: var(--ink-2); }
 .dj-tl-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); flex: none; }
+/* a session's values that matched the Journal's area / dream / private filter */
+.dj-tl-svals { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; margin-top: 6px; font-size: 14px; color: var(--ink-2); }
+.dj-tl-sval { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.dj-tl-sval b { font-weight: 600; color: var(--ink); }
+.dj-tl-sval .dj-tl-swatch { width: 8px; height: 8px; flex: none; }
+.dj-tl-sval-star { width: 13px; height: 13px; color: var(--gold); flex: none; }
+.dj-tl-sval-dream { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dj-tl-sval .chip { padding: 1px 6px; }
 
 /* dots: tinted disc with an icon or a category swatch */
 .dj-tl-dot { background: var(--dj-tint, var(--surface-3)); color: var(--dj-color, var(--ink-2)); }
@@ -171,6 +179,7 @@ a.dj-chip-dream:hover { text-decoration: none; border-color: var(--border-strong
   .dj-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 calc(-1 * var(--gutter)); padding: 2px var(--gutter); }
   .dj-chips::-webkit-scrollbar { display: none; }
   .dj-filter-chip, .dj-text-btn { flex: none; }
+  .dj-filters-clear { order: -1; }
   .dj-composer-actions { width: 100%; justify-content: flex-end; }
   .dj-chip-text { max-width: 150px; }
 }

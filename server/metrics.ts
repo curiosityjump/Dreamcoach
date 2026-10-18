@@ -191,9 +191,10 @@ function monthSeries(db: DB, viewer: Viewer, ids: number[], startsOn: string, co
   const progress = db
     .prepare(`SELECT value, substr(occurred_at,1,7) AS m FROM dream_progress WHERE source = 'session' AND is_private = 0 AND dreamer_id IN (${inList})`)
     .all(...ids) as { value: number; m: string }[];
-  // Journal entries the dreamers wrote themselves (reflections and notes, on self or session entries).
+  // Journal entries the dreamers wrote themselves (reflections and notes, on self or session entries), in the
+  // month they count as activity — the same dating as the snapshot's "Engaged" and "Last self activity".
   const journal = db
-    .prepare(`SELECT substr(j.occurred_at,1,7) AS m, COUNT(*) AS n FROM journal_entries j WHERE ${q.WRITTEN_BY_DREAMER('j')} AND ${JOURNAL_VISIBLE('j')} AND j.dreamer_id IN (${inList}) GROUP BY m`)
+    .prepare(`SELECT substr(${q.ACTIVITY_AT('j')},1,7) AS m, COUNT(*) AS n FROM journal_entries j WHERE ${q.WRITTEN_BY_DREAMER('j')} AND ${JOURNAL_VISIBLE('j')} AND j.dreamer_id IN (${inList}) GROUP BY m`)
     .all(0, 0, 0, ...ids) as { m: string; n: number }[];
   const actionsCreated = db
     .prepare(`SELECT substr(created_at,1,7) AS m, COUNT(*) AS n FROM actions WHERE is_private = 0 AND dreamer_id IN (${inList}) GROUP BY m`)

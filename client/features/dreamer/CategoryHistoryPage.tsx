@@ -220,7 +220,7 @@ function RateNow({ category, latest, onDone }: { category: RatingCategory; lates
     const anyPrivate = priv || (!!text && notePriv);
     create.mutate({ ratings: [{ category, value, isPrivate: priv, ...(text ? { note: text, notePrivate: notePriv || priv } : {}) }] }, {
       onSuccess: () => {
-        const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, `${m.label} saved as private — only you can see it.`);
+        const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, `${m.label} saved as private — only you can see it.`, priv ? undefined : `${m.label} saved: ${value}. Your private note is hidden right now.`);
         toast(msg, kind);
         onDone();
       },
@@ -380,7 +380,7 @@ function EntryRow({ entry, cellTaken }: { entry: RatingEntry; cellTaken: boolean
         title="Delete this entry?"
         body={own
           ? <>Your {m.label} rating of <b>{entry.value}</b> from {fmtDate(entry.occurredAt)}{entry.note ? ' and its note' : ''} will be removed for good.</>
-          : <>This {m.label} value of <b>{entry.value}</b>, recorded in a coaching session on {fmtDate(entry.occurredAt)}{entry.note ? ', and your note on it' : ''} will be removed for good.{entry.isPrivate ? ' It’s private, so nothing changes in your coach’s views.' : ''}</>}
+          : <>This {m.label} value of <b>{entry.value}</b>, recorded in a coaching session on {fmtDate(entry.occurredAt)}{entry.note ? ', and your note on it' : ','} will be removed for good.{entry.isPrivate ? ' It’s private, so nothing changes in your coach’s views.' : ''}</>}
         confirmLabel="Delete"
         danger
         loading={remove.isPending}

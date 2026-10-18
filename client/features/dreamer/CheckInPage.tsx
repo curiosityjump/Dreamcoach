@@ -13,7 +13,7 @@ import { Bar, Button, Card, CategoryChip, LoadingPage, PageHeader, PercentInput,
 import { IconCalendar, IconInfo, IconStar, IconX } from '@/components/icons';
 import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, isRatingCategory, type RatingCategory } from '@shared/care';
 import type { CheckInInput, Dream, LatestRating } from '@shared/types';
-import { fmtDate, fromLocalInputValue, toLocalInputValue } from '@/lib/format';
+import { fmtDate, fromLocalInputValue, plural, toLocalInputValue } from '@/lib/format';
 import { NotePrivateWith, catVars, savedToast } from './CareShared';
 
 interface RatingDraft { value: number | null; note: string; isPrivate: boolean; notePrivate: boolean }
@@ -127,9 +127,14 @@ function CheckInForm({ latest, dreams }: { latest: Partial<Record<RatingCategory
       (input.ratings ?? []).some((r) => r.isPrivate || r.notePrivate) ||
       (input.progress ?? []).some((p) => p.isPrivate || p.notePrivate) ||
       !!input.reflection?.isPrivate;
+    // Every part private (a private rating or update takes its note with it), or only some of them?
+    const allPrivate =
+      (input.ratings ?? []).every((r) => r.isPrivate) &&
+      (input.progress ?? []).every((p) => p.isPrivate) &&
+      (!input.reflection || input.reflection.isPrivate);
     create.mutate(input, {
       onSuccess: () => {
-        const [msg, kind] = savedToast(auth, anyPrivate, 'Check-in saved.', 'Check-in saved — the private parts are only visible to you.');
+        const [msg, kind] = savedToast(auth, anyPrivate, 'Check-in saved.', 'Check-in saved — the private parts are only visible to you.', allPrivate ? undefined : 'Check-in saved — the private parts are hidden right now.');
         toast(msg, kind);
         nav('/home');
       },
@@ -316,7 +321,7 @@ function ProgressCard({ dream, draft, onChange, onRemove, disabled }: {
       <Bar value={draft.value} large label={`${dream.title} progress`} />
       <PercentInput value={draft.value} onChange={(v) => onChange({ value: v })} label={`${dream.title} progress`} disabled={disabled} />
       <div className="row-wrap dci-under">
-        <span className="small tnum"><b>{draft.value}%</b>{diff != null && <span className="muted"> · {diff === 0 ? 'same as before' : `${diff > 0 ? '+' : '−'}${Math.abs(diff)} pts`}</span>}</span>
+        <span className="small tnum"><b>{draft.value}%</b>{diff != null && <span className="muted"> · {diff === 0 ? 'same as before' : `${diff > 0 ? '+' : '−'}${plural(Math.abs(diff), 'pt')}`}</span>}</span>
       </div>
       <TextArea value={draft.note} onChange={(e) => onChange({ note: e.target.value })} placeholder="What moved, or what got in the way? (optional)" aria-label={`${dream.title} note`} rows={2} maxLength={4000} disabled={disabled} data-testid={`checkin-dream-note-${dream.id}`} />
       <div className="row-wrap dc-privacy-row">

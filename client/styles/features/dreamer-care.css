@@ -28,7 +28,7 @@
 /* big value + "/ 10" + delta */
 .dc-cat-value-row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .dc-cat-value { font-family: var(--font-display); font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.02em; color: var(--ink); }
-.dc-cat-of { color: var(--muted-2); font-size: 14px; }
+.dc-cat-of { color: var(--muted); font-size: 14px; }
 .dc-cat-delta { margin-left: 4px; }
 .dc-cat-private { align-self: center; margin-left: 2px; }
 

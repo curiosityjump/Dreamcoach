@@ -100,7 +100,7 @@ function upsertAttachedNote(
     return;
   }
   if (body === undefined) {
-    if (existing && isPrivate !== undefined) db.prepare('UPDATE journal_entries SET is_private = ?, updated_at = ? WHERE id = ?').run(isPrivate ? 1 : 0, now, existing.id);
+    if (existing && isPrivate !== undefined) db.prepare('UPDATE journal_entries SET is_private = ? WHERE id = ?').run(isPrivate ? 1 : 0, existing.id);
     return;
   }
   if (!text) {
@@ -145,13 +145,19 @@ function upsertAttachedNote(
  */
 function detachNote(db: DB, parent: { ratingId: number; category: RatingCategory } | { progressId: number; dreamId: number }, onlyPrivate = false) {
   const p = 'ratingId' in parent ? { col: 'rating_id', id: parent.ratingId, category: parent.category, dreamId: null } : { col: 'progress_id', id: parent.progressId, category: null, dreamId: parent.dreamId };
+  const byDreamer = q.WRITTEN_BY_DREAMER('journal_entries');
   db.prepare(
-    // The dreamer's own words now stand alone, so they read as one of their reflections.
+    // The dreamer's own words now stand alone as one of their reflections, no longer part of the session.
     `UPDATE journal_entries SET ${p.col} = NULL, check_in_id = NULL, category = COALESCE(category, ?), dream_id = COALESCE(dream_id, ?),
-       source = CASE WHEN author_id = (SELECT user_id FROM dreamers WHERE id = journal_entries.dreamer_id) THEN 'self' ELSE source END
+       source = CASE WHEN ${byDreamer} THEN 'self' ELSE source END,
+       session_id = CASE WHEN ${byDreamer} THEN NULL ELSE session_id END
      WHERE ${p.col} = ?${onlyPrivate ? ' AND is_private = 1' : ''}`,
   ).run(p.category, p.dreamId, p.id);
 }
+
+/** A change that only flips privacy flags keeps the row's updated_at, so staff never see a row "touched" by it. */
+const privacyOnly = (patch: object): number =>
+  Object.entries(patch).every(([k, v]) => v === undefined || k === 'isPrivate' || k === 'notePrivate') ? 1 : 0;
 
 /* ---------- Self check-ins ---------- */
 
@@ -246,10 +252,11 @@ export function updateRating(
   assertCanShareBack(existing, patch, () => !!db.prepare('SELECT 1 FROM ratings WHERE session_id = ? AND category = ? AND is_private = 0 AND id <> ?').get(existing.sessionId, existing.category, id));
   const now = nowIso();
   db.transaction(() => {
-    db.prepare('UPDATE ratings SET value = COALESCE(?, value), is_private = COALESCE(?, is_private), occurred_at = COALESCE(?, occurred_at), updated_at = ? WHERE id = ?').run(
+    db.prepare('UPDATE ratings SET value = COALESCE(?, value), is_private = COALESCE(?, is_private), occurred_at = COALESCE(?, occurred_at), updated_at = CASE WHEN ? THEN updated_at ELSE ? END WHERE id = ?').run(
       patch.value !== undefined ? clampRating(patch.value) : null,
       patch.isPrivate === undefined ? null : patch.isPrivate ? 1 : 0,
       scope.isOwner && existing.source === 'self' ? occurredAt : null,
+      privacyOnly({ ...patch, note: undefined }),
       now,
       id,
     );
@@ -300,10 +307,11 @@ export function updateProgress(
   assertCanShareBack(existing, patch, () => !!db.prepare('SELECT 1 FROM dream_progress WHERE session_id = ? AND dream_id = ? AND is_private = 0 AND id <> ?').get(existing.sessionId, existing.dreamId, id));
   const now = nowIso();
   db.transaction(() => {
-    db.prepare('UPDATE dream_progress SET value = COALESCE(?, value), is_private = COALESCE(?, is_private), occurred_at = COALESCE(?, occurred_at), updated_at = ? WHERE id = ?').run(
+    db.prepare('UPDATE dream_progress SET value = COALESCE(?, value), is_private = COALESCE(?, is_private), occurred_at = COALESCE(?, occurred_at), updated_at = CASE WHEN ? THEN updated_at ELSE ? END WHERE id = ?').run(
       patch.value !== undefined ? clampProgress(patch.value) : null,
       patch.isPrivate === undefined ? null : patch.isPrivate ? 1 : 0,
       scope.isOwner && existing.source === 'self' ? occurredAt : null,
+      privacyOnly({ ...patch, note: undefined }),
       now,
       id,
     );
@@ -379,7 +387,7 @@ export function updateJournal(
   db.prepare(
     `UPDATE journal_entries SET body = COALESCE(?, body), is_private = COALESCE(?, is_private),
        dream_id = CASE WHEN ? = 1 THEN ? ELSE dream_id END, category = CASE WHEN ? = 1 THEN ? ELSE category END,
-       occurred_at = COALESCE(?, occurred_at), updated_at = ? WHERE id = ?`,
+       occurred_at = COALESCE(?, occurred_at), updated_at = CASE WHEN ? THEN updated_at ELSE ? END WHERE id = ?`,
   ).run(
     body ?? null,
     patch.isPrivate === undefined ? null : patch.isPrivate ? 1 : 0,
@@ -388,6 +396,7 @@ export function updateJournal(
     patch.category !== undefined ? 1 : 0,
     patch.category ?? null,
     scope.isOwner ? occurredAt : null,
+    privacyOnly(patch),
     nowIso(),
     id,
   );
@@ -448,7 +457,7 @@ export function updateAction(
   db.prepare(
     `UPDATE actions SET title = COALESCE(?, title), details = COALESCE(?, details),
        dream_id = CASE WHEN ? = 1 THEN ? ELSE dream_id END, category = CASE WHEN ? = 1 THEN ? ELSE category END,
-       is_private = COALESCE(?, is_private), status = ?, completed_at = ?, archived_at = ?, updated_at = ? WHERE id = ?`,
+       is_private = COALESCE(?, is_private), status = ?, completed_at = ?, archived_at = ?, updated_at = CASE WHEN ? THEN updated_at ELSE ? END WHERE id = ?`,
   ).run(
     title ?? null,
     patch.details?.trim() ?? null,
@@ -460,6 +469,7 @@ export function updateAction(
     status,
     completedAt,
     archivedAt,
+    privacyOnly(patch),
     now,
     id,
   );
@@ -542,14 +552,16 @@ export function deleteSession(db: DB, scope: Scope, sessionId: number): void {
   if (!s) throw new HttpError(404, 'Session not found.', 'not_found');
   if (!scope.isCoachFor) throw new HttpError(403, 'Not allowed.', 'forbidden');
   if (s.status !== 'in_progress') throw new HttpError(400, 'Completed sessions are part of the record and cannot be deleted.', 'invalid');
-  // Emptiness is judged on what the coach can see (shared rows); the response never reveals private rows.
+  // Emptiness is judged on what the coach can see in the session (shared rows); the response never reveals
+  // private rows. Session content is its values, notes and focus, the actions chosen in it and the
+  // reflections staff wrote in it; anything of the dreamer's survives the deletion, detached from it.
   const hasContent =
     Object.keys(s.ratings).length > 0 ||
     Object.keys(s.progress).length > 0 ||
     s.notes.trim() !== '' ||
     s.focus.trim() !== '' ||
     (db.prepare('SELECT 1 FROM actions WHERE session_id = ? AND is_private = 0 LIMIT 1').get(sessionId) != null) ||
-    (db.prepare(`SELECT 1 FROM journal_entries j WHERE j.session_id = ? AND ${q.JOURNAL_VISIBLE('j')} LIMIT 1`).get(sessionId, 0, 0, 0) != null);
+    (db.prepare(`SELECT 1 FROM journal_entries j WHERE j.session_id = ? AND NOT ${q.WRITTEN_BY_DREAMER('j')} AND ${q.JOURNAL_VISIBLE('j')} LIMIT 1`).get(sessionId, 0, 0, 0) != null);
   if (hasContent) throw new HttpError(400, 'This session already has entries. Complete it instead of deleting it.', 'invalid');
   db.transaction(() => {
     // Anything the dreamer kept private survives as part of their own history (no longer tied to the session).

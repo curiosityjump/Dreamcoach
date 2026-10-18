@@ -16,7 +16,9 @@ import { SessionGridView } from '@/features/coach/SessionGridView';
 import { CARE_CATEGORIES, CATEGORY_META, RATING_CATEGORIES, type RatingCategory } from '@shared/care';
 import type { ActionItem, CoachingSession, Dream } from '@shared/types';
 import { firstName, fmtDateLong, plural } from '@/lib/format';
+import { textShade } from '@/lib/color';
 import { PrivateMark } from './HomePage';
+import { useTouch } from './CareShared';
 
 type DreamRef = Pick<Dream, 'id' | 'title' | 'slot' | 'slotLabel'>;
 
@@ -57,6 +59,7 @@ export function MySessionsPage() {
 
 function SessionsIndex({ sessions, dreams, coachName, openSessionId }: { sessions: CoachingSession[]; dreams: DreamRef[]; coachName: string | null; openSessionId: number | null }) {
   const nav = useNavigate();
+  const touch = useTouch();
   const grid = useGrid('me');
   const sorted = useMemo(() => [...sessions].sort(newestFirst), [sessions]);
   const who = coachName ? firstName(coachName) : 'your coach';
@@ -86,7 +89,7 @@ function SessionsIndex({ sessions, dreams, coachName, openSessionId }: { session
       ) : (
         <div className="stack dh-sessions-stack">
           <Card data-testid="sessions-grid">
-            <CardHead title="Months side by side" sub="CARE ratings, dream progress, commitment and satisfaction as recorded in each session. Tap a session to open it." />
+            <CardHead title="Months side by side" sub={`CARE ratings, dream progress, commitment and satisfaction as recorded in each session. ${touch ? 'Tap' : 'Click'} a session to open it.`} />
             {grid.isLoading ? (
               <div className="stack" aria-busy><Skeleton h={28} /><Skeleton h={28} /><Skeleton h={28} w="90%" /></div>
             ) : grid.error || !grid.data ? (
@@ -153,7 +156,7 @@ function SessionRow({ session: s, dreams }: { session: CoachingSession; dreams: 
 function ValuePill({ category, value, delta, isPrivate }: { category: RatingCategory; value: number | undefined; delta?: number | null; isPrivate?: boolean }) {
   const m = CATEGORY_META[category];
   return (
-    <span className="dh-pill" style={{ '--dh-color': m.color, '--dh-tint': m.tint } as CSSProperties} title={`${m.label}${value != null ? `: ${value}${isPrivate ? ' (private)' : ''}` : ' (not recorded)'}`}>
+    <span className="dh-pill" style={{ '--dh-color': m.color, '--dh-tint': m.tint, '--dh-ink': textShade(m.color) } as CSSProperties} title={`${m.label}${value != null ? `: ${value}${isPrivate ? ' (private)' : ''}` : ' (not recorded)'}`}>
       {isPrivate && <><IconLock className="dh-lock" /><span className="sr-only">Private</span></>}
       <span className="dh-pill-k">{m.short}</span>
       <span className="dh-pill-v tnum">{value ?? '–'}</span>
@@ -189,7 +192,8 @@ function SessionDetail({ sid, sessions, dreams, programName }: { sid: number; se
   }
 
   const open = session.status === 'in_progress';
-  const sessionActions: ActionItem[] = (actions.data ?? []).filter((a) => a.sessionId === session.id);
+  // In the order they were chosen during the session, as the coach's workspace lists them.
+  const sessionActions: ActionItem[] = (actions.data ?? []).filter((a) => a.sessionId === session.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const wheelNow = Object.fromEntries(CARE_CATEGORIES.map((c) => [c, session.ratings[c] ?? null])) as WheelValues;
   const wheelPrev = previous ? (Object.fromEntries(CARE_CATEGORIES.map((c) => [c, previous.ratings[c] ?? null])) as WheelValues) : null;
   const anyRating = RATING_CATEGORIES.some((c) => session.ratings[c] != null);

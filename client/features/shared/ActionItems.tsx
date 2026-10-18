@@ -6,7 +6,7 @@
  * filters by `isPrivate`. `isPrivate` can only be true on the dreamer's own rows
  * while their session is unlocked; staff mode shows no privacy UI or wording at all.
  */
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { Link } from 'react-router';
 import { CARE_CATEGORIES, CATEGORY_META, isCareCategory, type CareCategory } from '@shared/care';
 import type { ActionItem, ActionStatus, Dream } from '@shared/types';
@@ -40,6 +40,10 @@ export interface ActionListProps {
   compact?: boolean;
   emptyTitle?: string;
   emptyBody?: string;
+  /** With filter 'all': which group an action is listed under (default: its status). */
+  groupOf?: (action: ActionItem) => ActionStatus;
+  /** With filter 'all': group headings other than the status names. */
+  groupLabels?: Partial<Record<ActionStatus, string>>;
 }
 
 export interface ActionComposerProps {
@@ -54,6 +58,17 @@ export interface ActionComposerProps {
   onDone?: (action: ActionItem | null) => void;
   onCancel?: () => void;
   autoFocus?: boolean;
+  /** Told whenever the typed title changes, so a page can tell when an action is typed but not yet added. */
+  onDraftChange?: (title: string) => void;
+  /** Lets a page add or discard what's typed (e.g. before it completes a session). */
+  ref?: Ref<ActionComposerHandle>;
+}
+
+export interface ActionComposerHandle {
+  /** Adds what's typed; resolves false if the save failed (the text and the error stay in the form). */
+  submit: () => Promise<boolean>;
+  /** Clears the form. */
+  discard: () => void;
 }
 
 /* ---------- Shared helpers ---------- */
@@ -140,7 +155,7 @@ function LinkSelects({ dreams, labels, dreamId, category, onDreamId, onCategory,
 /* ---------- Composer ---------- */
 
 /** The "Add an action" form (title, optional details, dream/category link, privacy in dreamer mode). */
-export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDreamId, defaultCategory, onDone, onCancel, autoFocus }: ActionComposerProps) {
+export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDreamId, defaultCategory, onDone, onCancel, autoFocus, onDraftChange, ref }: ActionComposerProps) {
   const { auth } = useAuth();
   const { toast } = useToast();
   const create = useCreateAction(dreamerRef);
@@ -158,9 +173,17 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
   const [error, setError] = useState<string | null>(null);
   // Saves still on their way: several can be, since the next action can be typed straight away.
   const [saving, setSaving] = useState(0);
+  // In a session the new row appears right under the composer, so a toast (over the next field the coach
+  // types into) would only get in the way; screen readers hear it from here instead.
+  const quiet = mode === 'staff' && sessionId != null;
+  const [announce, setAnnounce] = useState('');
 
   const trimmed = title.trim();
   const canSubmit = trimmed.length > 0;
+
+  const onDraftRef = useRef(onDraftChange);
+  onDraftRef.current = onDraftChange;
+  useEffect(() => { onDraftRef.current?.(title); }, [title]);
 
   const fill = (d: { title: string; details: string; showDetails: boolean; dreamId: number | null; category: CareCategory | null; isPrivate: boolean }) => {
     setTitle(d.title);
@@ -171,16 +194,18 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
     setIsPrivate(d.isPrivate);
   };
 
-  const submit = (e?: FormEvent) => {
-    e?.preventDefault();
-    if (!canSubmit) return;
+  const clear = () => fill({ title: '', details: '', showDetails: false, dreamId: defaultDreamId ?? null, category: defaultCategory ?? null, isPrivate: false });
+
+  /** Saves what's typed; resolves whether it went through. */
+  const save = (): Promise<boolean> => {
+    if (!canSubmit) return Promise.resolve(true);
     // The form clears at once, so whatever is typed next starts the next action instead of being lost
     // while this one saves. If the save fails, the text comes back unless something new is there by then.
     const draft = { title, details, showDetails, dreamId, category, isPrivate };
     setError(null);
-    fill({ title: '', details: '', showDetails: false, dreamId: defaultDreamId ?? null, category: defaultCategory ?? null, isPrivate: false });
+    clear();
     setSaving((n) => n + 1);
-    create
+    return create
       .mutateAsync({
         title: trimmed,
         details: details.trim() || undefined,
@@ -192,18 +217,29 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
       .then(
         (action) => {
           if (mode === 'dreamer' && isPrivate) toast(auth?.privateUnlocked ? 'Added as a private action — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
+          else if (quiet) setAnnounce(`Added “${trimmed}”.`);
           else toast('Action added.');
           onDone?.(action);
+          return true;
         },
         (err) => {
           setError(errorMessage(err));
           if (!titleRef.current?.value) fill(draft);
+          return false;
         },
       )
       .finally(() => setSaving((n) => n - 1));
+  };
+
+  const submit = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!canSubmit) return;
+    void save();
     // Ready for the next one (after a click on Add, too).
     titleRef.current?.focus();
   };
+
+  useImperativeHandle(ref, () => ({ submit: save, discard: () => { setError(null); clear(); } }));
 
   const onDetailsKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
@@ -264,6 +300,7 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
       {error && (
         <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>
       )}
+      {quiet && <span className="sr-only" role="status">{announce}</span>}
     </form>
   );
 }
@@ -271,18 +308,43 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
 /* ---------- List ---------- */
 
 /** Full-featured list: complete/reopen, edit (title, details, dream, category), set aside/restore, privacy (dreamer mode), delete (dreamer mode). */
-export function ActionList({ dreamerRef, actions, dreams, mode, sessionId, filter = 'active', showAdd, compact, emptyTitle, emptyBody }: ActionListProps) {
+export function ActionList({ dreamerRef, actions, dreams, mode, sessionId, filter = 'active', showAdd, compact, emptyTitle, emptyBody, groupOf, groupLabels }: ActionListProps) {
   const sorted = useMemo(() => sortDreams(dreams), [dreams]);
   const labels = useDreamLabels(dreamerRef, dreams);
 
   const visible = filter === 'all' ? actions : actions.filter((a) => a.status === filter);
+  const groupFor = groupOf ?? ((a: ActionItem) => a.status);
   const groups: { status: ActionStatus; items: ActionItem[] }[] =
     filter === 'all'
-      ? (['active', 'completed', 'archived'] as ActionStatus[]).map((status) => ({ status, items: visible.filter((a) => a.status === status) })).filter((g) => g.items.length > 0)
+      ? (['active', 'completed', 'archived'] as ActionStatus[]).map((status) => ({ status, items: visible.filter((a) => groupFor(a) === status) })).filter((g) => g.items.length > 0)
       : [{ status: filter, items: visible }];
 
+  // Completing, setting aside or restoring can move a row to another group (or off this list), which
+  // remounts it and drops the keyboard focus. Once the list has caught up, put the focus back on the same
+  // control of that row, or of the row that took its place.
+  const listRef = useRef<HTMLDivElement>(null);
+  const refocus = useRef<{ id: number; control: RowControl; index: number; at: number } | null>(null);
+  const onStatusChanged = useCallback((id: number, control: RowControl) => {
+    const rows = [...(listRef.current?.querySelectorAll<HTMLElement>('[data-testid="action-item"]') ?? [])];
+    refocus.current = { id, control, index: rows.findIndex((r) => r.dataset.actionId === String(id)), at: Date.now() };
+  }, []);
+  useEffect(() => {
+    const want = refocus.current;
+    const root = listRef.current;
+    if (!want || !root) return;
+    if (Date.now() - want.at > 5000) { refocus.current = null; return; }
+    const active = document.activeElement;
+    const row = root.querySelector<HTMLElement>(`[data-action-id="${want.id}"]`);
+    // Still on the row (it hasn't moved yet), or the person has moved on: nothing to do.
+    if (active && active !== document.body) { if (!row?.contains(active)) refocus.current = null; return; }
+    refocus.current = null;
+    const rows = [...root.querySelectorAll<HTMLElement>('[data-testid="action-item"]')];
+    const target = row ?? rows[Math.min(Math.max(want.index, 0), rows.length - 1)];
+    target?.querySelector<HTMLElement>(want.control === 'check' ? '[data-testid="action-check"] button' : '[data-testid="action-menu"]')?.focus();
+  }, [actions]);
+
   return (
-    <div className={`da-list${compact ? ' da-compact' : ''}`} data-testid="action-list" data-mode={mode}>
+    <div className={`da-list${compact ? ' da-compact' : ''}`} data-testid="action-list" data-mode={mode} ref={listRef}>
       {showAdd && (
         <div className="da-list-add">
           <ActionComposer dreamerRef={dreamerRef} dreams={sorted} mode={mode} sessionId={sessionId} />
@@ -296,11 +358,11 @@ export function ActionList({ dreamerRef, actions, dreams, mode, sessionId, filte
         groups.map((g) => (
           <section key={g.status} className="da-group" data-testid={`action-group-${g.status}`}>
             {filter === 'all' && (
-              <h4 className="da-group-head">{STATUS_LABEL[g.status]} <span className="da-count tnum">{g.items.length}</span></h4>
+              <h4 className="da-group-head">{groupLabels?.[g.status] ?? STATUS_LABEL[g.status]} <span className="da-count tnum">{g.items.length}</span></h4>
             )}
             <ul className="da-rows">
               {g.items.map((a) => (
-                <ActionRow key={a.id} action={a} dreamerRef={dreamerRef} mode={mode} dreams={sorted} labels={labels} compact={!!compact} />
+                <ActionRow key={a.id} action={a} dreamerRef={dreamerRef} mode={mode} dreams={sorted} labels={labels} compact={!!compact} onStatusChanged={onStatusChanged} />
               ))}
             </ul>
           </section>
@@ -312,13 +374,17 @@ export function ActionList({ dreamerRef, actions, dreams, mode, sessionId, filte
 
 /* ---------- Row ---------- */
 
-function ActionRow({ action, dreamerRef, mode, dreams, labels, compact }: {
+type RowControl = 'check' | 'menu';
+
+function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatusChanged }: {
   action: ActionItem;
   dreamerRef: DreamerRef;
   mode: ActionMode;
   dreams: DreamRef[];
   labels: Map<number, DreamLabel>;
   compact: boolean;
+  /** A status change went through (from the check or the menu), so the row may move. */
+  onStatusChanged: (id: number, control: RowControl) => void;
 }) {
   const { auth } = useAuth();
   const { toast } = useToast();
@@ -353,12 +419,14 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact }: {
       onError: (e) => toast(errorMessage(e), 'error'),
     });
 
-  const onCheck = (checked: boolean) => {
-    if (checked) patch({ status: 'completed' }, 'Done — nicely.');
-    else patch({ status: 'active' }, isDreamer ? 'Reopened — back on your list.' : 'Reopened.');
+  const setStatus = (status: ActionStatus, message: string, kind: 'success' | 'info', control: RowControl) =>
+    patch({ status }, message, kind, () => onStatusChanged(action.id, control));
+  const onCheck = (checked: boolean, control: RowControl = 'check') => {
+    if (checked) setStatus('completed', 'Done — nicely.', 'success', control);
+    else setStatus('active', isDreamer ? 'Reopened — back on your list.' : 'Reopened.', 'success', control);
   };
-  const setAside = () => patch({ status: 'archived' }, isDreamer ? 'Set aside — you can bring it back any time.' : 'Set aside.', 'info');
-  const restore = () => patch({ status: 'active' }, isDreamer ? 'Back on your list.' : 'Restored.');
+  const setAside = () => setStatus('archived', isDreamer ? 'Set aside — you can bring it back any time.' : 'Set aside.', 'info', 'menu');
+  const restore = () => setStatus('active', isDreamer ? 'Back on your list.' : 'Restored.', 'success', 'menu');
   const makePrivate = () => patch({ isPrivate: true }, auth?.privateUnlocked ? 'Now private — only you can see this.' : PRIVATE_HIDDEN_MSG, 'private');
   const share = () => patch({ isPrivate: false }, 'Shared with your coach.');
   const confirmRemove = () =>
@@ -382,7 +450,7 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact }: {
       aria-busy={busy || undefined}
     >
       <div className={`da-check${busy ? ' is-busy' : ''}`} data-testid="action-check">
-        <Check checked={shown.status === 'completed'} onChange={onCheck} label={shown.status === 'completed' ? `Reopen “${shown.title}”` : `Mark “${shown.title}” complete`} />
+        <Check checked={shown.status === 'completed'} onChange={(v) => onCheck(v)} label={shown.status === 'completed' ? `Reopen “${shown.title}”` : `Mark “${shown.title}” complete`} />
       </div>
 
       <div className="da-body">
@@ -439,7 +507,7 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact }: {
           >
             <button type="button" className="menu-item" onClick={() => setEditing(true)} data-testid="action-edit"><IconEdit /> Edit</button>
             {shown.status === 'active' && <button type="button" className="menu-item" onClick={setAside} data-testid="action-archive"><IconArchive /> Set aside</button>}
-            {shown.status === 'completed' && <button type="button" className="menu-item" onClick={() => onCheck(false)} data-testid="action-reopen"><IconRotate /> Reopen</button>}
+            {shown.status === 'completed' && <button type="button" className="menu-item" onClick={() => onCheck(false, 'menu')} data-testid="action-reopen"><IconRotate /> Reopen</button>}
             {shown.status === 'archived' && <button type="button" className="menu-item" onClick={restore} data-testid="action-restore"><IconRotate /> Restore</button>}
             {isDreamer && (shown.isPrivate
               ? <button type="button" className="menu-item" onClick={share} data-testid="action-share"><IconUnlock /> Share with coach</button>

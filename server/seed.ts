@@ -53,6 +53,11 @@ function pickFresh<T>(used: Set<T>, ...banks: readonly (readonly T[])[]): T {
 }
 
 /* ---------- dates ---------- */
+// The demo program runs in US Eastern time (America/New_York, DST-aware): sessions fall in its working hours,
+// check-ins and reflections in its waking hours, and a text that says "tonight" in its evening. Times are stored
+// as UTC instants, so viewers elsewhere see the same moments in their own local time. Months stay UTC months,
+// like the trend charts that bucket by them.
+const DEMO_TZ = 'America/New_York';
 const NOW = new Date();
 const MINUTE = 60000;
 const HOUR = 3600000;
@@ -60,21 +65,40 @@ const DAY = 86400000;
 function monthStartUTC(monthsAgo: number): Date {
   return new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - monthsAgo, 1));
 }
-function at(d: Date, hour = 15, minute = 0): string {
-  const x = new Date(d.getTime());
-  x.setUTCHours(hour, minute, 0, 0);
-  return x.toISOString();
+const zoneClock = new Intl.DateTimeFormat('en-US', { timeZone: DEMO_TZ, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' });
+const zoneOffsets = new Map<number, number>(); // by UTC hour: the zone's offsets change only on the hour
+/** The demo zone's wall clock at instant `t`, as a timestamp whose UTC fields read that wall time. */
+function wall(t: number): number {
+  const h = Math.floor(t / HOUR);
+  let offset = zoneOffsets.get(h);
+  if (offset == null) {
+    const p = Object.fromEntries(zoneClock.formatToParts(h * HOUR).map((x) => [x.type, Number(x.value)]));
+    offset = Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!) - h * HOUR;
+    zoneOffsets.set(h, offset);
+  }
+  return t + offset;
 }
-/** When something may be written: UTC weekdays (0 = Sunday) and hours [from, to). Waking hours by default. */
+/** The instant at which the demo zone's wall clock reads `w` (a wall() value). */
+function unwall(w: number): number {
+  const guess = w - (wall(w) - w);
+  return w - (wall(guess) - guess);
+}
+/** `hour:minute` in the demo zone on the calendar date of `d` (its UTC date, as isoDate() writes it). */
+function at(d: Date, hour = 15, minute = 0): string {
+  return new Date(unwall(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour, minute))).toISOString();
+}
+/** The demo-zone calendar date of instant `t`, for at(). */
+const zoneDate = (t: number) => new Date(Math.floor(wall(t) / DAY) * DAY);
+/** When something may be written: demo-zone weekdays (0 = Sunday) and hours [from, to). Waking hours by default. */
 interface Hours { days?: number[]; hours?: [number, number] }
 /** The stretches of [from, to] that fall on an allowed day and hour. */
 function slots(from: number, to: number, when: Hours = {}): [number, number][] {
   const [h0, h1] = when.hours ?? [8, 22];
   const out: [number, number][] = [];
-  for (let day = Date.parse(at(new Date(from), 0)); day <= to; day += DAY) {
+  for (let day = zoneDate(from).getTime(); day <= wall(to); day += DAY) {
     if (when.days && !when.days.includes(new Date(day).getUTCDay())) continue;
-    const a = Math.max(from, day + h0 * HOUR);
-    const b = Math.min(to, day + h1 * HOUR);
+    const a = Math.max(from, unwall(day + h0 * HOUR));
+    const b = Math.min(to, unwall(day + h1 * HOUR));
     if (a <= b) out.push([a, b]);
   }
   return out;
@@ -542,6 +566,8 @@ const OPENERS: Record<Mood, string[]> = {
 };
 // Once a mood's openers are used up, the nearest mood lends one before anything repeats.
 const NEAR_MOOD: Record<Mood, Mood> = { first: 'steady', up: 'steady', steady: 'up', down: 'tired', tired: 'down' };
+/** Openers that describe the month itself as uneventful. */
+const QUIET_MONTH = /quieter month|small, steady steps|steady month/;
 const CARE_MOVES: Record<CareCategory, Record<'upHigh' | 'up' | 'down' | 'downLow', string[]>> = {
   energy: {
     upHigh: ['sleeping better, and the morning routine is back.', 'more rest and regular movement are paying off.', 'early nights most of the month; feeling rested.'],
@@ -584,7 +610,7 @@ const DREAM_FOCUS = {
   done: ['celebrate, then decide what comes next'],
 };
 
-// Texts that name a day or a time of day are only written then (UTC; 0 = Sunday).
+// Texts that name a day or a time of day are only written then (demo-zone time; 0 = Sunday).
 const WEEKDAYS = [1, 2, 3, 4, 5];
 const TEXT_TIMES: [RegExp, Hours][] = [
   [/quiet Sunday/, { days: [0], hours: [14, 22] }],
@@ -600,12 +626,13 @@ const textTime = (text: string): Hours | undefined => TEXT_TIMES.find(([re]) => 
 const fitsTime = (text: string, t: number) => { const w = textTime(text); return !w || slots(t, t, w).length > 0; };
 
 // How each dream horizon moves from session to session: nearer dreams most months, the 3–5 year and lifetime
-// dreams in small, occasional steps. Only the nearer-term dreams take the odd honest dip.
+// dreams in small, occasional steps (at most `step` points at a time, even after a few quiet months). Only the
+// nearer-term dreams take the odd honest dip.
 const DREAM_PACE = [
-  { move: 0.85, wobble: 3, dip: 0.08 }, // 6–12 month dream
-  { move: 0.9, wobble: 3, dip: 0 }, // program dream
-  { move: 0.55, wobble: 2, dip: 0.05 }, // 3–5 year dream
-  { move: 0.35, wobble: 1, dip: 0 }, // lifetime dream
+  { move: 0.85, wobble: 3, dip: 0.08, step: Infinity }, // 6–12 month dream
+  { move: 0.9, wobble: 3, dip: 0, step: Infinity }, // program dream
+  { move: 0.55, wobble: 2, dip: 0.05, step: 6 }, // 3–5 year dream
+  { move: 0.35, wobble: 1, dip: 0, step: 4 }, // lifetime dream
 ];
 
 /** A monthly one-on-one, planned before anything is written so the activity between sessions can lead into the next. */
@@ -621,21 +648,31 @@ interface PlannedSession {
 // Guaranteed privacy examples for the main demo dreamers — a private action, a private reflection, a private
 // Alignment rating with a note, and a shared Energy rating whose note is private. They fall in the last ten days,
 // after the latest session and a day or more clear of any, so they are easy to find and “the session” they
-// mention has already happened.
-const PRIVACY_EXAMPLES: Record<string, { action: string; actionDetails: string; reflection: string; alignmentNote: string; energyNote: string }> = {
+// mention has already happened. `rulesOut` lists the bank texts that would repeat or contradict them; that dreamer
+// never gets those.
+interface PrivacyExample { action: string; actionDetails: string; reflection: string; alignmentNote: string; energyNote: string; rulesOut: string[] }
+const PRIVACY_EXAMPLES: Record<string, PrivacyExample> = {
   'alicia@dreamcoach.demo': {
     action: 'Ask HR about tuition reimbursement before I tell anyone',
     actionDetails: 'If the answer is no, I want time to work out the next step on my own.',
     reflection: 'Mom asked again when I’ll “finally” finish my degree. I laughed it off, but it stung. I want to finish it for me, not to end that conversation.',
     alignmentNote: 'Picked up two extra weekend shifts for the money, and the garden plan slid again. That isn’t a trade I want to keep making.',
     energyNote: 'Long run on Saturday felt good. What I didn’t say in the session: I’m only sleeping five hours on shift weeks.',
+    rulesOut: ['Clear on what matters, and part of that is deciding to leave my job in the spring. Nobody knows yet.'],
   },
   'darnell@dreamcoach.demo': {
     action: 'Book the physical I keep pushing back',
     actionDetails: 'Haven’t told Keisha that the pharmacy machine read my blood pressure high.',
     reflection: 'Some nights I wonder if the mentoring program is me trying to give those kids what nobody gave me. Maybe that’s a fine reason. I just want to be honest about it.',
     alignmentNote: 'Said yes to the church board because I couldn’t say no to Pastor James. It takes the evenings I promised the boys.',
-    energyNote: 'Morning walks are holding. Not ready to say this out loud yet: the new blood-pressure pills leave me foggy until noon.',
+    energyNote: 'Morning walks are holding. Not ready to say this out loud yet: I get winded on the stairs at Cedar Court, and it scares me a little.',
+    rulesOut: [
+      'Book a check-up — it’s been three years',
+      'Doctor’s appointment next week. Trying not to spiral.',
+      'Sometimes I wonder if I picked the safe dreams so I couldn’t fail at the big ones.',
+      'Running on empty, and part of it is the medication change. Not ready to share that yet.',
+      'Feeling strong, and I know why: I finally told my doctor what’s been going on. That stays with me for now.',
+    ],
   },
   'grace@dreamcoach.demo': {
     action: 'Update my résumé for the People Ops role at Fernhill Collective',
@@ -643,8 +680,18 @@ const PRIVACY_EXAMPLES: Record<string, { action: string; actionDetails: string; 
     reflection: 'Got passed over for the HR business partner role and smiled through the team announcement. I’m not fine about it yet. Writing it here so I can be honest somewhere.',
     alignmentNote: 'Spent the week defending a leave policy I don’t believe in. Repeating the company line is costing me something.',
     energyNote: 'Planning the next dinner gave me a lift this week. Also: I started seeing a therapist on Thursdays, and that’s mine for now.',
+    rulesOut: [
+      'Make the therapy appointment I keep putting off',
+      'Calmer at home, but we’ve started seeing a counselor together, and that’s ours for now.',
+      'Growing a little. Keeping this between me and the page: I’m not sure I want the promotion.',
+      'My manager wants me for the new role. Exciting, but I haven’t told my family, because it means longer hours.',
+    ],
   },
 };
+const PRIVATE_BANKS: readonly (readonly string[])[] = [PRIVATE_ACTIONS, REFLECTIONS_PRIVATE, ...Object.values(PRIVATE_NOTES).flatMap((n) => [n.low, n.mid, n.high])];
+for (const { rulesOut } of Object.values(PRIVACY_EXAMPLES)) {
+  for (const t of rulesOut) if (!PRIVATE_BANKS.some((bank) => bank.includes(t))) throw new Error(`rulesOut text is in no bank: ${t}`);
+}
 
 /* ---------- insert helpers ---------- */
 /** Runs an INSERT whose first parameter is the row id with a fresh random id, and returns that id. */
@@ -746,15 +793,16 @@ export function resetAndSeed(db: DB): SeedSummary {
       const planSession = (m: number, upcoming: boolean): PlannedSession => {
         const prev = plan[plan.length - 1];
         const monthStart = monthStartUTC(m);
-        // session day: 3rd–20th, starting 14:00–19:45 for 15–30 minutes, clear of the coach's other sessions
-        let day: number, start: number, end: number;
+        // session day: a weekday from the 3rd to the 20th, starting 9:00–15:45 Eastern for 15–30 minutes, clear of
+        // the coach's other sessions
+        let date: number, start: number, end: number;
         do {
-          day = 3 + Math.floor(rand() * 17);
-          start = Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), day, 14 + Math.floor(rand() * 6), pick([0, 15, 30, 45]));
+          date = Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), 3 + Math.floor(rand() * 17));
+          start = unwall(date + (9 + Math.floor(rand() * 7)) * HOUR + pick([0, 15, 30, 45]) * MINUTE);
           end = start + (15 + Math.floor(rand() * 15)) * 60000;
-        } while (calendar.some(([a, b]) => start < b + 15 * 60000 && a < end + 15 * 60000));
+        } while (!WEEKDAYS.includes(new Date(date).getUTCDay()) || calendar.some(([a, b]) => start < b + 15 * 60000 && a < end + 15 * 60000));
         // in the current month only if that day has already passed
-        const held = !upcoming && Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), day) <= NOW.getTime() - DAY;
+        const held = !upcoming && date <= NOW.getTime() - DAY;
         if (held) calendar.push([start, end]);
         const progressT = Math.min(1, (spec.joinedMonthsAgo - m) / Math.max(1, spec.joinedMonthsAgo)); // 0..1
 
@@ -789,7 +837,7 @@ export function resetAndSeed(db: DB): SeedSummary {
           let v: number;
           if (was == null) v = d.start;
           else if (!dipped && chance(pace.dip)) v = was - (2 + Math.floor(rand() * 3));
-          else if (chance(pace.move)) v = Math.max(was, Math.round(d.start + (d.end - d.start) * progressT + jitter(pace.wobble)));
+          else if (chance(pace.move)) v = Math.max(was, Math.min(was + pace.step, Math.round(d.start + (d.end - d.start) * progressT + jitter(pace.wobble))));
           else v = was;
           if (d.end >= 100 && progressT >= 0.85) v = 100;
           return clamp(v, 0, 100);
@@ -817,7 +865,8 @@ export function resetAndSeed(db: DB): SeedSummary {
       const dreamActionIdx = spec.dreams.map(() => 0);
       const openActions: { id: number; createdAt: string; dream: number | null }[] = [];
       const stepsDone: { dream: number; at: number }[] = []; // completed dream steps, so the focus never asks for a first step twice
-      const used = new Set<string>(); // texts and titles this dreamer already has
+      const example = PRIVACY_EXAMPLES[spec.email];
+      const used = new Set<string>(example?.rulesOut); // texts and titles this dreamer already has, or must not get
 
       for (let k = 0; k < plan.length && plan[k]!.held; k++) {
         const p = plan[k]!;
@@ -847,9 +896,12 @@ export function resetAndSeed(db: DB): SeedSummary {
 
         // Coach notes: an opener that fits the session, the CARE moves, and a dream achieved or the dream that moved most.
         const achieved = prev ? p.progress.findIndex((v, i) => v >= 100 && prev.progress[i]! < 100) : -1;
+        const moved = prev ? p.progress.map((v, i) => ({ i, v, by: v - prev.progress[i]! })).filter((d) => d.i !== achieved).sort((a, b) => b.by - a.by)[0] : undefined;
         const careShift = prev ? CARE_CATEGORIES.reduce((n, c) => n + p.ratings[c] - prev.ratings[c], 0) / CARE_CATEGORIES.length : 0;
         const mood: Mood = !prev ? 'first' : achieved >= 0 ? 'up' : p.ratings.energy <= 4 ? 'tired' : careShift >= 0.75 ? 'up' : careShift <= -0.75 ? 'down' : 'steady';
-        const lines: string[] = [pickFresh(used, OPENERS[mood], OPENERS[NEAR_MOOD[mood]])];
+        // A month in which a dream took a big step is never called a quiet one.
+        const openers = (m: Mood) => OPENERS[m].filter((o) => !((moved?.by ?? 0) >= 8 && QUIET_MONTH.test(o)));
+        const lines: string[] = [pickFresh(used, openers(mood), openers(NEAR_MOOD[mood]))];
         for (const cat of CARE_CATEGORIES) {
           const v = p.ratings[cat];
           const was = prev?.ratings[cat];
@@ -858,10 +910,7 @@ export function resetAndSeed(db: DB): SeedSummary {
           lines.push(`${cat[0]!.toUpperCase()}${cat.slice(1)} ${v > was ? 'up' : 'down'} to ${v} (from ${was}) — ${pickFresh(used, moves)}`);
         }
         if (achieved >= 0) lines.push(`“${spec.dreams[achieved]!.title}” reached 100% — a dream achieved. We took time to celebrate before looking ahead.`);
-        if (prev) {
-          const moved = p.progress.map((v, i) => ({ i, v, by: v - prev.progress[i]! })).filter((d) => d.i !== achieved).sort((a, b) => b.by - a.by)[0];
-          if (moved && moved.by >= 3) lines.push(`Most movement on “${spec.dreams[moved.i]!.title}” — up ${moved.by} points to ${moved.v}%.`);
-        }
+        if (moved && moved.by >= 3) lines.push(`Most movement on “${spec.dreams[moved.i]!.title}” — up ${moved.by} points to ${moved.v}%.`);
 
         // Review previous actions: some were done in between (at a waking hour) or are ticked off now; some set aside.
         for (const a of [...openActions]) {
@@ -941,7 +990,7 @@ export function resetAndSeed(db: DB): SeedSummary {
         if (story) nCheckIns = Math.max(nCheckIns, 2);
         for (let idx = 0; idx < nCheckIns; idx++) {
           const t = windowStart + DAY + (span - 2 * DAY) * ((idx + 0.2 + rand() * 0.6) / nCheckIns);
-          const when = at(new Date(t), 12 + Math.floor(rand() * 10), pick([0, 10, 20, 30, 40, 50]));
+          const when = at(zoneDate(t), 8 + Math.floor(rand() * 14), pick([0, 10, 20, 30, 40, 50]));
           const tWhen = new Date(when).getTime();
           const ciId = insert(insCheckIn, dreamerId, when, userId, when);
           counts.checkIns++;
@@ -1052,7 +1101,6 @@ export function resetAndSeed(db: DB): SeedSummary {
       }
 
       // ---- Guaranteed demo privacy examples, personal to each main demo dreamer ----
-      const example = PRIVACY_EXAMPLES[spec.email];
       if (example) {
         // The last ten days, starting a day after the latest session; if that session was only just held, the ten
         // days before it instead. The action, the reflection and the check-in each take a third, in that order.

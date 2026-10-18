@@ -180,7 +180,7 @@ export function DirectorCoachPage() {
           <h2 id="dir-coach-trends-heading">Trends for {first}’s dreamers</h2>
           <span className="dir-section-sub">Month by month across this caseload. Coaching sessions and self check-ins stay side by side so both kinds of activity are visible.</span>
         </div>
-        <DirectorTrendGrid months={months} scope="caseload" sessionsBy={first} testPrefix="director-coach" />
+        <DirectorTrendGrid months={months} scope="caseload" sessionsBy={first} caseloadSize={summary.dreamers} testPrefix="director-coach" />
       </section>
 
       <section className="dir-section" aria-labelledby="dir-coach-caseload-heading">

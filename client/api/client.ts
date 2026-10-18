@@ -12,10 +12,15 @@ export const UNAUTHENTICATED_EVENT = 'dc:unauthenticated';
 // The server keeps private entries showing for 30 minutes after the last *interaction*, so every request
 // says how long ago that was; polling and other background reads then never extend the unlock.
 let lastInteraction = Date.now();
+// The latest interaction a request has told the server about.
+let reportedInteraction = lastInteraction;
 if (typeof window !== 'undefined') {
   const mark = () => { lastInteraction = Date.now(); };
   for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const) window.addEventListener(ev, mark, { capture: true, passive: true });
 }
+
+/** The person has touched the page since the last request went out, so the server hasn't heard of it yet. */
+export const interactedSinceLastRequest = () => lastInteraction > reportedInteraction;
 
 let readsHeld: Promise<unknown> | null = null;
 
@@ -33,6 +38,7 @@ export async function holdReads<T>(until: Promise<T>): Promise<T> {
 export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
   // Wait out the hold, and any newer one that replaced it meanwhile.
   while (method === 'GET' && readsHeld) await readsHeld;
+  reportedInteraction = lastInteraction;
   const res = await fetch(`/api${path}`, {
     method,
     headers: { 'x-dc-idle': String(Date.now() - lastInteraction), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },

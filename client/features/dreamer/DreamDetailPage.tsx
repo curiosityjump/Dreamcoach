@@ -19,8 +19,7 @@ import { UnlockDialog } from '@/features/shared/PrivacyControl';
 import type { Dream, DreamHistory, ProgressEntry } from '@shared/types';
 import { DREAM_COLOR, DreamsProgressDialog, privacyToast } from './DreamsProgressDialog';
 import { DreamsEditForm } from './DreamsEditDialog';
-import { AchievedChip } from './DreamsPage';
-import { SessionDelta, dreamBaseline } from './HomePage';
+import { AchievedChip, SessionDelta, dreamBaseline } from './HomePage';
 
 export function DreamDetailPage() {
   const params = useParams();
@@ -76,6 +75,8 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
   const activeCount = actions.filter((a) => a.status === 'active').length;
   const completedCount = actions.filter((a) => a.status === 'completed').length;
   const dreamRefs = useMemo(() => sorted.map((d) => ({ id: d.id, title: d.title, slot: d.slot })), [sorted]);
+  // Sessions whose cell holds a shared value: a value hidden from one of them can't be shared back.
+  const sharedSessions = useMemo(() => new Set(entries.filter((e) => e.source === 'session' && !e.isPrivate).map((e) => e.sessionId)), [entries]);
 
   return (
     <div className="page dd-page dd-detail" data-testid="dream-detail" data-dream-id={dream.id}>
@@ -167,7 +168,7 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
             ) : (
               <div className="list dd-entries">
                 {newestFirst.map((e, i) => (
-                  <ProgressRow key={e.id} entry={e} previous={newestFirst[i + 1] ?? null} />
+                  <ProgressRow key={e.id} entry={e} previous={newestFirst[i + 1] ?? null} cellTaken={e.sessionId != null && sharedSessions.has(e.sessionId)} />
                 ))}
               </div>
             )}
@@ -255,7 +256,10 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
 /** A 409 the dreamer can act on (a hidden note, a value that can't be shared back) reads as information, not an alarm. */
 const isConflict = (e: unknown) => e instanceof ApiRequestError && e.code === 'conflict';
 
-function ProgressRow({ entry, previous }: { entry: ProgressEntry; previous: ProgressEntry | null }) {
+/** What the dreamer had in the editor when they chose to show private entries from it: it comes back afterwards. */
+type EditDraft = { value: number; note: string; notePrivate: boolean; hiddenNote: boolean; seenNote: ProgressEntry['note'] };
+
+function ProgressRow({ entry, previous, cellTaken }: { entry: ProgressEntry; previous: ProgressEntry | null; cellTaken: boolean }) {
   const { auth, unlockPrivate } = useAuth();
   const { toast } = useToast();
   const update = useUpdateProgress('me');
@@ -263,11 +267,13 @@ function ProgressRow({ entry, previous }: { entry: ProgressEntry; previous: Prog
   const [confirmHide, setConfirmHide] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editingNote, setEditingNote] = useState(false);
+  const [draft, setDraft] = useState<EditDraft | null>(null);
   const [unlocking, setUnlocking] = useState(false);
-  const reopenEditor = useRef(false);
   const isSession = entry.source === 'session';
   // A private session value whose session was later deleted: it belongs to no session any more.
   const detached = isSession && entry.sessionId == null;
+  // A hidden session value can be shared back only while its session has no shared value for this dream (DECISIONS #14).
+  const shareBlocked = isSession && entry.isPrivate && (detached || cellTaken);
   const delta = previous ? entry.value - previous.value : null;
   const unlocked = !!auth?.privateUnlocked;
   // Private session values (and detached ones) are the dreamer's to remove: staff can't see them.
@@ -298,12 +304,11 @@ function ProgressRow({ entry, previous }: { entry: ProgressEntry; previous: Prog
       toast(errorMessage(e), 'error');
     }
   };
-  // The editor asked to show private entries (a note is hidden under it): unlock, then open it again on the real note.
-  const askUnlock = () => { setEditingNote(false); setUnlocking(true); };
-  const onUnlockClosed = () => {
-    setUnlocking(false);
-    if (reopenEditor.current) { reopenEditor.current = false; setEditingNote(true); }
-  };
+  // The editor asked to show private entries (a note is hidden under it). It makes way for the password dialog and
+  // then opens again with what was typed, which goes below the note once it is in view (or stays as it was on Cancel).
+  const askUnlock = (d: EditDraft) => { setDraft(d); setEditingNote(false); setUnlocking(true); };
+  const onUnlockClosed = () => { setUnlocking(false); setEditingNote(true); };
+  const closeEditor = () => { setEditingNote(false); setDraft(null); };
 
   const recorded = detached
     ? `in a coaching session with ${entry.recordedBy.name} that was later removed`
@@ -337,7 +342,7 @@ function ProgressRow({ entry, previous }: { entry: ProgressEntry; previous: Prog
           <Button variant="ghost" icon size="sm" aria-label="Options for this update" aria-expanded={open} data-testid="progress-entry-menu" loading={update.isPending && !editingNote}><IconMore /></Button>
         )}
       >
-        {!detached && (
+        {!detached && !shareBlocked && (
           <button type="button" className="menu-item" onClick={() => (entry.isPrivate ? void setPrivacy(false) : isSession ? setConfirmHide(true) : void setPrivacy(true))} data-testid="progress-entry-privacy">
             {entry.isPrivate ? <><IconUnlock /> Share update with coach</> : <><IconLock /> Make update private</>}
           </button>
@@ -355,6 +360,15 @@ function ProgressRow({ entry, previous }: { entry: ProgressEntry; previous: Prog
             <div className="divider" />
             <button type="button" className="menu-item dd-menu-danger" onClick={() => setConfirmDelete(true)} data-testid="progress-entry-delete"><IconTrash /> Delete update</button>
           </>
+        )}
+        {isSession && (
+          <div className="dd-menu-note muted tiny" data-testid="progress-entry-menu-note">
+            {detached
+              ? 'Its coaching session was later removed, so this value stays private.'
+              : shareBlocked
+                ? 'Your coach recorded a new value for this session after you hid this one, so this one stays private.'
+                : 'Recorded by your coach — the value itself is changed in a session.'}
+          </div>
         )}
       </Dropdown>
 
@@ -377,30 +391,37 @@ function ProgressRow({ entry, previous }: { entry: ProgressEntry; previous: Prog
         danger
         loading={remove.isPending}
       />
-      {/* Keyed by the note under it: if a hidden note comes into view, the editor starts again from it rather than writing over it. */}
-      {editingNote && <EntryEditDialog key={entry.note?.id ?? 'no-note'} entry={entry} onClose={() => setEditingNote(false)} onShowPrivate={askUnlock} />}
-      <UnlockDialog
-        open={unlocking}
-        onClose={onUnlockClosed}
-        onUnlock={async (password) => { const a = await unlockPrivate(password); reopenEditor.current = true; return a; }}
-      />
+      {editingNote && <EntryEditDialog entry={entry} draft={draft} onClose={closeEditor} onShowPrivate={askUnlock} />}
+      <UnlockDialog open={unlocking} onClose={onUnlockClosed} onUnlock={unlockPrivate} />
     </div>
   );
 }
 
 /** Edit an entry: value (own self check-ins only) and the attached note with its privacy. */
-function EntryEditDialog({ entry, onClose, onShowPrivate }: { entry: ProgressEntry; onClose: () => void; onShowPrivate: () => void }) {
+function EntryEditDialog({ entry, draft, onClose, onShowPrivate }: { entry: ProgressEntry; draft: EditDraft | null; onClose: () => void; onShowPrivate: (draft: EditDraft) => void }) {
   const { auth } = useAuth();
   const { toast } = useToast();
   const update = useUpdateProgress('me');
   const isSession = entry.source === 'session';
   const unlocked = !!auth?.privateUnlocked;
-  const [value, setValue] = useState(entry.value);
-  const [note, setNote] = useState(entry.note?.body ?? '');
-  const [notePrivate, setNotePrivate] = useState(entry.note?.isPrivate ?? false);
+  const [value, setValue] = useState(draft?.value ?? entry.value);
+  const [note, setNote] = useState(draft?.note ?? entry.note?.body ?? '');
+  const [notePrivate, setNotePrivate] = useState(draft?.notePrivate ?? entry.note?.isPrivate ?? false);
   const [error, setError] = useState<string | null>(null);
   // With private entries hidden, a note the dreamer can't see may already sit under this entry.
-  const [hiddenNote, setHiddenNote] = useState(false);
+  const [hiddenNote, setHiddenNote] = useState(draft?.hiddenNote ?? false);
+  // Private entries were shown from here, so a note that was hidden is in view now: start from it (and its privacy),
+  // keeping anything typed below it. Saving can then never write over a note unseen. A note going out of view
+  // (private entries hidden meanwhile) takes the text with it, since it may hold its words.
+  const [seenNote, setSeenNote] = useState(draft ? draft.seenNote : entry.note);
+  const [kept, setKept] = useState(false);
+  if (entry.note?.id !== seenNote?.id) {
+    const typed = entry.note && note.trim() !== (seenNote?.body ?? '') ? note.trim() : '';
+    setSeenNote(entry.note);
+    setNote([entry.note?.body, typed].filter(Boolean).join('\n\n'));
+    setNotePrivate(entry.note?.isPrivate ?? false);
+    setKept(!!typed);
+  }
   const hasNote = note.trim().length > 0;
 
   const save = async () => {
@@ -460,6 +481,7 @@ function EntryEditDialog({ entry, onClose, onShowPrivate }: { entry: ProgressEnt
         <Field label="Note" htmlFor={`dd-entry-note-${entry.id}`} hint={entry.note ? 'Clear the text to remove the note.' : undefined}>
           <TextArea id={`dd-entry-note-${entry.id}`} value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="What was behind this number?" data-testid="entry-edit-note" />
         </Field>
+        {kept && <div className="muted tiny" data-testid="entry-edit-kept">Your private note is back, with what you typed below it.</div>}
         {hasNote && !entry.isPrivate && (
           <div className="spread dd-privacy-row">
             <span className="small">Your note</span>
@@ -467,12 +489,12 @@ function EntryEditDialog({ entry, onClose, onShowPrivate }: { entry: ProgressEnt
           </div>
         )}
         {hasNote && entry.isPrivate && <div className="muted tiny">This update is private, so its note is private too.</div>}
-        {hiddenNote && (
+        {hiddenNote && !unlocked && (
           <div className="callout callout-private dd-hidden-note" role="status" data-testid="entry-edit-hidden-note">
             <IconLock />
             <div className="dd-hidden-note-body">
-              <span>This update already has a note that is hidden right now. Show private entries to see it and edit it here.</span>
-              <Button variant="secondary" size="sm" onClick={onShowPrivate} data-testid="entry-edit-show-private"><IconUnlock /> Show private entries</Button>
+              <span>This update already has a note that is hidden right now. Show private entries to see it and edit it here — what you typed stays.</span>
+              <Button variant="secondary" size="sm" onClick={() => onShowPrivate({ value, note, notePrivate, hiddenNote: true, seenNote })} data-testid="entry-edit-show-private"><IconUnlock /> Show private entries</Button>
             </div>
           </div>
         )}

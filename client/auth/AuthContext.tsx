@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ApiRequestError, get, holdReads, post, UNAUTHENTICATED_EVENT } from '@/api/client';
+import { ApiRequestError, get, holdReads, interactedSinceLastRequest, post, UNAUTHENTICATED_EVENT } from '@/api/client';
 import { useToast } from '@/components/toast';
 import type { AuthState } from '@shared/types';
 
@@ -45,6 +45,9 @@ function onSignal(handler: (signal: AuthSignal) => void): () => void {
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+
+/** How long before private entries would hide again the browser checks whether to keep them showing. */
+const KEEP_ALIVE_LEAD_MS = 60_000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuthState] = useState<AuthState | null>(null);
@@ -110,11 +113,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHENTICATED_EVENT, h);
   }, [qc, setAuth, stopHiding]);
 
-  // Private unlock auto-expires server-side after 30 idle minutes; mirror that in the UI.
+  // Private unlock auto-expires server-side after 30 idle minutes, sliding from the last interaction a request
+  // reported. Reading or typing sends no requests, so shortly before the window closes, tell the server about
+  // any interaction it hasn't heard of (that slides the window). Otherwise let it lapse, and mirror that here.
   useEffect(() => {
     if (!auth?.privateUnlocked || !auth.privateUnlockedUntil) return;
-    const ms = new Date(auth.privateUnlockedUntil).getTime() - Date.now() + 500;
-    const t = window.setTimeout(() => void refresh(), Math.max(1000, ms));
+    const until = new Date(auth.privateUnlockedUntil).getTime();
+    let t = 0;
+    const at = (time: number, run: () => void) => { t = window.setTimeout(run, Math.max(1000, time - Date.now())); };
+    at(until - KEEP_ALIVE_LEAD_MS, () => {
+      if (interactedSinceLastRequest()) void refresh();
+      at(until + 500, () => void refresh());
+    });
     return () => window.clearTimeout(t);
   }, [auth?.privateUnlocked, auth?.privateUnlockedUntil, refresh]);
 

@@ -296,16 +296,23 @@ export function DirectorDreamersPage() {
   const [reassigning, setReassigning] = useState<DirectorDreamerRow | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
-  // The coach filter lives in the URL so the coach page can link straight to a caseload.
-  const coachFilter = params.get('coach') ?? 'all';
+  const staff = staffQ.data ?? [];
+  const all = dreamers.data ?? [];
+
+  // The coach filter lives in the URL so the coach page can link straight to a caseload. A value that names
+  // no coach (an old or hand-edited link) is dropped, so the menu always shows the filter that is in use.
+  const coachParam = params.get('coach');
+  const staleCoach = coachParam != null && (coachParam === '' || (staffQ.isSuccess && coachParam !== UNASSIGNED && !staff.some((s) => String(s.id) === coachParam)));
+  const coachFilter = coachParam == null || staleCoach ? 'all' : coachParam;
   const setCoachFilter = (v: string) => {
     const next = new URLSearchParams(params);
     if (v === 'all') next.delete('coach'); else next.set('coach', v);
     setParams(next, { replace: true });
   };
+  useEffect(() => {
+    if (staleCoach) setParams((p) => { const next = new URLSearchParams(p); next.delete('coach'); return next; }, { replace: true });
+  }, [staleCoach, setParams]);
 
-  const staff = staffQ.data ?? [];
-  const all = dreamers.data ?? [];
   // Offered while someone has no coach, and kept while it is the active filter so the menu never misstates it.
   const showUnassigned = coachFilter === UNASSIGNED || all.some((r) => !r.dreamer.coach);
 

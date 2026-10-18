@@ -85,6 +85,7 @@ function CoachName({ c }: { c: CoachSummary }) {
       <Avatar initials={c.coach.initials} tone={c.coach.role === 'director' ? 'plum' : 'gold'} />
       <span className="dir-person-text">
         <span className="dir-person-name">
+          {/* The keyboard's way into a coach: rows and cards also open on a click anywhere, but take no focus of their own. */}
           <Link to={coachPath(c.coach.id)} className="dir-person-link" onClick={(e) => e.stopPropagation()}>{c.coach.name}</Link>
           {c.coach.role === 'director' && <Chip className="chip-muted" title="The Director’s own caseload">Director</Chip>}
         </span>
@@ -118,9 +119,7 @@ function CoachesTable({ coaches }: { coaches: CoachSummary[] }) {
             <tr
               key={c.coach.id}
               className="clickable dir-row"
-              tabIndex={0}
               onClick={() => nav(coachPath(c.coach.id))}
-              onKeyDown={(e) => { if (e.key === 'Enter') nav(coachPath(c.coach.id)); }}
               data-testid="director-coach-row"
               data-coach-id={c.coach.id}
             >

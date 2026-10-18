@@ -234,6 +234,14 @@ export const JOURNAL_VISIBLE = (alias = 'j') => `(
 /** A journal row the dreamer wrote themselves (not a coach's session reflection). Takes no params. */
 export const WRITTEN_BY_DREAMER = (alias = 'j') => `${alias}.author_id = (SELECT dd.user_id FROM dreamers dd WHERE dd.id = ${alias}.dreamer_id)`;
 
+/**
+ * When a journal row counts as the dreamer's activity. A note on a session-recorded value (attached, outside
+ * any check-in) takes the session's date, but it is a reflection of theirs dated when they wrote it; every
+ * other row counts on its own date. Takes no params.
+ */
+export const ACTIVITY_AT = (alias = 'j') =>
+  `(CASE WHEN ${alias}.check_in_id IS NULL AND (${alias}.rating_id IS NOT NULL OR ${alias}.progress_id IS NOT NULL) THEN ${alias}.created_at ELSE ${alias}.occurred_at END)`;
+
 /** Same-moment ratings (one check-in) keep CARE order, since ids carry no order. */
 const CATEGORY_ORDER = `CASE x.category ${RATING_CATEGORIES.map((c, i) => `WHEN '${c}' THEN ${i}`).join(' ')} END`;
 
@@ -378,7 +386,10 @@ export function listProgress(db: DB, scope: Scope, opts: { dreamId?: number; ses
   if (opts.dreamId != null) { where.push('x.dream_id = ?'); params.push(opts.dreamId); }
   if (opts.sessionId != null) { where.push('x.session_id = ?'); params.push(opts.sessionId); }
   if (opts.checkInId != null) { where.push('x.check_in_id = ?'); params.push(opts.checkInId); }
-  const rows = db.prepare(`${PROGRESS_SELECT} WHERE ${where.join(' AND ')} ORDER BY x.occurred_at ASC, x.created_at ASC, x.id ASC`).all(...params) as ProgressRow[];
+  // Same-moment entries (one session or check-in) keep dream order, since ids carry no order.
+  const rows = db
+    .prepare(`${PROGRESS_SELECT} WHERE ${where.join(' AND ')} ORDER BY x.occurred_at ASC, (SELECT d.slot FROM dreams d WHERE d.id = x.dream_id), x.created_at ASC, x.id ASC`)
+    .all(...params) as ProgressRow[];
   return rows.map(mapProgress);
 }
 
@@ -436,12 +447,13 @@ export function getAction(db: DB, scope: Scope, id: number): ActionItem | null {
 /* ---------- Coaching sessions ---------- */
 
 function mapSession(db: DB, scope: Scope, s: SessionRow, number: number): CoachingSession {
-  // Shared rows win over private ones for the same cell (a coach may re-enter a value the dreamer privatised).
+  // Cells come in CARE order / dream order, never in an order a private write could move. Within a cell,
+  // shared rows win over private ones (a coach may re-enter a value the dreamer privatised).
   const ratings = db
-    .prepare(`SELECT category, value, is_private FROM ratings WHERE session_id = ? AND (is_private = 0 OR ? = 1) ORDER BY is_private DESC, updated_at ASC`)
+    .prepare(`SELECT x.category, x.value, x.is_private FROM ratings x WHERE x.session_id = ? AND (x.is_private = 0 OR ? = 1) ORDER BY ${CATEGORY_ORDER}, x.is_private DESC, x.updated_at ASC`)
     .all(s.id, INC(scope)) as { category: RatingCategory; value: number; is_private: number }[];
   const progress = db
-    .prepare(`SELECT dream_id, value, is_private FROM dream_progress WHERE session_id = ? AND (is_private = 0 OR ? = 1) ORDER BY is_private DESC, updated_at ASC`)
+    .prepare(`SELECT dream_id, value, is_private FROM dream_progress WHERE session_id = ? AND (is_private = 0 OR ? = 1) ORDER BY dream_id, is_private DESC, updated_at ASC`)
     .all(s.id, INC(scope)) as { dream_id: number; value: number; is_private: number }[];
   // Actions chosen in this session, and how many of those have since been completed.
   const counts = db
@@ -541,13 +553,14 @@ export function getSnapshot(db: DB, scope: Scope): Snapshot {
   const last = completed[completed.length - 1] ?? null;
   const open = sessions.find((s) => s.status === 'in_progress') ?? null;
   // Self activity: only visible entries count. A check-in counts when any of its entries is visible
-  // (the same rule as listCheckIns); a reflection is a standalone entry the dreamer wrote outside a check-in.
+  // (the same rule as listCheckIns); a reflection is anything the dreamer wrote outside a check-in — a
+  // standalone entry, or a note on a session-recorded value (dated when written, as in journal30 below).
   const lastCheckIn = listCheckIns(db, scope, { limit: 1 })[0]?.occurredAt ?? null;
   const lastReflection = (
     db
       .prepare(
-        `SELECT MAX(j.occurred_at) AS t FROM journal_entries j
-         WHERE j.dreamer_id = ? AND ${WRITTEN_BY_DREAMER('j')} AND j.check_in_id IS NULL AND j.rating_id IS NULL AND j.progress_id IS NULL AND ${JOURNAL_VISIBLE('j')}`,
+        `SELECT MAX(${ACTIVITY_AT('j')}) AS t FROM journal_entries j
+         WHERE j.dreamer_id = ? AND ${WRITTEN_BY_DREAMER('j')} AND j.check_in_id IS NULL AND ${JOURNAL_VISIBLE('j')}`,
       )
       .get(scope.dreamerId, inc, inc, inc) as { t: string | null }
   ).t;
@@ -556,7 +569,7 @@ export function getSnapshot(db: DB, scope: Scope): Snapshot {
   const checkIns30 = listCheckIns(db, scope, { from: d30 }).length;
   // The dreamer's own words in the last 30 days: reflections and notes, on self and session entries alike.
   const journal30 = db
-    .prepare(`SELECT COUNT(*) AS n FROM journal_entries j WHERE j.dreamer_id = ? AND ${WRITTEN_BY_DREAMER('j')} AND j.occurred_at >= ? AND ${JOURNAL_VISIBLE('j')}`)
+    .prepare(`SELECT COUNT(*) AS n FROM journal_entries j WHERE j.dreamer_id = ? AND ${WRITTEN_BY_DREAMER('j')} AND ${ACTIVITY_AT('j')} >= ? AND ${JOURNAL_VISIBLE('j')}`)
     .get(scope.dreamerId, d30, inc, inc, inc) as { n: number };
   return {
     latest: latestRatings(db, scope),
@@ -585,8 +598,13 @@ export function getTimeline(db: DB, scope: Scope, opts: { limit?: number; from?:
     if (opts.to && p.occurredAt > opts.to) continue;
     items.push({ kind: 'progress', at: p.occurredAt, item: p, dreamTitle: dreams.get(p.dreamId) ?? 'Dream' });
   }
-  // Attached notes travel with their parent entries; only standalone reflections appear on their own.
-  for (const j of listJournal(db, scope, { from: opts.from, to: opts.to, standaloneOnly: true })) items.push({ kind: 'journal', at: j.occurredAt, item: j });
+  // Attached notes travel with their parent entries; only standalone reflections appear on their own —
+  // except notes on values a coach recorded, whose parent is folded into its session item, so they sit beside it.
+  for (const j of listJournal(db, scope, { from: opts.from, to: opts.to })) {
+    const standalone = j.ratingId == null && j.progressId == null;
+    const onSessionValue = j.sessionId != null && (j.ratingId != null || j.progressId != null);
+    if (standalone || onSessionValue) items.push({ kind: 'journal', at: j.occurredAt, item: j });
+  }
   for (const a of listActions(db, scope, 'all')) {
     const push = (at: string, event: 'created' | 'completed' | 'archived') => {
       if (opts.from && at < opts.from) return;

@@ -5,13 +5,13 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { useDreams, useOverview, useSessions } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
-import { Bar, Button, Card, Chip, EmptyState, PageHeader, PrivateChip, Skeleton } from '@/components/ui';
-import { IconArrowRight, IconCheck, IconEdit, IconInfo, IconStar, IconTarget } from '@/components/icons';
-import { fmtDate, plural, relativeTime } from '@/lib/format';
+import { Bar, Button, Card, EmptyState, PageHeader, PrivateChip, Skeleton } from '@/components/ui';
+import { IconArrowRight, IconEdit, IconInfo, IconStar, IconTarget } from '@/components/icons';
+import { plural, relativeTime } from '@/lib/format';
 import type { CoachingSession, Dream, Program } from '@shared/types';
 import { DREAM_COLOR, DreamsProgressDialog } from './DreamsProgressDialog';
 import { DreamsEditDialog } from './DreamsEditDialog';
-import { SessionDelta, dreamBaseline } from './HomePage';
+import { AchievedChip, SessionDelta, dreamBaseline } from './HomePage';
 
 export function DreamsPage() {
   const dreams = useDreams('me');
@@ -55,15 +55,6 @@ export function DreamsPage() {
         </div>
       )}
     </div>
-  );
-}
-
-export function AchievedChip({ achievedAt, compact }: { achievedAt: string; compact?: boolean }) {
-  return (
-    <Chip className="dd-achieved" title={`Achieved ${fmtDate(achievedAt, { month: 'long', day: 'numeric', year: 'numeric' })}`}>
-      <IconCheck />
-      {compact ? 'Achieved' : `Achieved · ${fmtDate(achievedAt)}`}
-    </Chip>
   );
 }
 

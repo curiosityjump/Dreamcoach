@@ -56,6 +56,12 @@ test('background requests never keep private entries showing; real activity slid
   // …but a request made right after an interaction does.
   await me(0);
   assert.ok(Date.parse(until()!) > Date.now() + 29 * 60_000);
+  // The browser's check a minute before the window closes, after someone kept reading or typing without a
+  // request going out, slides it from their last interaction (here four minutes ago).
+  s.db.prepare(`UPDATE auth_sessions SET private_unlocked_until = ? WHERE token = ?`).run(new Date(Date.now() + 60_000).toISOString(), dreamer.cookie.split('=')[1]);
+  assert.equal((await me(4 * 60_000)).privateUnlocked, true);
+  const slid = Date.parse(until()!) - Date.now();
+  assert.ok(slid > 25 * 60_000 && slid <= 26 * 60_000, `slid to ${Math.round(slid / 1000)}s from now`);
   await dreamer.post('/auth/privacy/lock');
 });
 
@@ -560,4 +566,19 @@ test('seeded rows carry random ids too, so the demo data shows no countable gaps
   for (const id of ids) assert.ok(Number.isSafeInteger(id) && id > 2 ** 20, `id ${id} is not sequential-looking`);
   const sorted = [...ids].sort((a, b) => a - b);
   for (let i = 1; i < sorted.length; i++) assert.ok(sorted[i]! - sorted[i - 1]! > 1000, 'no two visible ids sit next to each other');
+});
+
+test('making an entry private and shared again leaves no trace in what staff see', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const action = (await dreamer.get('/dreamers/me/actions')).body.find((a: any) => !a.isPrivate);
+  const rating = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => !r.isPrivate && r.source === 'self');
+  const before = { actions: (await coach.get(`/dreamers/${dreamerId}/actions`)).body, energy: (await coach.get(`/dreamers/${dreamerId}/care/energy`)).body };
+  await dreamer.patch(`/dreamers/me/actions/${action.id}`, { isPrivate: true });
+  await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { isPrivate: true });
+  await new Promise((r) => setTimeout(r, 15));
+  await dreamer.patch(`/dreamers/me/actions/${action.id}`, { isPrivate: false });
+  await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { isPrivate: false });
+  const after = { actions: (await coach.get(`/dreamers/${dreamerId}/actions`)).body, energy: (await coach.get(`/dreamers/${dreamerId}/care/energy`)).body };
+  assert.deepEqual(after, before);
 });

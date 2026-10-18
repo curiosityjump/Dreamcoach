@@ -43,6 +43,17 @@ export interface TimelineFeedProps {
   compact?: boolean;
   emptyTitle?: string;
   emptyBody?: string;
+  /**
+   * The Journal's area / dream / private filters: a session row then names the value that matched it
+   * (its value for that area or dream, or its private values), since its values aren't listed one by one.
+   */
+  sessionValues?: SessionValueFilter;
+}
+
+export interface SessionValueFilter {
+  category: RatingCategory | null;
+  dreamId: number | null;
+  privateOnly: boolean;
 }
 
 const itemKey = (it: TimelineItem) => `${it.kind}-${it.item.id}${it.kind === 'action' ? `-${it.event}` : ''}`;
@@ -67,7 +78,7 @@ function groupByDays(items: TimelineItem[]): { key: string; at: string; items: T
 }
 
 /** Chronological feed mixing ratings, progress updates, reflections, action events and sessions. */
-export function TimelineFeed({ items, dreamerRef, mode, dreams, groupByDay, limit, compact, emptyTitle, emptyBody }: TimelineFeedProps) {
+export function TimelineFeed({ items, dreamerRef, mode, dreams, groupByDay, limit, compact, emptyTitle, emptyBody, sessionValues }: TimelineFeedProps) {
   const grouped = groupByDay ?? !compact;
   const sorted = useMemo(() => {
     const s = sortNewestFirst(items);
@@ -83,7 +94,7 @@ export function TimelineFeed({ items, dreamerRef, mode, dreams, groupByDay, limi
   }
 
   const cls = `dj-tl${compact ? ' dj-tl-compact' : ''}`;
-  const row = (it: TimelineItem) => <TimelineRow key={itemKey(it)} it={it} dreamerRef={dreamerRef} mode={mode} dreams={dreams} compact={!!compact} showDate={!grouped} />;
+  const row = (it: TimelineItem) => <TimelineRow key={itemKey(it)} it={it} dreamerRef={dreamerRef} mode={mode} dreams={dreams} compact={!!compact} showDate={!grouped} sessionValues={sessionValues} />;
 
   if (!grouped) {
     return (
@@ -114,6 +125,7 @@ interface RowCtx {
   compact: boolean;
   /** Show the full date (no day heading above) instead of just the time. */
   showDate: boolean;
+  sessionValues?: SessionValueFilter;
 }
 
 function TimelineRow({ it, ...ctx }: { it: TimelineItem } & RowCtx) {
@@ -139,13 +151,16 @@ function When({ at, showDate }: { at: string; showDate: boolean }) {
   return <time className="dj-tl-when" dateTime={at}>{showDate ? fmtDateTime(at) : fmtTime(at)}</time>;
 }
 
-/** Attached note on a rating/progress entry. The 'private' class only ever applies in dreamer mode. */
-function NoteBlock({ note, mode }: { note: RatingEntry['note']; mode: TimelineMode }) {
+/**
+ * Attached note on a rating/progress entry. The 'private' class only ever applies in dreamer mode. A note on a
+ * private rating or progress update is private with it, whatever its own switch says (DECISIONS #9).
+ */
+function NoteBlock({ note, mode, parentPrivate, parent }: { note: RatingEntry['note']; mode: TimelineMode; parentPrivate: boolean; parent: 'rating' | 'update' }) {
   if (!note) return null;
-  const priv = mode === 'dreamer' && note.isPrivate;
+  const priv = mode === 'dreamer' && (note.isPrivate || parentPrivate);
   return (
     <div className={`note-block${priv ? ' private' : ''}`} data-testid="timeline-note">
-      {priv && <span className="dj-note-lock"><IconLock /> Private note</span>}
+      {priv && <span className="dj-note-lock"><IconLock /> {note.isPrivate ? 'Private note' : `Private with its ${parent}`}</span>}
       {note.body}
     </div>
   );
@@ -165,7 +180,7 @@ function RatingRow({ entry: r, mode, compact, showDate }: { entry: RatingEntry }
           {isDreamer && <Link to={`/care/${r.category}`} className="dj-tl-link" data-testid="timeline-care-link">History</Link>}
         </span>
       </div>
-      <NoteBlock note={r.note} mode={mode} />
+      <NoteBlock note={r.note} mode={mode} parentPrivate={r.isPrivate} parent="rating" />
     </Row>
   );
 }
@@ -181,7 +196,7 @@ function ProgressRow({ entry: p, dreamTitle, mode, compact, showDate }: { entry:
         {isDreamer && p.isPrivate && <PrivateChip compact={compact} />}
         <span className="dj-tl-end"><When at={p.occurredAt} showDate={showDate} /></span>
       </div>
-      <NoteBlock note={p.note} mode={mode} />
+      <NoteBlock note={p.note} mode={mode} parentPrivate={p.isPrivate} parent="update" />
     </Row>
   );
 }
@@ -215,9 +230,30 @@ function ActionRow({ action: a, event, mode, dreams, compact, showDate }: { acti
   );
 }
 
-function SessionRow({ session: s, dreamerRef, mode, compact, showDate }: { session: CoachingSession } & RowCtx) {
+type SessionValue = { key: string; kind: 'rating'; category: RatingCategory; value: number; isPrivate: boolean } | { key: string; kind: 'progress'; title: string; value: number; isPrivate: boolean };
+
+/** What a session row names under the Journal's filters: its value for the area or dream, or (Private only) its private values. */
+function sessionValuesFor(s: CoachingSession, f: SessionValueFilter | undefined, dreams: DreamRef[] | undefined): SessionValue[] {
+  if (!f) return [];
+  const listPrivate = f.privateOnly && f.category == null && f.dreamId == null;
+  const categories = f.category ? [f.category] : listPrivate ? s.privateRatings ?? [] : [];
+  const dreamIds = f.dreamId != null ? [f.dreamId] : listPrivate ? s.privateProgress ?? [] : [];
+  const out: SessionValue[] = [];
+  for (const c of categories) {
+    const value = s.ratings[c];
+    if (value != null) out.push({ key: `r-${c}`, kind: 'rating', category: c, value, isPrivate: !!s.privateRatings?.includes(c) });
+  }
+  for (const id of dreamIds) {
+    const value = s.progress[id];
+    if (value != null) out.push({ key: `p-${id}`, kind: 'progress', title: dreams?.find((d) => d.id === id)?.title ?? 'Dream', value, isPrivate: !!s.privateProgress?.includes(id) });
+  }
+  return out;
+}
+
+function SessionRow({ session: s, dreamerRef, mode, dreams, compact, showDate, sessionValues }: { session: CoachingSession } & RowCtx) {
   const isDreamer = mode === 'dreamer';
   const to = isDreamer ? `/sessions/${s.id}` : staffDreamerPath(typeof dreamerRef === 'number' ? dreamerRef : s.dreamerId, 'sessions');
+  const values = sessionValuesFor(s, sessionValues, dreams);
   return (
     <Row kind="session" dot={<IconMessage />} dotClass="dj-dot-accent">
       <div className="dj-tl-head">
@@ -228,6 +264,19 @@ function SessionRow({ session: s, dreamerRef, mode, compact, showDate }: { sessi
           <Link to={to} className="dj-tl-link" data-testid="timeline-session-link">{isDreamer ? 'Open' : 'Sessions'}</Link>
         </span>
       </div>
+      {values.length > 0 && (
+        <div className="dj-tl-svals" data-testid="timeline-session-values">
+          <span className="dj-tl-eyebrow">Recorded</span>
+          {values.map((v) => (
+            <span key={v.key} className="dj-tl-sval" data-testid="timeline-session-value">
+              {v.kind === 'rating'
+                ? <><span className="dj-tl-swatch" style={{ '--dj-color': CATEGORY_META[v.category].color } as CSSProperties} aria-hidden />{CATEGORY_META[v.category].label} <b className="tnum">{v.value}</b></>
+                : <><IconStar className="dj-tl-sval-star" /><span className="dj-tl-sval-dream">‘{v.title}’</span> <b className="tnum">{v.value}%</b></>}
+              {isDreamer && v.isPrivate && <PrivateChip compact />}
+            </span>
+          ))}
+        </div>
+      )}
       {s.focus && !compact && (
         <div className="dj-tl-focus"><span className="dj-tl-eyebrow">Focus</span><span>{s.focus}</span></div>
       )}
@@ -332,7 +381,7 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
     >
       <div className="dj-entry-main">
         {editing ? (
-          <JournalEditForm entry={shown} dreams={dreams} attached={attached} privateWith={privateWithParent ? parentNoun : null} pending={update.isPending} onSave={onSave} onCancel={() => setEditing(false)} />
+          <JournalEditForm entry={shown} dreams={dreams} attached={attached} privateParent={privateWithParent ? parentNoun : null} pending={update.isPending} onSave={onSave} onCancel={() => setEditing(false)} />
         ) : (
           <>
             <div className="dj-entry-body" data-testid="journal-entry-body">{shown.body}</div>
@@ -395,13 +444,13 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
 
 /* ---------- Inline edit form ---------- */
 
-function JournalEditForm({ entry, dreams, attached, privateWith, pending, onSave, onCancel }: {
+function JournalEditForm({ entry, dreams, attached, privateParent, pending, onSave, onCancel }: {
   entry: JournalEntry;
   dreams?: DreamRef[];
   /** Notes attached to a rating/progress entry keep their context; only body and privacy can change. */
   attached: boolean;
-  /** Set when the note is private because its rating / progress update is: its own switch then has no say. */
-  privateWith: string | null;
+  /** Set (to the parent's noun) when the note's rating / progress update is private: its own switch then has no say. */
+  privateParent: string | null;
   pending: boolean;
   onSave: (changes: { body?: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null }) => void;
   onCancel: () => void;
@@ -474,8 +523,11 @@ function JournalEditForm({ entry, dreams, attached, privateWith, pending, onSave
             </select>
           </>
         )}
-        {privateWith
-          ? <Chip className="chip-private" title={`Share the ${privateWith} to share this note too.`} data-testid="journal-entry-edit-privacy-with"><IconLock /> Private with its {privateWith}</Chip>
+        {/* Under a private parent: a note whose own switch is shared follows it; one marked private stays private either way. */}
+        {privateParent
+          ? entry.isPrivate
+            ? <Chip className="chip-private" title={`It stays private if you share the ${privateParent}; its own switch comes back then.`} data-testid="journal-entry-edit-privacy-with"><IconLock /> Private note</Chip>
+            : <Chip className="chip-private" title={`Share the ${privateParent} to share this note too.`} data-testid="journal-entry-edit-privacy-with"><IconLock /> Private with its {privateParent}</Chip>
           : <span data-testid="journal-entry-edit-privacy"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>}
         <div className="dj-edit-actions">
           <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={pending} data-testid="journal-entry-edit-cancel">Cancel</Button>

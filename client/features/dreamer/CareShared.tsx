@@ -14,10 +14,14 @@ import { sessionBaseline } from '@/lib/sessionDelta';
 
 export const PRIVATE_HIDDEN_MSG = 'Saved as private — private entries are currently hidden.';
 
-/** The toast to show after something was saved, depending on whether any part of it is private. */
-export function savedToast(auth: AuthState | null, anyPrivate: boolean, sharedMessage: string, privateMessage: string): [string, 'success' | 'private'] {
+/**
+ * The toast to show after something was saved, depending on whether any part of it is private. `partlyHidden` is
+ * for a save that is only partly private, while private entries are hidden: it says the shared parts went through
+ * rather than that everything was saved as private.
+ */
+export function savedToast(auth: AuthState | null, anyPrivate: boolean, sharedMessage: string, privateMessage: string, partlyHidden?: string): [string, 'success' | 'private'] {
   if (!anyPrivate) return [sharedMessage, 'success'];
-  return [auth?.privateUnlocked ? privateMessage : PRIVATE_HIDDEN_MSG, 'private'];
+  return [auth?.privateUnlocked ? privateMessage : partlyHidden ?? PRIVATE_HIDDEN_MSG, 'private'];
 }
 
 /** CSS variables for a category's color + tint, for use on `style`. */

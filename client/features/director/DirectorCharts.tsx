@@ -11,7 +11,7 @@ import { Bar, BarChart, CartesianGrid, LabelList, Line, LineChart, ReferenceLine
 import { CARE_CATEGORIES, CATEGORY_META, type CareCategory } from '@shared/care';
 import type { MonthPoint } from '@shared/types';
 import { Card, EmptyState } from '@/components/ui';
-import { IconChart } from '@/components/icons';
+import { IconChart, IconUsers } from '@/components/icons';
 import { num, pct, plural } from '@/lib/format';
 
 const SESSION_COLOR = 'var(--accent)';
@@ -46,9 +46,10 @@ function monthDate(key: string): Date {
   return new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1);
 }
 
+/** The month under way, in UTC like the server's monthly buckets, so the flagged bar is the one still filling up. */
 function currentMonthKey(): string {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 /** Rows for Recharts: short month labels, with the year added only when the series spans more than one. */
@@ -150,6 +151,15 @@ function NoMonths() {
   return (
     <EmptyState icon={<IconChart />} title="No months to show yet">
       Trends appear once the program has recorded its first month of sessions.
+    </EmptyState>
+  );
+}
+
+/** A caseload trend when the coach has nobody assigned today: the months exist, but there is no one to follow. */
+function NoCaseload({ who }: { who: string }) {
+  return (
+    <EmptyState icon={<IconUsers />} title={`No dreamers in ${who}’s caseload right now`}>
+      This chart follows the dreamers assigned to {who} today.
     </EmptyState>
   );
 }
@@ -325,9 +335,13 @@ export function ActionsChart({ rows }: { rows: Row[] }) {
 
 /* ---------- All four together (coach page) ---------- */
 
-/** `sessionsBy` names the coach on a caseload: their bars are the sessions they ran, the rest follows their dreamers. */
-export function DirectorTrendGrid({ months, scope, sessionsBy, testPrefix }: { months: MonthPoint[]; scope: string; sessionsBy?: string; testPrefix: string }) {
+/**
+ * `sessionsBy` names the coach on a caseload: their bars are the sessions they ran, the rest follows their dreamers.
+ * With `caseloadSize` 0 those other cards say the caseload is empty rather than that nothing was recorded.
+ */
+export function DirectorTrendGrid({ months, scope, sessionsBy, caseloadSize, testPrefix }: { months: MonthPoint[]; scope: string; sessionsBy?: string; caseloadSize?: number; testPrefix: string }) {
   const rows = monthRows(months);
+  const noCaseload = scope !== 'team' && caseloadSize === 0 ? <NoCaseload who={sessionsBy ?? 'this coach'} /> : null;
   const sessionsDefinition = scope === 'team'
     ? 'Completed coaching sessions and self check-ins recorded each month across the team.'
     : `Completed coaching sessions ${sessionsBy ?? 'this coach'} ran, and self check-ins by dreamers in this caseload, each month.`;
@@ -337,13 +351,13 @@ export function DirectorTrendGrid({ months, scope, sessionsBy, testPrefix }: { m
         <SessionsChart rows={rows} />
       </TrendCard>
       <TrendCard title="CARE ratings by month" definition="Average of the CARE ratings recorded in coaching sessions each month, per area." rows={rows} testId={`${testPrefix}-chart-care`}>
-        <CareLinesChart rows={rows} />
+        {noCaseload ?? <CareLinesChart rows={rows} />}
       </TrendCard>
       <TrendCard title="Dream progress by month" definition="Average dream progress recorded in coaching sessions each month." rows={rows} testId={`${testPrefix}-chart-dreams`}>
-        <DreamProgressChart rows={rows} />
+        {noCaseload ?? <DreamProgressChart rows={rows} />}
       </TrendCard>
       <TrendCard title="Actions created vs completed" definition="Actions created and completed each month." rows={rows} testId={`${testPrefix}-chart-actions`}>
-        <ActionsChart rows={rows} />
+        {noCaseload ?? <ActionsChart rows={rows} />}
       </TrendCard>
     </div>
   );

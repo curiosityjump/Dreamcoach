@@ -34,7 +34,7 @@ input, textarea, select {
 }
 input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 textarea { resize: vertical; line-height: 1.5; }
-::placeholder { color: var(--muted-2); }
+::placeholder { color: var(--muted); }
 hr { border: 0; border-top: 1px solid var(--border); margin: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .muted { color: var(--muted); }

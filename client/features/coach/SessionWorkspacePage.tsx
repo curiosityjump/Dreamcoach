@@ -9,18 +9,18 @@
  * coach may see, so nothing here filters or mentions privacy.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useBlocker, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { CARE_CATEGORIES, CATEGORY_META, type RatingCategory } from '@shared/care';
-import type { CheckIn, CoachingSession, JournalEntry, SessionGrid } from '@shared/types';
+import type { ActionItem, CheckIn, CoachingSession, JournalEntry, SessionGrid } from '@shared/types';
 import { useActions, useCheckIns, useDeleteSession, useDreams, useGrid, useJournal, useOverview, useSession, useSetSessionProgress, useSetSessionRating, useUpdateSession } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
 import { presentPath, staffDreamerPath } from '@/app/routes';
 import { useToast } from '@/components/toast';
 import { Avatar, Bar, Button, Card, CardHead, CategoryChip, Chip, ConfirmDialog, EmptyState, Field, LoadingPage, Modal, SourceChip, TextArea, TextInput } from '@/components/ui';
 import { IconArrowLeft, IconCalendar, IconCheck, IconClock, IconEdit, IconInfo, IconPresent, IconRotate, IconTrash } from '@/components/icons';
-import { fmtDate, fmtDateTime, fmtTime, fromLocalInputValue, relativeTime, toLocalInputValue } from '@/lib/format';
-import { ActionComposer, ActionList } from '@/features/shared/ActionItems';
+import { dayKey, fmtDate, fmtDateTime, fmtTime, fromLocalInputValue, relativeTime, toLocalInputValue } from '@/lib/format';
+import { ActionComposer, ActionList, type ActionComposerHandle } from '@/features/shared/ActionItems';
 import { SessionGridView } from './SessionGridView';
 import { textShade } from '@/lib/color';
 
@@ -200,10 +200,24 @@ export function SessionWorkspacePage() {
   const focus = useAutosave(s?.focus ?? '', saveFocus);
   const notesStatus = combineStatus(notes.status, focus.status);
 
+  // An action typed in "New actions" but not yet added is never dropped silently: completing the session
+  // or leaving the page asks first.
+  const composerRef = useRef<ActionComposerHandle>(null);
+  const [actionDraft, setActionDraft] = useState('');
+  const draftTitle = actionDraft.trim();
+  const draftRef = useRef('');
+  draftRef.current = draftTitle;
+  const [draftAsk, setDraftAsk] = useState(false);
+  const [draftBusy, setDraftBusy] = useState(false);
+  // Set just before this page navigates away itself (completed, deleted), once nothing is left to ask about.
+  const leaving = useRef(false);
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => !leaving.current && draftRef.current !== '' && currentLocation.pathname !== nextLocation.pathname);
+  const leave = (to: string) => { leaving.current = true; nav(to); };
+
   // Grid values, actions and the session itself save as they change; warn before leaving while any
-  // of that is still on its way to the server.
+  // of that is still on its way to the server, or while an action is typed but not added.
   useEffect(() => {
-    const onBeforeUnload = (e: BeforeUnloadEvent) => { if (qc.isMutating() > 0) e.preventDefault(); };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { if (qc.isMutating() > 0 || draftRef.current) e.preventDefault(); };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [qc]);
@@ -219,20 +233,47 @@ export function SessionWorkspacePage() {
     patchSession(body).then(applySession, (e) => { toast(errorMessage(e), 'error'); void session.refetch(); });
   };
 
-  const onRating = (category: RatingCategory, value: number | null) => {
+  // Each grid write reports on its own, so in fast entry a failure is never hidden behind the next save.
+  // A value that didn't save stays marked on its cell until it goes through, and Complete sends it again.
+  const gridWrites = useRef({ pending: 0, seq: new Map<string, number>(), failed: new Map<string, () => Promise<unknown>>(), toastedAt: 0 });
+  const [gridUnsaved, setGridUnsaved] = useState(0);
+  const writeGrid = (key: string, write: () => Promise<CoachingSession>): Promise<CoachingSession> => {
+    const w = gridWrites.current;
+    const n = (w.seq.get(key) ?? 0) + 1;
+    w.seq.set(key, n);
+    w.pending += 1;
     setGridStatus('saving');
-    setRating.mutate({ sessionId: sid, category, value }, {
-      onSuccess: (data) => { applySession(data); setGridStatus('saved'); },
-      onError: (e) => { setGridStatus('error'); toast(errorMessage(e), 'error'); },
-    });
+    const settle = () => {
+      w.pending -= 1;
+      setGridUnsaved(w.failed.size);
+      if (w.pending === 0) setGridStatus(w.failed.size > 0 ? 'error' : 'saved');
+    };
+    return write().then(
+      (data) => {
+        applySession(data);
+        if (w.seq.get(key) === n) w.failed.delete(key);
+        settle();
+        return data;
+      },
+      (e: unknown) => {
+        // Only the newest write for a cell counts: an older one failing after it changes nothing.
+        if (w.seq.get(key) === n) {
+          w.failed.set(key, () => writeGrid(key, write));
+          // Once per burst, not once per keystroke: the cells and the status say the rest.
+          if (Date.now() - w.toastedAt > 5000) {
+            w.toastedAt = Date.now();
+            toast(`${errorMessage(e).replace(/\.$/, '')}. That value isn’t saved — it’s marked in the grid so you can try again.`, 'error');
+          }
+        }
+        settle();
+        throw e;
+      },
+    );
   };
-  const onProgress = (dreamId: number, value: number | null) => {
-    setGridStatus('saving');
-    setProgress.mutate({ sessionId: sid, dreamId, value }, {
-      onSuccess: (data) => { applySession(data); setGridStatus('saved'); },
-      onError: (e) => { setGridStatus('error'); toast(errorMessage(e), 'error'); },
-    });
-  };
+  const onRating = (category: RatingCategory, value: number | null) =>
+    writeGrid(`rating-${category}`, () => setRating.mutateAsync({ sessionId: sid, category, value }));
+  const onProgress = (dreamId: number, value: number | null) =>
+    writeGrid(`progress-${dreamId}`, () => setProgress.mutateAsync({ sessionId: sid, dreamId, value }));
 
   const onDate = (iso: string) => {
     const before = s?.number;
@@ -247,22 +288,60 @@ export function SessionWorkspacePage() {
     });
   };
 
-  // Typed-but-unsaved notes count too, so the delete button goes away while typing rather than
-  // when the autosave lands (which would shift "Complete session" under the pointer).
-  const isEmpty = !!s && Object.keys(s.ratings).length === 0 && Object.keys(s.progress).length === 0 && !notes.text.trim() && !focus.text.trim() && s.actionsCreated === 0;
+  // Judged like the server does, on what the coach can see: values, notes, focus, actions chosen here, and
+  // reflections staff wrote in this session (the dreamer's own words are theirs, not the session's).
+  // Typed-but-unsaved notes count too, so the delete button goes away while typing rather than when the
+  // autosave lands (which would shift "Complete session" under the pointer).
+  const journalHere = (journal.data ?? []).some((j) => j.sessionId === sid && j.author.role !== 'dreamer');
+  const nothingRecorded = !!s && Object.keys(s.ratings).length === 0 && Object.keys(s.progress).length === 0 && !notes.text.trim() && !focus.text.trim() && s.actionsCreated === 0 && !journalHere && gridUnsaved === 0;
+  const isEmpty = nothingRecorded && !draftTitle;
 
-  const complete = (anyway = false) => {
+  const complete = async ({ anyway = false, draft }: { anyway?: boolean; draft?: 'add' | 'discard' } = {}) => {
     if (!s) return;
+    let added = false;
+    if (draftTitle) {
+      if (!draft) { setDraftAsk(true); return; }
+      if (draft === 'add') {
+        setDraftBusy(true);
+        const ok = await composerRef.current?.submit();
+        setDraftBusy(false);
+        setDraftAsk(false);
+        // The composer keeps the text and says why; the session stays open.
+        if (!ok) { toast('The action couldn’t be added, so the session is still open.', 'error'); return; }
+        added = true;
+      } else {
+        composerRef.current?.discard();
+        setDraftAsk(false);
+      }
+    }
     // An empty session would still count as a session run (and the dreamer as seen), so ask first.
-    if (isEmpty && !anyway) { setConfirmEmpty(true); return; }
+    if (nothingRecorded && !added && !anyway) { setConfirmEmpty(true); return; }
     setConfirmEmpty(false);
+    // A grid value that didn't save goes again first: the record is never completed without it.
+    const unsaved = [...gridWrites.current.failed.values()];
+    if (unsaved.length > 0) {
+      try { await Promise.all(unsaved.map((retry) => retry())); }
+      catch { toast('A value in the grid still isn’t saved, so the session stays open. Check your connection and try again.', 'error'); return; }
+    }
     updateSession.mutate(
       { sessionId: sid, status: 'completed', ...(notes.isDirty() ? { notes: notes.text } : {}), ...(focus.isDirty() ? { focus: focus.text } : {}) },
       {
-        onSuccess: (data) => { applySession(data); toast(`Session ${data.number} completed.`); nav(staffDreamerPath(id, 'sessions')); },
+        onSuccess: (data) => { applySession(data); toast(`Session ${data.number} completed.`); leave(staffDreamerPath(id, 'sessions')); },
         onError: (e) => toast(errorMessage(e), 'error'),
       },
     );
+  };
+
+  // Leaving with an action typed but not added: the same question, then carry on (or stay).
+  const leaveWithDraft = async (choice: 'add' | 'discard' | 'stay') => {
+    if (blocker.state !== 'blocked') return;
+    if (choice === 'stay') { blocker.reset(); return; }
+    if (choice === 'discard') { composerRef.current?.discard(); blocker.proceed(); return; }
+    setDraftBusy(true);
+    const ok = await composerRef.current?.submit();
+    setDraftBusy(false);
+    if (ok) blocker.proceed();
+    else { blocker.reset(); toast('The action couldn’t be added, so you’re still on this page.', 'error'); }
   };
   const reopen = () => {
     updateSession.mutate({ sessionId: sid, status: 'in_progress' }, {
@@ -272,7 +351,7 @@ export function SessionWorkspacePage() {
   };
   const remove = () => {
     deleteSession.mutate(sid, {
-      onSuccess: () => { setConfirmDelete(false); setConfirmEmpty(false); toast('Session deleted.', 'info'); nav(staffDreamerPath(id)); },
+      onSuccess: () => { setConfirmDelete(false); setConfirmEmpty(false); toast('Session deleted.', 'info'); leave(staffDreamerPath(id)); },
       onError: (e) => { setConfirmDelete(false); setConfirmEmpty(false); toast(errorMessage(e), 'error'); },
     });
   };
@@ -281,34 +360,55 @@ export function SessionWorkspacePage() {
   const dreamList = useMemo(() => [...(grid.data?.dreams ?? dreams.data ?? [])].sort((a, b) => a.slot - b.slot), [grid.data?.dreams, dreams.data]);
   const dreamRefs = useMemo(() => (dreams.data ?? dreamList).map((d) => ({ id: d.id, title: d.title, slot: d.slot })), [dreams.data, dreamList]);
   const allActions = actions.data ?? [];
-  const sessionActions = useMemo(() => allActions.filter((a) => a.sessionId === sid), [allActions, sid]);
+  // In the order they were chosen, as they were agreed in the conversation.
+  const sessionActions = useMemo(
+    () => allActions.filter((a) => a.sessionId === sid).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id),
+    [allActions, sid],
+  );
 
-  // Sessions arrive oldest → newest; the previous session is the last completed one before this column.
-  const previousSession = useMemo(() => {
-    if (!grid.data || !s) return null;
-    const idx = grid.data.sessions.findIndex((x) => x.id === s.id);
-    const before = (idx >= 0 ? grid.data.sessions.slice(0, idx) : grid.data.sessions.filter((x) => x.id !== s.id)).filter((x) => x.status === 'completed');
-    return before[before.length - 1] ?? null;
+  // Sessions arrive oldest → newest. The previous session is the last completed one before this column;
+  // the next is whatever session comes after it (when an earlier session has been opened again).
+  const { previousSession, nextSession } = useMemo(() => {
+    if (!grid.data || !s) return { previousSession: null, nextSession: null };
+    const all = grid.data.sessions;
+    const idx = all.findIndex((x) => x.id === s.id);
+    const before = (idx >= 0 ? all.slice(0, idx) : all.filter((x) => x.id !== s.id)).filter((x) => x.status === 'completed');
+    return { previousSession: before[before.length - 1] ?? null, nextSession: idx >= 0 ? all[idx + 1] ?? null : null };
   }, [grid.data, s]);
 
-  // The stretch of time this session looks back on: from the end of the previous session (what was
-  // done during that one belongs to it) to the end of this one — now, while it is in progress.
-  const span = useMemo(() => ({
-    from: previousSession ? Date.parse(previousSession.completedAt ?? previousSession.occurredAt) : -Infinity,
-    to: s?.status === 'completed' ? Date.parse(s.completedAt ?? s.occurredAt) : Infinity,
-  }), [previousSession, s]);
+  // The stretch of time this session looks back on: from the end of the previous session (what was done
+  // during that one belongs to it) to the end of this one. That is when it was completed; while it is in
+  // progress, now — unless a later session exists (an earlier session opened again), whose start ends it.
+  const span = useMemo(() => {
+    const from = previousSession ? previousSession.completedAt ?? previousSession.occurredAt : null;
+    const to = s?.status === 'completed' ? s.completedAt ?? s.occurredAt : nextSession ? nextSession.occurredAt : null;
+    return {
+      fromIso: from,
+      from: from ? Date.parse(from) : -Infinity,
+      to: to ? Date.parse(to) : Infinity,
+      start: s ? Date.parse(s.occurredAt) : Infinity,
+      // Looking back on a session that is over (or followed by another), rather than one happening now.
+      past: to != null,
+    };
+  }, [previousSession, nextSession, s]);
 
-  // Actions to review: what was open during this session, plus whatever was completed or set aside
-  // in its span — by the dreamer in between, or in this conversation — so there is something to
-  // celebrate and a ticked-off action stays on the list instead of vanishing. A past session opened
-  // again never shows actions chosen later or completions from later months.
-  const reviewActions = useMemo(() => allActions.filter((a) => {
-    if (a.sessionId === sid || Date.parse(a.createdAt) > span.to) return false;
-    const closedAt = a.status === 'completed' ? a.completedAt : a.status === 'archived' ? a.archivedAt : null;
-    if (closedAt == null) return true;
+  // Actions to review: what was open when this session began, plus whatever was completed or set aside in
+  // its span — by the dreamer in between, or in this conversation — so there is something to celebrate.
+  // Never actions chosen later. An action closed after the span still shows (with what happened to it
+  // since) under the group it was in at the time, so ticking one off in a past session never hides it.
+  const closedAtOf = (a: ActionItem) => (a.status === 'completed' ? a.completedAt : a.status === 'archived' ? a.archivedAt : null);
+  const closedInSpan = useCallback((a: ActionItem) => {
+    const closedAt = closedAtOf(a);
+    if (closedAt == null) return false;
     const t = Date.parse(closedAt);
     return t > span.from && t <= span.to;
-  }), [allActions, sid, span]);
+  }, [span]);
+  const reviewActions = useMemo(() => allActions.filter((a) => {
+    if (a.sessionId === sid || Date.parse(a.createdAt) > span.to) return false;
+    const closedAt = closedAtOf(a);
+    return closedAt == null || Date.parse(closedAt) > span.start || closedInSpan(a);
+  }), [allActions, sid, span, closedInSpan]);
+  const reviewGroupOf = useCallback((a: ActionItem) => (closedInSpan(a) ? a.status : 'active'), [closedInSpan]);
 
   const since = useMemo(() => {
     const inRange = (iso: string) => { const t = Date.parse(iso); return t > span.from && t <= span.to; };
@@ -317,6 +417,15 @@ export function SessionWorkspacePage() {
       reflections: (journal.data ?? []).filter((j) => j.checkInId == null && j.sessionId == null && inRange(j.occurredAt)),
     };
   }, [span, checkIns.data, journal.data]);
+
+  // "Since last session" names the boundary it really uses: when the previous session was completed, which
+  // is a later day than it took place when it was recorded after the fact.
+  const sinceLabel = !previousSession || span.fromIso == null ? 'before the first session'
+    : dayKey(span.fromIso) === dayKey(previousSession.occurredAt) ? `after Session ${previousSession.number} · ${fmtDate(span.fromIso)}`
+    : `after Session ${previousSession.number} · completed ${fmtDate(span.fromIso)}`;
+  const sinceUntil = s?.status !== 'completed' && nextSession ? ` · until Session ${nextSession.number}` : '';
+  // Values of an earlier session are that session's, not "today's".
+  const isToday = !!s && dayKey(s.occurredAt) === dayKey(new Date().toISOString());
 
   // A new conversation starts with the CARE ratings, so the cursor waits in the first empty one —
   // on a laptop only: on a phone or tablet it would pop up the keyboard before anyone asked.
@@ -338,6 +447,14 @@ export function SessionWorkspacePage() {
   const editable = !!s && (!isCompleted || editValues);
 
   const scrollTo = (el: HTMLElement | null) => el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Straight to the first action to review (or "Mark reviewed" when there is none), like the other steps.
+  const focusReview = () => {
+    scrollTo(reviewRef.current);
+    window.setTimeout(() => {
+      const root = reviewRef.current;
+      (root?.querySelector<HTMLElement>('[data-testid="action-check"] button') ?? root?.querySelector<HTMLElement>('[data-testid="review-toggle"]'))?.focus({ preventScroll: true });
+    }, 350);
+  };
   const focusCell = (cell: string) => {
     scrollTo(gridRef.current);
     const input = gridRef.current?.querySelector<HTMLInputElement>(`input[data-cs-cell="${cell}"]`);
@@ -347,7 +464,7 @@ export function SessionWorkspacePage() {
   const steps: { n: number; label: string; hint: string; done: boolean; manual?: boolean; go: () => void; testId: string }[] = [
     { n: 1, label: 'CARE ratings', hint: 'The four areas, 0–10', done: careDone, go: () => focusCell('rating-contribution'), testId: 'step-care' },
     { n: 2, label: 'Dream progress', hint: 'Where each dream stands today', done: progressDone, go: () => focusCell(dreamList[0] ? `progress-${dreamList[0].id}` : 'rating-contribution'), testId: 'step-dreams' },
-    { n: 3, label: 'Review previous actions', hint: 'Celebrate, complete, or set aside', done: reviewed, manual: true, go: () => scrollTo(reviewRef.current), testId: 'step-review' },
+    { n: 3, label: 'Review previous actions', hint: 'Celebrate, complete, or set aside', done: reviewed, manual: true, go: focusReview, testId: 'step-review' },
     { n: 4, label: 'Commitment', hint: 'How committed right now, 0–10', done: !!commitmentDone, go: () => focusCell('rating-commitment'), testId: 'step-commitment' },
     { n: 5, label: 'New focus & actions', hint: 'What matters for the coming period', done: focusDone, go: () => { scrollTo(newRef.current); window.setTimeout(() => document.getElementById('cs-focus')?.focus({ preventScroll: true }), 350); }, testId: 'step-focus' },
     { n: 6, label: 'Satisfaction', hint: 'Satisfaction with progress, 0–10', done: !!satisfactionDone, go: () => focusCell('rating-satisfaction'), testId: 'step-satisfaction' },
@@ -405,7 +522,7 @@ export function SessionWorkspacePage() {
             {isCompleted ? (
               <Button variant="secondary" onClick={reopen} loading={updateSession.isPending} data-testid="session-reopen"><IconRotate /> Reopen</Button>
             ) : (
-              <Button variant="primary" onClick={() => complete()} loading={updateSession.isPending} data-testid="session-complete"><IconCheck /> Complete session</Button>
+              <Button variant="primary" onClick={() => void complete()} loading={updateSession.isPending} data-testid="session-complete"><IconCheck /> Complete session</Button>
             )}
             {!isCompleted && isEmpty && (
               <Button variant="ghost" icon onClick={() => setConfirmDelete(true)} aria-label="Delete this empty session" title="Delete this empty session" data-testid="session-delete"><IconTrash /></Button>
@@ -445,7 +562,7 @@ export function SessionWorkspacePage() {
           <Card className="cs-card" pad="sm" data-testid="since-last-session">
             <div className="cs-side-head">
               <h3>Since last session</h3>
-              <span className="muted tiny">{previousSession ? `after Session ${previousSession.number} · ${fmtDate(previousSession.occurredAt)}` : 'before the first session'}</span>
+              <span className="muted tiny" data-testid="since-window">{sinceLabel}{sinceUntil}</span>
             </div>
             <SinceList checkIns={since.checkIns} reflections={since.reflections} dreams={dreamList} loading={checkIns.isLoading || journal.isLoading} />
           </Card>
@@ -453,7 +570,7 @@ export function SessionWorkspacePage() {
           <Card className="cs-card" pad="sm" data-testid="dreams-glance">
             <div className="cs-side-head">
               <h3>Dreams at a glance</h3>
-              <span className="muted tiny">{previousSession ? `S${previousSession.number} → today` : 'today'}</span>
+              <span className="muted tiny">{previousSession ? `S${previousSession.number} → ${isToday ? 'today' : `S${s.number}`}` : isToday ? 'today' : `Session ${s.number}`}</span>
             </div>
             <ul className="cs-glance">
               {dreamList.map((d) => {
@@ -467,7 +584,7 @@ export function SessionWorkspacePage() {
                         {prev != null && <span className="muted">{prev}% →</span>} <b>{now == null ? '–' : `${now}%`}</b>
                       </span>
                     </div>
-                    <Bar value={now} color="var(--gold)" label={`${d.title} progress today`} />
+                    <Bar value={now} color="var(--gold)" label={`${d.title} progress ${isToday ? 'today' : `in Session ${s.number}`}`} />
                   </li>
                 );
               })}
@@ -481,7 +598,7 @@ export function SessionWorkspacePage() {
           <Card className="cs-card cs-grid-card">
             <CardHead
               title="Session grid"
-              sub={isCompleted && !editValues ? 'This session is complete. Values are shown read-only.' : 'Months side by side — today’s column is open for entry.'}
+              sub={isCompleted && !editValues ? 'This session is complete. Values are shown read-only.' : `Months side by side — ${isToday ? 'today’s' : `Session ${s.number}’s`} column is open for entry.`}
               actions={
                 <>
                   <SaveIndicator status={gridStatus} testId="grid-save-status" />
@@ -511,7 +628,7 @@ export function SessionWorkspacePage() {
             <CardHead
               title="Review previous actions"
               sub={!previousSession ? 'Actions already on the list — complete, set aside, or edit inline.'
-                : isCompleted ? `Open at the time, plus anything completed or set aside between Session ${previousSession.number} and this one.`
+                : span.past ? `Open at the time, plus anything completed or set aside between Session ${previousSession.number} and ${isCompleted || !nextSession ? 'this one' : `Session ${nextSession.number}`}.`
                 : `Still open, plus anything completed or set aside since Session ${previousSession.number}.`}
               actions={
                 <Button variant={reviewed ? 'secondary' : 'ghost'} size="sm" onClick={() => setReviewed(!reviewed)} aria-pressed={reviewed} data-testid="review-toggle">
@@ -525,7 +642,18 @@ export function SessionWorkspacePage() {
             ) : actions.error ? (
               <div className="callout callout-muted" role="alert"><IconInfo /><span>{errorMessage(actions.error)}</span></div>
             ) : (
-              <ActionList dreamerRef={id} actions={reviewActions} dreams={dreamRefs} mode="staff" filter="all" compact emptyTitle="No open actions to review" emptyBody="Everything chosen before today has been completed or set aside. A good moment to celebrate before choosing what comes next." />
+              <ActionList
+                dreamerRef={id}
+                actions={reviewActions}
+                dreams={dreamRefs}
+                mode="staff"
+                filter="all"
+                compact
+                groupOf={reviewGroupOf}
+                groupLabels={span.past ? { active: 'Open at the time' } : undefined}
+                emptyTitle="No open actions to review"
+                emptyBody={`Everything chosen before ${isToday ? 'today' : 'this session'} has been completed or set aside. A good moment to celebrate before choosing what comes next.`}
+              />
             )}
           </Card>
           </div>
@@ -534,7 +662,7 @@ export function SessionWorkspacePage() {
           <Card className="cs-card">
             <CardHead title="New actions for the coming period" sub="Small, concrete steps chosen together. They appear on the dreamer’s list right away." />
             <div className="cs-composer">
-              <ActionComposer dreamerRef={id} dreams={dreamRefs} mode="staff" sessionId={sid} autoFocus={false} />
+              <ActionComposer ref={composerRef} dreamerRef={id} dreams={dreamRefs} mode="staff" sessionId={sid} autoFocus={false} onDraftChange={setActionDraft} />
             </div>
             {sessionActions.length > 0 && (
               <div className="cs-session-actions" data-testid="session-actions">
@@ -557,7 +685,7 @@ export function SessionWorkspacePage() {
             {/* The conversation ends here, far below the header's button. */}
             {!isCompleted && (
               <div className="cs-notes-foot">
-                <Button variant="primary" onClick={() => complete()} loading={updateSession.isPending} data-testid="session-complete-end"><IconCheck /> Complete session</Button>
+                <Button variant="primary" onClick={() => void complete()} loading={updateSession.isPending} data-testid="session-complete-end"><IconCheck /> Complete session</Button>
               </div>
             )}
           </Card>
@@ -583,11 +711,32 @@ export function SessionWorkspacePage() {
           <>
             <Button variant="secondary" onClick={() => setConfirmEmpty(false)} data-testid="complete-empty-cancel">Keep working</Button>
             <Button variant="danger" onClick={remove} loading={deleteSession.isPending} disabled={busy} data-testid="complete-empty-delete"><IconTrash /> Delete instead</Button>
-            <Button variant="primary" onClick={() => complete(true)} loading={updateSession.isPending} disabled={busy} data-testid="complete-empty-confirm">Complete anyway</Button>
+            <Button variant="primary" onClick={() => void complete({ anyway: true })} loading={updateSession.isPending} disabled={busy} data-testid="complete-empty-confirm">Complete anyway</Button>
           </>
         }
       >
         <p style={{ color: 'var(--ink-2)' }}>Nothing has been recorded in this session yet. Complete it anyway? It will count as a session held. If it didn’t happen, delete it instead.</p>
+      </Modal>
+
+      <Modal
+        open={(draftAsk || blocker.state === 'blocked') && !!draftTitle}
+        onClose={() => (blocker.state === 'blocked' ? void leaveWithDraft('stay') : setDraftAsk(false))}
+        title={`Add “${draftTitle}” before ${blocker.state === 'blocked' ? 'leaving' : 'completing'}?`}
+        footer={blocker.state === 'blocked' ? (
+          <>
+            <Button variant="secondary" onClick={() => void leaveWithDraft('stay')} disabled={draftBusy} data-testid="draft-action-cancel">Stay</Button>
+            <Button variant="ghost" onClick={() => void leaveWithDraft('discard')} disabled={draftBusy} data-testid="draft-action-discard">Discard</Button>
+            <Button variant="primary" onClick={() => void leaveWithDraft('add')} loading={draftBusy} data-testid="draft-action-add">Add and leave</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={() => setDraftAsk(false)} disabled={draftBusy || busy} data-testid="draft-action-cancel">Cancel</Button>
+            <Button variant="ghost" onClick={() => void complete({ draft: 'discard' })} disabled={draftBusy || busy} data-testid="draft-action-discard">Discard</Button>
+            <Button variant="primary" onClick={() => void complete({ draft: 'add' })} loading={draftBusy || updateSession.isPending} data-testid="draft-action-add">Add and complete</Button>
+          </>
+        )}
+      >
+        <p style={{ color: 'var(--ink-2)' }}>This action is typed in “New actions” but hasn’t been added yet, so the dreamer won’t see it.</p>
       </Modal>
     </div>
   );

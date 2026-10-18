@@ -229,7 +229,8 @@ function OverviewTab({ id, overview }: { id: number; overview: DreamerOverview }
    ====================================================================== */
 
 function SessionDetail({ id, session: s, prev, dreams, actions }: { id: number; session: CoachingSession; prev: CoachingSession | null; dreams: Dream[]; actions: ActionItem[] }) {
-  const own = useMemo(() => actions.filter((a) => a.sessionId === s.id), [actions, s.id]);
+  // In the order they were chosen in the conversation.
+  const own = useMemo(() => actions.filter((a) => a.sessionId === s.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id), [actions, s.id]);
   const inProgress = s.status === 'in_progress';
   return (
     <Card className="cv-session-detail" data-testid="session-detail" data-session-id={s.id}>
@@ -654,10 +655,12 @@ export function StaffDreamerPage() {
   const tab: Tab = (TABS as readonly string[]).includes(params.tab ?? '') ? (params.tab as Tab) : 'overview';
   const { auth } = useAuth();
   const isDirector = auth?.user.role === 'director';
-  const backTo = isDirector ? '/director/dreamers' : '/coach';
-  const backLabel = isDirector ? 'All dreamers' : 'My dreamers';
   // A 404 (unknown dreamer, or one outside this coach's caseload) is final — don't retry it.
   const overview = useOverview(id, { enabled: valid, retry: (count, err) => !is404(err) && count < 2 });
+  // The Director's own dreamers lead back to their coaching list, everyone else's to All dreamers.
+  const ownCaseload = !isDirector || (overview.data != null && overview.data.dreamer.coach?.userId === auth?.user.id);
+  const backTo = ownCaseload ? '/coach' : '/director/dreamers';
+  const backLabel = !isDirector ? 'My dreamers' : ownCaseload ? 'My coaching' : 'All dreamers';
 
   if (!valid || (overview.isError && is404(overview.error))) return <NotFound backTo={backTo} backLabel={backLabel} />;
   if (overview.isPending) return <div className="page page-wide"><LoadingPage label="Loading dreamer…" /></div>;

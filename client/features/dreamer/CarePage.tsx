@@ -148,11 +148,12 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
       }),
     };
     const anyPrivate = input.ratings!.some((r) => r.isPrivate || r.notePrivate);
+    const allPrivate = input.ratings!.every((r) => r.isPrivate);
     create.mutate(input, {
       onSuccess: () => {
         const names = rated.map((c) => CATEGORY_META[c].label);
         const list = names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-        const [msg, kind] = savedToast(auth, anyPrivate, `Check-in saved — ${list} updated.`, `Check-in saved — the private parts are only visible to you.`);
+        const [msg, kind] = savedToast(auth, anyPrivate, `Check-in saved — ${list} updated.`, `Check-in saved — the private parts are only visible to you.`, allPrivate ? undefined : `Check-in saved — ${list} updated; the private parts are hidden right now.`);
         toast(msg, kind);
         reset();
       },
@@ -326,7 +327,7 @@ function QuickRatingCard({ category, latest, sessions }: { category: ProgramCate
     const anyPrivate = priv || (!!text && notePriv);
     create.mutate({ ratings: [{ category, value, isPrivate: priv, ...(text ? { note: text, notePrivate: notePriv || priv } : {}) }] }, {
       onSuccess: () => {
-        const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, `${m.label} saved as private — only you can see it.`);
+        const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, `${m.label} saved as private — only you can see it.`, priv ? undefined : `${m.label} saved: ${value}. Your private note is hidden right now.`);
         toast(msg, kind);
         reset();
       },

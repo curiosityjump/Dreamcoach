@@ -14,10 +14,13 @@ import type { Dream } from '@shared/types';
 
 export const DREAM_COLOR = 'var(--gold)';
 
-/** Toast copy after saving something, respecting the privacy rules in the client guide. */
-export function privacyToast(toast: (m: string, k?: 'success' | 'error' | 'info' | 'private') => void, savedPrivate: boolean, unlocked: boolean, sharedMessage: string, privateMessage = 'Saved as private.') {
+/**
+ * Toast copy after saving something, respecting the privacy rules in the client guide. `partlyHidden` is for a save
+ * that is only partly private (a shared update with a private note) while private entries are hidden.
+ */
+export function privacyToast(toast: (m: string, k?: 'success' | 'error' | 'info' | 'private') => void, savedPrivate: boolean, unlocked: boolean, sharedMessage: string, privateMessage = 'Saved as private.', partlyHidden?: string) {
   if (!savedPrivate) return toast(sharedMessage, 'success');
-  toast(unlocked ? privateMessage : 'Saved as private — private entries are currently hidden.', 'private');
+  toast(unlocked ? privateMessage : partlyHidden ?? 'Saved as private — private entries are currently hidden.', 'private');
 }
 
 export function DreamsProgressDialog({ dream, open, onClose, onSaved }: { dream: Dream; open: boolean; onClose: () => void; onSaved?: (value: number) => void }) {
@@ -50,7 +53,7 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
         : isPrivate
           ? 'Saved as private — a 100% only you can see. Your dream is marked achieved when a shared update reaches 100%.'
           : 'Saved — your note is private, and this dream is achieved. Celebrate it.';
-      privacyToast(toast, anyPrivate, !!auth?.privateUnlocked, shared, privateMessage);
+      privacyToast(toast, anyPrivate, !!auth?.privateUnlocked, shared, privateMessage, isPrivate ? undefined : `${shared} Your private note is hidden right now.`);
       onSaved?.(value);
       onClose();
     } catch (e) {

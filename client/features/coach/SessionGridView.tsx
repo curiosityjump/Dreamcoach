@@ -8,7 +8,7 @@
  * the two sources never blur together. The server already returns only what the
  * viewer may see, so an empty cell is simply an empty cell.
  */
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, PROGRESS_MAX, PROGRESS_MIN, RATING_MAX, RATING_MIN, type RatingCategory } from '@shared/care';
 import type { CoachingSession, SessionGrid } from '@shared/types';
 import { CategoryChip, PrivateChip } from '@/components/ui';
@@ -19,9 +19,13 @@ export interface SessionGridViewProps {
   /** The session being edited (its column is highlighted and editable when `editable`). */
   currentSessionId?: number | null;
   editable?: boolean;
-  /** Called when the coach edits a value in the current session column. `null` clears a cell. */
-  onRating?: (category: RatingCategory, value: number | null) => void;
-  onProgress?: (dreamId: number, value: number | null) => void;
+  /**
+   * Called when the coach edits a value in the current session column. `null` clears a cell. Return the
+   * save's promise so a value that didn't save stays marked on its cell and goes again on the next
+   * Enter, Tab or blur.
+   */
+  onRating?: (category: RatingCategory, value: number | null) => Promise<unknown> | void;
+  onProgress?: (dreamId: number, value: number | null) => Promise<unknown> | void;
   /** Clicking a column header selects that session (e.g. to open/edit it). */
   onSelectSession?: (sessionId: number) => void;
   /** Show at most the last N sessions (default: all; the grid scrolls horizontally). */
@@ -44,10 +48,11 @@ function TinyDelta({ now, prev, points }: { now: number | null; prev: number | n
   const d = now - prev;
   if (d === 0) return null;
   const cls = d > 0 ? 'cs-delta-up' : 'cs-delta-down';
-  // Dream progress changes are percentage points, so they read "pts", never "%".
+  const n = Math.abs(d);
+  // Dream progress changes are percentage points, so they read "pts" ("1 pt"), never "%".
   return (
-    <span className={`cs-delta ${cls} tnum`} aria-label={`${d > 0 ? 'up' : 'down'} ${Math.abs(d)}${points ? ' points' : ''} from the previous session`}>
-      {d > 0 ? '+' : '−'}{Math.abs(d)}{points && <span className="cs-delta-unit"> pts</span>}
+    <span className={`cs-delta ${cls} tnum`} aria-label={`${d > 0 ? 'up' : 'down'} ${n}${points ? (n === 1 ? ' point' : ' points') : ''} from the previous session`}>
+      {d > 0 ? '+' : '−'}{n}{points && <span className="cs-delta-unit"> {n === 1 ? 'pt' : 'pts'}</span>}
     </span>
   );
 }
@@ -65,13 +70,15 @@ function PrivateMark() {
  * commits on change (after a short pause), on blur and on Enter; an empty field
  * clears the value on blur or Enter. As in a spreadsheet, Enter and the up/down
  * arrows move between rows (they never change the number), a new number replaces
- * the old one until the coach starts typing, and Escape cancels the edit.
+ * the old one until the coach starts typing, and Escape cancels the edit. A value
+ * that didn't save keeps its number, is marked on the cell, and is sent again on
+ * the next Enter, Tab or blur — even when the number typed is the same.
  */
 function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cellId, trailing }: {
   value: number | null;
   min: number;
   max: number;
-  onCommit: (v: number | null) => void;
+  onCommit: (v: number | null) => Promise<unknown> | void;
   label: string;
   suffix?: string;
   testId: string;
@@ -88,12 +95,20 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   // Nothing typed since the cell was focused (or since Escape): the whole value stays selected,
   // so a click inside the cell can't drop the caret after it and have the next digits appended.
   const untouched = useRef(true);
+  // The last value sent didn't reach the server: the cell says so, and the same number counts as a change.
+  const [failed, setFailed] = useState(false);
+  const failedRef = useRef(false);
+  const markFailed = (v: boolean) => { failedRef.current = v; setFailed(v); };
+  // Only the newest send decides whether the cell is marked (an older one may settle after it).
+  const sends = useRef(0);
+  const errorId = useId();
 
   // Reflect server changes when the coach isn't mid-edit.
   useEffect(() => {
     if (!focused.current) {
       setText(value == null ? '' : String(value));
       lastSent.current = value;
+      markFailed(false);
     }
   }, [value]);
 
@@ -112,9 +127,15 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
     if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
     const parsed = parse(t);
     if (parsed === undefined) return false;
-    if (parsed === lastSent.current) return false;
+    if (parsed === lastSent.current && !failedRef.current) return false;
     lastSent.current = parsed;
-    onCommit(parsed);
+    // Sent again: the cell stays marked until the answer comes, but a blur right after Enter doesn't resend.
+    failedRef.current = false;
+    const n = ++sends.current;
+    onCommit(parsed)?.then(
+      () => { if (sends.current === n) markFailed(false); },
+      () => { if (sends.current === n) markFailed(true); },
+    );
     return true;
   };
 
@@ -174,7 +195,7 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   };
 
   return (
-    <span className="cs-cell-edit">
+    <span className={`cs-cell-edit${failed ? ' is-failed' : ''}`}>
       <input
         type="number"
         inputMode="numeric"
@@ -185,8 +206,11 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
         value={text}
         placeholder="–"
         aria-label={label}
+        aria-invalid={failed || undefined}
+        aria-describedby={failed ? errorId : undefined}
         data-testid={testId}
         data-cs-cell={cellId}
+        data-save-failed={failed || undefined}
         onFocus={(e) => { focused.current = true; untouched.current = true; atFocus.current = lastSent.current; e.currentTarget.select(); }}
         onMouseUp={(e) => { if (untouched.current) { e.preventDefault(); e.currentTarget.select(); } }}
         onBlur={() => { focused.current = false; commit(text); }}
@@ -194,7 +218,9 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
         onKeyDown={onKeyDown}
       />
       {suffix && <span className="cs-input-suffix" aria-hidden>{suffix}</span>}
-      {trailing}
+      {failed
+        ? <span className="cs-cell-error" id={errorId} title="This value didn’t save. Press Enter, or move to another cell, to try again." data-testid="grid-cell-error">Not saved</span>
+        : trailing}
     </span>
   );
 }

@@ -87,6 +87,7 @@
 .dd-note-lock svg { width: 11px; height: 11px; }
 .dd-menu-danger { color: var(--danger); }
 .dd-menu-danger svg { color: var(--danger); }
+.dd-menu-note { padding: 8px 10px 4px; max-width: 240px; line-height: 1.4; }
 .dd-entry .user-menu .menu { min-width: 240px; }
 .dd-hidden-note-body { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .dd-hidden-note-body .btn svg { width: 16px; height: 16px; margin-top: 0; }

@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from 'react';
 import { useSearchParams } from 'react-router';
 import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, isCareCategory, type CareCategory, type RatingCategory } from '@shared/care';
-import type { Dream, JournalEntry, TimelineItem } from '@shared/types';
+import type { CoachingSession, Dream, JournalEntry, TimelineItem } from '@shared/types';
 import { useCreateJournal, useDreams, useJournal, useOverview, useTimeline } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
 import { useAuth } from '@/auth/AuthContext';
@@ -54,10 +54,26 @@ function entryMatches(e: JournalEntry, f: Filters, dreams: DreamRef[], q: string
   return true;
 }
 
+/** The server lists which of a session's values are private (only to the owner, only while they are shown). */
+function sessionPrivate(s: CoachingSession, f: Filters): boolean {
+  const ratings = s.privateRatings ?? [];
+  const progress = s.privateProgress ?? [];
+  if (f.category != null || f.dreamId != null) {
+    return (f.category != null && ratings.includes(f.category)) || (f.dreamId != null && progress.includes(f.dreamId));
+  }
+  return ratings.length + progress.length > 0;
+}
+
 function itemMatches(it: TimelineItem, f: Filters, dreams: DreamRef[], q: string): boolean {
   const dreamId = it.kind === 'progress' ? it.item.dreamId : it.kind === 'journal' || it.kind === 'action' ? it.item.dreamId : null;
   const category = it.kind === 'rating' || it.kind === 'journal' || it.kind === 'action' ? it.item.category : null;
-  const isPrivate = it.kind === 'session' ? false : it.kind === 'journal' ? entryPrivate(it.item) : it.item.isPrivate;
+  // Notes travel inside their rating or progress update here, so a private note makes its row private too. A
+  // session is private when the value that matched is (under an area or dream filter), or when it has any.
+  const isPrivate =
+    it.kind === 'journal' ? entryPrivate(it.item)
+    : it.kind === 'session' ? sessionPrivate(it.item, f)
+    : it.kind === 'action' ? it.item.isPrivate
+    : it.item.isPrivate || !!it.item.note?.isPrivate;
   // A coaching session carries the values recorded in it, so it belongs under any area or dream it has a value for.
   if (it.kind === 'session') {
     if (f.dreamId != null && it.item.progress[f.dreamId] == null) return false;
@@ -207,6 +223,7 @@ export function JournalPage() {
             mode="dreamer"
             dreams={dreamRefs}
             groupByDay
+            sessionValues={filters.category != null || filters.dreamId != null || filters.privateOnly ? { category: filters.category, dreamId: filters.dreamId, privateOnly: filters.privateOnly } : undefined}
             emptyTitle={filtering ? 'Nothing matches' : 'Nothing here yet'}
             emptyBody={filtering ? 'Try a different word, or clear the filters to see everything again.' : 'Your ratings, progress updates, reflections, actions and sessions will appear here as they happen.'}
           />
@@ -276,9 +293,6 @@ function FilterBar({ filters, onChange, dreams, categories, showPrivate, placeho
         />
       </div>
       <div className="dj-chips" role="group" aria-label="Filter by">
-        {clearable && (
-          <button type="button" className="dj-text-btn" onClick={() => onChange(NO_FILTERS)} data-testid="journal-filters-clear">Clear</button>
-        )}
         {dreams.map((d) => (
           <button
             key={d.id}
@@ -312,6 +326,10 @@ function FilterBar({ filters, onChange, dreams, categories, showPrivate, placeho
           <button type="button" className="dj-filter-chip dj-filter-private" aria-pressed={filters.privateOnly} onClick={() => set({ privateOnly: !filters.privateOnly })} data-testid="journal-filter-private">
             <IconLock /> Private only
           </button>
+        )}
+        {/* After the chips, so applying a filter never moves the one just clicked (phones show it first on the rail). */}
+        {clearable && (
+          <button type="button" className="dj-text-btn dj-filters-clear" onClick={() => onChange(NO_FILTERS)} data-testid="journal-filters-clear">Clear</button>
         )}
       </div>
     </div>

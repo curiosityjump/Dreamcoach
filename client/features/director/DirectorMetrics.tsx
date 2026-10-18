@@ -30,12 +30,15 @@ export function fmtDayRange(from: string, to: string): string {
   return `${fmtDay(from, { month: 'long', day: 'numeric', year: 'numeric' })} – ${fmtDay(to, { month: 'long', day: 'numeric', year: 'numeric' })}`;
 }
 
-/** Which month of the program we are in, e.g. { current: 9, total: 10 }; null outside the program window. */
+/**
+ * Which month of the program we are in, e.g. { current: 9, total: 10 }; null outside the program window.
+ * `now` is read in UTC, like the server's monthly buckets, so the counter agrees with the charts and "Sessions this month".
+ */
 export function programMonth(startsOn: string, endsOn: string, now = new Date()): { current: number; total: number } | null {
   const s = new Date(Number(startsOn.slice(0, 4)), Number(startsOn.slice(5, 7)) - 1, 1);
   const e = new Date(Number(endsOn.slice(0, 4)), Number(endsOn.slice(5, 7)) - 1, 1);
   const total = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1;
-  const current = (now.getFullYear() - s.getFullYear()) * 12 + (now.getMonth() - s.getMonth()) + 1;
+  const current = (now.getUTCFullYear() - s.getFullYear()) * 12 + (now.getUTCMonth() - s.getMonth()) + 1;
   if (current < 1 || current > total) return null;
   return { current, total };
 }

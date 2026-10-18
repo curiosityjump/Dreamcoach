@@ -39,7 +39,7 @@
 .cs-cell.cs-cur { background: var(--accent-soft); }
 .cs-section-row + .cs-row .cs-cell.cs-cur { border-top: 0; }
 .cs-val { display: inline-flex; align-items: baseline; justify-content: center; gap: 4px; font-weight: 500; }
-.cs-none { color: var(--muted-2); font-weight: 400; }
+.cs-none { color: var(--muted); font-weight: 400; }
 .cs-delta { font-size: 11px; font-weight: 600; letter-spacing: 0; }
 .cs-delta-up { color: var(--success); }
 .cs-delta-down { color: var(--ink-2); opacity: 0.8; }
@@ -57,6 +57,10 @@
 .cs-input::placeholder { color: var(--muted-2); font-weight: 400; }
 .cs-input-suffix { font-size: 12px; color: var(--muted); }
 .cs-cell-edit .cs-delta { margin-left: 3px; min-width: 22px; text-align: left; }
+/* a value that didn't save: marked until it goes through */
+.cs-cell-edit.is-failed .cs-input { border-color: var(--danger); background: var(--danger-soft); }
+.cs-cell-edit.is-failed .cs-input:focus { box-shadow: 0 0 0 3px var(--danger-soft); }
+.cs-cell-error { margin-left: 4px; font-size: 11px; font-weight: 600; line-height: 1.15; color: var(--danger); white-space: nowrap; cursor: help; }
 .cs-editing .cs-cell.cs-cur { padding: 0 6px !important; }
 
 /* compact */
@@ -101,7 +105,7 @@
 .cs-about { margin-top: 1px; }
 .cs-head-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-top: 8px; font-size: 14px; color: var(--ink-2); }
 .cs-session-label { font-weight: 600; color: var(--ink); }
-.cs-sep { color: var(--muted-2); }
+.cs-sep { color: var(--muted); }
 .cs-head-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .cs-date-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 8px; margin: 0 -4px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink-2); font-size: 14px; font-variant-numeric: tabular-nums; }
 .cs-date-btn svg { width: 14px; height: 14px; color: var(--muted); }
@@ -144,7 +148,7 @@
 .cs-save-error { color: var(--danger); }
 
 /* steps */
-.cs-steps-head, .cs-side-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.cs-steps-head, .cs-side-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 10px; margin-bottom: 8px; }
 .cs-steps-head h3, .cs-side-head h3 { font-size: 16px; }
 .cs-steps-count { font-size: 12.5px; color: var(--muted); font-weight: 500; }
 .cs-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -194,6 +198,12 @@
 .cs-glance-vals { white-space: nowrap; flex: none; }
 .cs-glance-vals b { font-weight: 600; color: var(--ink); }
 
+@media (min-width: 1041px) {
+  /* The page's bottom spacing sits inside the layout, so at the very end of the page the sticky
+     sidebar still has room below it and never slides up under the top bar. */
+  .cs-page { padding-bottom: 0; }
+  .cs-main { padding-bottom: 64px; }
+}
 @media (max-width: 1040px) {
   .cs-layout { grid-template-columns: 1fr; grid-template-areas: none; }
   .cs-main { grid-area: auto; }

@@ -169,6 +169,34 @@ test('a dreamer’s own note on a session-recorded entry counts as their journal
   assert.equal(after.journalEntries30d, listed.length, 'the count matches the dreamer’s own entries on the Reflections tab');
 });
 
+test('a note on a session value is a reflection dated when it was written, for Last self activity and Engaged alike', async () => {
+  const coach = await staff('priya@dreamcoach.demo');
+  const director = await staff('director@dreamcoach.demo');
+  const dreamer = new Client(s.base);
+  const auth = await dreamer.login('grace@dreamcoach.demo');
+  const id = auth.dreamerId;
+  const snap = async () => (await coach.get(`/dreamers/${id}/overview`)).body.snapshot;
+  const before = await snap();
+  // A value recorded in a session two months ago, noted today.
+  const old = (await dreamer.get('/dreamers/me/ratings?category=relationships')).body.find((r: any) => r.source === 'session' && !r.note && r.occurredAt < minutesAgo(60 * 24 * 60));
+  assert.ok(old);
+  const noted = await dreamer.patch(`/dreamers/me/ratings/${old.id}`, { note: 'Looking back, this was the month I started calling my sister again.' });
+  assert.equal(noted.status, 200);
+  const after = await snap();
+  assert.deepEqual(after.lastSelfActivity, { at: noted.body.note.createdAt, kind: 'reflection' });
+  assert.equal(after.journalEntries30d, before.journalEntries30d + 1);
+  // The Director's row says the same, and across the team "Engaged" means exactly a self activity in the last 30 days.
+  const rows = (await director.get('/director/dreamers')).body;
+  assert.deepEqual(rows.find((r: any) => r.dreamer.id === id).snapshot.lastSelfActivity, after.lastSelfActivity);
+  const d30 = minutesAgo(30 * 24 * 60);
+  for (const r of rows) {
+    const engaged = r.snapshot.selfCheckIns30d > 0 || r.snapshot.journalEntries30d > 0;
+    assert.equal(engaged, !!r.snapshot.lastSelfActivity && r.snapshot.lastSelfActivity.at >= d30, `${r.dreamer.name}: Engaged and Last self activity agree`);
+  }
+  await dreamer.patch(`/dreamers/me/ratings/${old.id}`, { note: null });
+  assert.deepEqual(await snap(), before);
+});
+
 test('the team overview counts dreamers with no coach', async () => {
   const director = await staff('director@dreamcoach.demo');
   const overview = async () => (await director.get('/director/overview')).body;

@@ -19,7 +19,7 @@ import { WheelOfLife, type WheelValues } from '@/components/WheelOfLife';
 import { MultiTrendChart, type TrendPoint } from '@/components/charts';
 import { Bar, Delta, LoadingPage, Stat } from '@/components/ui';
 import { IconArrowLeft, IconBrand, IconInfo } from '@/components/icons';
-import { firstName, fmtDate, fmtMonthLong, fmtTime } from '@/lib/format';
+import { dayKey, firstName, fmtDate, fmtMonthLong, fmtTime } from '@/lib/format';
 
 const POLL_MS = 4000;
 
@@ -85,6 +85,8 @@ export function PresentPage() {
 
   const dreamer = overview.data.dreamer;
   const delta = (now: number | null | undefined, prev: number | null | undefined) => (now == null || prev == null ? null : now - prev);
+  // Presenting an earlier session shows that session's values, not "today's".
+  const isToday = dayKey(s.occurredAt) === dayKey(new Date().toISOString());
 
   return (
     <div className="csp-page" data-testid="present-page">
@@ -101,8 +103,14 @@ export function PresentPage() {
 
       <main className="csp-grid">
         <section className="csp-panel csp-wheel" aria-label="CARE wheel">
-          <h2 className="csp-h2">CARE today</h2>
-          <WheelOfLife values={todayWheel} compare={lastWheel} size={440} valueLabel="Today" compareLabel={previous ? `Last session (S${previous.number})` : undefined} />
+          <h2 className="csp-h2">{isToday ? 'CARE today' : `CARE at Session ${s.number}`}</h2>
+          <WheelOfLife
+            values={todayWheel}
+            compare={lastWheel}
+            size={440}
+            valueLabel={isToday ? 'Today' : `Session ${s.number}`}
+            compareLabel={previous ? (isToday ? `Last session (S${previous.number})` : `Session ${previous.number}`) : undefined}
+          />
           <ul className="csp-care-list" data-testid="present-care">
             {CARE_CATEGORIES.map((c) => {
               const now = s.ratings[c] ?? null;
@@ -134,13 +142,13 @@ export function PresentPage() {
                     </div>
                     <div className="csp-dream-num">
                       <span className="csp-dream-pct tnum">{now == null ? '–' : `${now}%`}</span>
-                      {/* Until today's value is in, the bar stays empty and last session's value is named as such. */}
+                      {/* Until this session's value is in, the bar stays empty and last session's value is named as such. */}
                       {now == null && prev != null && previous
                         ? <span className="csp-dream-was tnum" data-testid="present-dream-was">S{previous.number}: {prev}%</span>
                         : <Delta value={delta(now, prev)} digits={0} suffix=" pts" />}
                     </div>
                   </div>
-                  <Bar value={now} color="var(--gold)" large label={`${d.title} progress today`} />
+                  <Bar value={now} color="var(--gold)" large label={`${d.title} progress ${isToday ? 'today' : `in Session ${s.number}`}`} />
                 </li>
               );
             })}

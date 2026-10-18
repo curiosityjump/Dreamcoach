@@ -175,9 +175,9 @@ function DreamRow({ dream, base }: { dream: Dream; base: Baseline }) {
         </div>
         <div className="dh-dream-pct tnum" aria-hidden>{dream.progress != null ? `${dream.progress}%` : ''}</div>
       </div>
-      <Bar value={dream.progress} color={achieved ? 'var(--success)' : undefined} label={`${dream.title || 'Dream'} progress`} />
+      <Bar value={dream.progress} label={`${dream.title || 'Dream'} progress`} />
       <div className="dh-dream-meta">
-        {achieved && <Chip className="chip-success"><IconCheck /> Achieved {fmtDate(dream.achievedAt)}</Chip>}
+        {achieved && <AchievedChip achievedAt={dream.achievedAt!} />}
         {dream.progressIsPrivate && <span data-testid="home-dream-private"><PrivateChip /></span>}
         {dream.progress == null ? (
           <span>No progress recorded yet</span>
@@ -190,6 +190,16 @@ function DreamRow({ dream, base }: { dream: Dream; base: Baseline }) {
         <span>{dream.activeActions ? plural(dream.activeActions, 'active action') : 'No active actions'}</span>
       </div>
     </Link>
+  );
+}
+
+/** The gold "Achieved · Sep 16" chip, the same on Home, the dreams list and a dream's page. */
+export function AchievedChip({ achievedAt, compact }: { achievedAt: string; compact?: boolean }) {
+  return (
+    <Chip className="dd-achieved" title={`Achieved ${fmtDate(achievedAt, { month: 'long', day: 'numeric', year: 'numeric' })}`}>
+      <IconCheck />
+      {compact ? 'Achieved' : `Achieved · ${fmtDate(achievedAt)}`}
+    </Chip>
   );
 }
 
@@ -320,6 +330,9 @@ function CoachingCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: 
     return done.reduce((a, b) => (a.occurredAt > b.occurredAt ? a : b));
   }, [sessions.data]);
   const who = coachName ? firstName(coachName) : 'your coach';
+  // The first two lines of the notes: the clamp then never lands just after a full stop ("84%.…"), and the
+  // whole of them is one click away.
+  const notes = lastCompleted ? lastCompleted.notes.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 2).join('\n') : '';
 
   return (
     <Card data-testid="home-coaching">
@@ -353,8 +366,8 @@ function CoachingCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: 
           {lastCompleted.focus && (
             <div className="dh-session-focus"><span className="dh-eyebrow">Focus</span><span>{lastCompleted.focus}</span></div>
           )}
-          {lastCompleted.notes.trim() ? (
-            <p className="dh-session-notes">{lastCompleted.notes}</p>
+          {notes ? (
+            <p className="dh-session-notes">{notes}</p>
           ) : (
             <p className="dh-session-notes muted">No notes were written for this session.</p>
           )}

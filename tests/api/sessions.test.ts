@@ -127,6 +127,73 @@ test('an empty in-progress session can be deleted; a completed one cannot', asyn
   assert.equal((await coach.del(`/dreamers/${id}/sessions/${completed.id}`)).status, 400);
 });
 
+test('a session that looks empty to the coach can be deleted after clearing values the dreamer had written notes on', async () => {
+  const coach = new Client(s.base);
+  await coach.login('maya@dreamcoach.demo');
+  const dreamer = new Client(s.base);
+  const auth = await dreamer.login('lena@dreamcoach.demo');
+  const id = auth.dreamerId;
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const started = await coach.post(`/dreamers/${id}/sessions`, {});
+  assert.equal(started.status, 201);
+  const sid = started.body.id;
+  const dream = (await coach.get(`/dreamers/${id}/dreams`)).body[0];
+  await coach.put(`/dreamers/${id}/sessions/${sid}/ratings`, { category: 'energy', value: 6 });
+  await coach.put(`/dreamers/${id}/sessions/${sid}/progress`, { dreamId: dream.id, value: 20 });
+  const rating = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => r.sessionId === sid);
+  const progress = (await dreamer.get(`/dreamers/me/progress?dreamId=${dream.id}`)).body.find((p: any) => p.sessionId === sid);
+  const shared = 'Slept properly three nights in a row before this.';
+  const kept = 'Only 20% because I have not started the study guide yet.';
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: shared, notePrivate: false })).status, 200);
+  assert.equal((await dreamer.patch(`/dreamers/me/progress/${progress.id}`, { note: kept, notePrivate: true })).status, 200);
+  // A dreamer's own entry tied to the session is theirs, not session content.
+  const own = await dreamer.post('/dreamers/me/journal', { body: 'Talked it through with Maya today.', sessionId: sid });
+  assert.equal(own.status, 201);
+
+  // The coach clears both cells: to them the session is empty again, and it can be deleted.
+  await coach.put(`/dreamers/${id}/sessions/${sid}/ratings`, { category: 'energy', value: null });
+  const cleared = (await coach.put(`/dreamers/${id}/sessions/${sid}/progress`, { dreamId: dream.id, value: null })).body;
+  assert.deepEqual([cleared.ratings, cleared.progress, cleared.notes, cleared.focus, cleared.actionsCreated], [{}, {}, '', '', 0]);
+  const del = await coach.del(`/dreamers/${id}/sessions/${sid}`);
+  assert.equal(del.status, 200, JSON.stringify(del.body));
+
+  // The dreamer's words survive as their own reflections, no longer part of any session.
+  const journal = (await dreamer.get('/dreamers/me/journal')).body;
+  const sharedNote = journal.find((j: any) => j.body === shared);
+  const privateNote = journal.find((j: any) => j.body === kept);
+  assert.deepEqual([sharedNote.sessionId, sharedNote.ratingId, sharedNote.source, sharedNote.category, sharedNote.isPrivate], [null, null, 'self', 'energy', false]);
+  assert.deepEqual([privateNote.sessionId, privateNote.progressId, privateNote.source, privateNote.dreamId, privateNote.isPrivate], [null, null, 'self', dream.id, true]);
+  assert.equal(journal.find((j: any) => j.id === own.body.id).sessionId, null);
+  const staffJournal = (await coach.get(`/dreamers/${id}/journal`)).body;
+  assert.equal(staffJournal.find((j: any) => j.body === shared).sessionId, null);
+  assert.ok(!staffJournal.some((j: any) => j.body === kept));
+  for (const j of [sharedNote, privateNote, own.body]) await dreamer.del(`/dreamers/me/journal/${j.id}`);
+});
+
+test('staff session payloads keep a fixed cell order: a private note on a session value moves nothing', async () => {
+  const director = new Client(s.base);
+  await director.login('director@dreamcoach.demo');
+  const dreamer = new Client(s.base);
+  const auth = await dreamer.login('alicia@dreamcoach.demo');
+  const id = auth.dreamerId;
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const paths = [`/dreamers/${id}/sessions`, `/dreamers/${id}/grid`, `/dreamers/${id}/overview`, `/dreamers/${id}/timeline`, `/dreamers/${id}/progress`, '/director/dreamers'];
+  const capture = async () => Promise.all(paths.map(async (p) => JSON.stringify((await director.get(p)).body)));
+  const sessions = (await director.get(`/dreamers/${id}/sessions`)).body;
+  for (const x of sessions) assert.deepEqual(Object.keys(x.ratings), ['contribution', 'alignment', 'relationships', 'energy', 'commitment', 'satisfaction'].filter((c) => c in x.ratings), `session ${x.number} lists cells in CARE order`);
+  const before = await capture();
+  // A private note on the first CARE value of the first and the latest session.
+  const targets = [sessions[0], sessions.filter((x: any) => x.status === 'completed').slice(-1)[0]];
+  const ratings = (await dreamer.get('/dreamers/me/ratings?category=contribution')).body;
+  for (const x of targets) {
+    const r = ratings.find((e: any) => e.sessionId === x.id);
+    assert.equal((await dreamer.patch(`/dreamers/me/ratings/${r.id}`, { note: 'Not something I want to bring up yet.', notePrivate: true })).status, 200);
+  }
+  const after = await capture();
+  paths.forEach((p, i) => assert.equal(after[i], before[i], `${p} is byte-identical for staff`));
+  for (const x of targets) await dreamer.patch(`/dreamers/me/ratings/${ratings.find((e: any) => e.sessionId === x.id).id}`, { note: null });
+});
+
 test('director can run a session for any dreamer; coach cannot for another caseload', async () => {
   const director = new Client(s.base);
   await director.login('director@dreamcoach.demo');
@@ -331,4 +398,20 @@ test('a journal entry can only be tagged with the dreamer’s own dreams', async
   }
   assert.equal((await dreamer.patch(`/dreamers/me/journal/${j.id}`, { dreamId: mine.id })).body.dreamId, mine.id);
   await dreamer.del(`/dreamers/me/journal/${j.id}`);
+});
+
+test('a dreamer’s note on a coach-recorded value appears in their timeline beside the session', async () => {
+  const dreamer = new Client(s.base);
+  await dreamer.login('owen@dreamcoach.demo');
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const rating = (await dreamer.get('/dreamers/me/ratings?category=alignment')).body.find((r: any) => r.source === 'session' && !r.note && !r.isPrivate);
+  assert.ok(rating);
+  const body = 'What I meant by that number, in my own words.';
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: body, notePrivate: true })).status, 200);
+  const items = (await dreamer.get('/dreamers/me/timeline?limit=1000')).body as any[];
+  const note = items.find((it) => it.kind === 'journal' && it.item.body === body);
+  assert.ok(note, 'the note is listed');
+  assert.equal(note.item.ratingId, rating.id);
+  assert.ok(items.some((it) => it.kind === 'session' && it.item.id === rating.sessionId), 'its session is listed too');
+  await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: null });
 });
