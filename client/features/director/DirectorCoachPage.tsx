@@ -13,7 +13,7 @@ import { staffDreamerPath } from '@/app/routes';
 import { Avatar, Button, Card, Chip, EmptyState, LoadingPage } from '@/components/ui';
 import { IconArrowLeft, IconArrowRight, IconCalendar, IconCompass, IconGrid, IconInfo, IconUsers } from '@/components/icons';
 import { plural } from '@/lib/format';
-import { CareCell, ComparisonCaveat, DreamsCell, HowCalculated, LastSelfCell, LastSessionCell, PersonCell, StatGroup, achievedCount, summaryStatGroups } from './DirectorMetrics';
+import { CareCell, ComparisonCaveat, DreamsCell, HowCalculated, LastSelfCell, LastSessionCell, PersonCell, StatGroup, TableScroll, achievedCount, summaryStatGroups } from './DirectorMetrics';
 import { DirectorTrendGrid } from './DirectorCharts';
 
 /* ---------- Header ---------- */
@@ -33,7 +33,7 @@ function CoachHeader({ summary, isSelf }: { summary: CoachSummary; isSelf: boole
           </h1>
           <div className="dir-coach-meta">
             <span><IconUsers /> {plural(summary.dreamers, 'dreamer')}{summary.dreamers !== summary.activeDreamers ? ` · ${summary.activeDreamers} active` : ''}</span>
-            <span><IconCalendar /> {plural(summary.sessionsTotal, 'session')} in the program</span>
+            <span><IconCalendar /> {plural(summary.sessionsTotal, 'session')} run in the program</span>
           </div>
         </div>
       </div>
@@ -50,7 +50,7 @@ function CoachHeader({ summary, isSelf }: { summary: CoachSummary; isSelf: boole
 function CaseloadTable({ rows }: { rows: CaseloadEntry[] }) {
   const nav = useNavigate();
   return (
-    <div className="table-wrap dir-table-wrap">
+    <TableScroll>
       <table className="table dir-table dir-caseload-table" data-testid="director-caseload-table">
         <thead>
           <tr>
@@ -76,7 +76,7 @@ function CaseloadTable({ rows }: { rows: CaseloadEntry[] }) {
             >
               <td><PersonCell initials={e.dreamer.initials} name={e.dreamer.name} about={e.dreamer.about} status={e.dreamer.status} /></td>
               <td><LastSessionCell snapshot={e.snapshot} /></td>
-              <td><LastSelfCell entry={e} /></td>
+              <td><LastSelfCell snapshot={e.snapshot} /></td>
               <td><CareCell careAverage={e.careAverage} latest={e.snapshot.latest} /></td>
               <td className="dir-dreams-cell"><DreamsCell dreamAverage={e.dreamAverage} achieved={achievedCount(e.snapshot)} /></td>
               <td className="num tnum dir-num-lg">{e.snapshot.activeActions}</td>
@@ -85,7 +85,7 @@ function CaseloadTable({ rows }: { rows: CaseloadEntry[] }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
@@ -110,7 +110,7 @@ function CaseloadCards({ rows }: { rows: CaseloadEntry[] }) {
           </div>
           <dl className="dir-card-facts">
             <div><dt>Last session</dt><dd><LastSessionCell snapshot={e.snapshot} /></dd></div>
-            <div><dt>Last self activity</dt><dd><LastSelfCell entry={e} /></dd></div>
+            <div><dt>Last self activity</dt><dd><LastSelfCell snapshot={e.snapshot} /></dd></div>
             <div><dt>CARE</dt><dd><CareCell careAverage={e.careAverage} latest={e.snapshot.latest} /></dd></div>
             <div><dt>Dreams</dt><dd><DreamsCell dreamAverage={e.dreamAverage} achieved={achievedCount(e.snapshot)} /></dd></div>
             <div><dt>Active actions</dt><dd className="tnum">{e.snapshot.activeActions}</dd></div>
@@ -180,7 +180,7 @@ export function DirectorCoachPage() {
           <h2 id="dir-coach-trends-heading">Trends for {first}’s dreamers</h2>
           <span className="dir-section-sub">Month by month across this caseload. Coaching sessions and self check-ins stay side by side so both kinds of activity are visible.</span>
         </div>
-        <DirectorTrendGrid months={months} scope="caseload" testPrefix="director-coach" />
+        <DirectorTrendGrid months={months} scope="caseload" sessionsBy={first} testPrefix="director-coach" />
       </section>
 
       <section className="dir-section" aria-labelledby="dir-coach-caseload-heading">

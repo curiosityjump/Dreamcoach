@@ -14,10 +14,11 @@ import { staffDreamerPath } from '@/app/routes';
 import { useToast } from '@/components/toast';
 import { Avatar, Button, Card, EmptyState, Field, LoadingPage, Modal, PageHeader, TextInput } from '@/components/ui';
 import { IconArrowRight, IconChevronDown, IconInfo, IconPlay, IconRefresh, IconSearch, IconUsers } from '@/components/icons';
-import { fmtDateTime, plural, relativeTime } from '@/lib/format';
-import { CareCell, CareChangeValue, DreamerStatusChip, DreamsCell, LastSessionCell, PersonCell, achievedCount } from './DirectorMetrics';
+import { plural } from '@/lib/format';
+import { CareCell, CareChangeValue, DreamsCell, LastSelfCell, LastSessionCell, PersonCell, TableScroll, Th, achievedCount } from './DirectorMetrics';
 import { DirectorRowMenu } from './DirectorRowMenu';
 
+/** `lastActivity` is the dreamer's last self activity (check-in or reflection), the column it sorts. */
 type SortKey = 'name' | 'lastActivity' | 'lastSession' | 'careAvg' | 'careChange' | 'dreamAvg';
 type SortDir = 'asc' | 'desc';
 type StatusFilter = 'all' | DreamerStatus;
@@ -25,7 +26,7 @@ const UNASSIGNED = 'none';
 
 const SORT_LABEL: Record<SortKey, string> = {
   name: 'Name',
-  lastActivity: 'Last activity',
+  lastActivity: 'Last self activity',
   lastSession: 'Last session',
   careAvg: 'CARE average',
   careChange: 'CARE change',
@@ -43,7 +44,7 @@ function sortRows(rows: DirectorDreamerRow[], key: SortKey, dir: SortDir): Direc
     let d = 0;
     switch (key) {
       case 'name': d = a.dreamer.name.localeCompare(b.dreamer.name); break;
-      case 'lastActivity': d = time(a.lastActivityAt) - time(b.lastActivityAt); break;
+      case 'lastActivity': d = time(a.snapshot.lastSelfActivity?.at) - time(b.snapshot.lastSelfActivity?.at); break;
       case 'lastSession': d = time(a.snapshot.lastSession?.occurredAt) - time(b.snapshot.lastSession?.occurredAt); break;
       case 'careAvg': d = numOrNeg(a.careAverage) - numOrNeg(b.careAverage); break;
       case 'careChange': d = numOrNeg(a.careChange) - numOrNeg(b.careChange); break;
@@ -63,16 +64,6 @@ function CoachCell({ coach, avatar }: { coach: DirectorDreamerRow['dreamer']['co
     <span className="dir-coach-cell">
       {avatar && <Avatar initials={coach.initials} size="sm" tone="gold" />}
       <span>{coach.name}</span>
-    </span>
-  );
-}
-
-function WhenCell({ iso, sub }: { iso: string | null; sub?: ReactNode }) {
-  if (!iso) return <span className="muted">—</span>;
-  return (
-    <span className="dir-when" title={fmtDateTime(iso)}>
-      {relativeTime(iso)}
-      {sub && <span className="dir-when-sub">{sub}</span>}
     </span>
   );
 }
@@ -179,21 +170,19 @@ function SortTh({ k, sort, onSort, children, className = '' }: { k: SortKey; sor
 function DreamersTable({ rows, sort, onSort, actions }: { rows: DirectorDreamerRow[]; sort: { key: SortKey; dir: SortDir }; onSort: (k: SortKey) => void; actions: RowActions }) {
   const nav = useNavigate();
   return (
-    <div className="table-wrap dir-table-wrap">
+    <TableScroll>
       <table className="table dir-table dir-dreamers-table" data-testid="director-dreamers-table">
         <thead>
           <tr>
             <SortTh k="name" sort={sort} onSort={onSort}>Dreamer</SortTh>
             <th scope="col">Coach</th>
-            <th scope="col">Status</th>
             <th scope="col" className="num">Sessions</th>
             <SortTh k="lastSession" sort={sort} onSort={onSort}>Last session</SortTh>
             <SortTh k="lastActivity" sort={sort} onSort={onSort}>Self activity</SortTh>
             <SortTh k="careAvg" sort={sort} onSort={onSort}>CARE</SortTh>
             <SortTh k="careChange" sort={sort} onSort={onSort} className="num">Change</SortTh>
             <SortTh k="dreamAvg" sort={sort} onSort={onSort}>Dreams</SortTh>
-            <th scope="col" className="num">Actions</th>
-            <th scope="col" className="num">Check-ins 30d</th>
+            <Th className="num" sub="active">Actions</Th>
             <th scope="col" className="dir-sticky-col"><span className="sr-only">More</span></th>
           </tr>
         </thead>
@@ -208,23 +197,21 @@ function DreamersTable({ rows, sort, onSort, actions }: { rows: DirectorDreamerR
               data-testid="director-dreamer-row"
               data-dreamer-id={r.dreamer.id}
             >
-              <td><PersonCell initials={r.dreamer.initials} name={r.dreamer.name} about={r.dreamer.about} /></td>
+              <td><PersonCell initials={r.dreamer.initials} name={r.dreamer.name} about={r.dreamer.about} status={r.dreamer.status} /></td>
               <td><CoachCell coach={r.dreamer.coach} /></td>
-              <td><DreamerStatusChip status={r.dreamer.status} always /></td>
               <td className="num tnum dir-num-lg">{r.sessionsCompleted}</td>
               <td><LastSessionCell snapshot={r.snapshot} compact /></td>
-              <td><WhenCell iso={r.snapshot.lastSelfCheckIn} /></td>
+              <td><LastSelfCell snapshot={r.snapshot} /></td>
               <td><CareCell careAverage={r.careAverage} latest={r.snapshot.latest} /></td>
               <td className="num"><CareChangeValue change={r.careChange} /></td>
               <td className="dir-dreams-cell"><DreamsCell dreamAverage={r.dreamAverage} achieved={achievedCount(r.snapshot)} /></td>
               <td className="num tnum dir-num-lg">{r.snapshot.activeActions}</td>
-              <td className="num tnum dir-num-lg">{r.snapshot.selfCheckIns30d}</td>
               <td className="num dir-sticky-col"><RowMenu row={r} actions={actions} /></td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
@@ -253,11 +240,11 @@ function DreamersCards({ rows, actions }: { rows: DirectorDreamerRow[]; actions:
             <div><dt>Coach</dt><dd><CoachCell coach={r.dreamer.coach} avatar /></dd></div>
             <div><dt>Sessions</dt><dd className="tnum">{plural(r.sessionsCompleted, 'completed session')}</dd></div>
             <div><dt>Last session</dt><dd><LastSessionCell snapshot={r.snapshot} /></dd></div>
-            <div><dt>Last self activity</dt><dd><WhenCell iso={r.snapshot.lastSelfCheckIn} sub={r.snapshot.lastSelfCheckIn ? 'self check-in' : undefined} /></dd></div>
+            <div><dt>Last self activity</dt><dd><LastSelfCell snapshot={r.snapshot} /></dd></div>
             <div><dt>CARE</dt><dd><CareCell careAverage={r.careAverage} latest={r.snapshot.latest} /></dd></div>
             <div><dt>CARE change</dt><dd><CareChangeValue change={r.careChange} /></dd></div>
             <div><dt>Dreams</dt><dd><DreamsCell dreamAverage={r.dreamAverage} achieved={achievedCount(r.snapshot)} /></dd></div>
-            <div><dt>Actions · check-ins (30d)</dt><dd className="tnum">{r.snapshot.activeActions} active · {r.snapshot.selfCheckIns30d} check-ins</dd></div>
+            <div><dt>Active actions</dt><dd className="tnum">{r.snapshot.activeActions}</dd></div>
           </dl>
           <div className="dir-card-foot">
             <span className="muted small">Tap to open</span>

@@ -179,7 +179,9 @@ export interface CoachingSession {
    */
   privateRatings?: RatingCategory[];
   privateProgress?: number[];
+  /** Visible actions chosen in this session. */
   actionsCreated: number;
+  /** How many of the actions chosen in this session are now completed (at any time since). */
   actionsCompleted: number;
 }
 
@@ -207,8 +209,15 @@ export interface Snapshot {
   completedActions30d: number;
   lastSession: { id: number; occurredAt: string; number: number; status: CoachingSessionStatus } | null;
   openSession: { id: number; occurredAt: string } | null;
+  /** When the newest visible self check-in happened (the same check-ins `/check-ins` lists). */
   lastSelfCheckIn: string | null;
+  /**
+   * The dreamer's newest visible self activity: a check-in, or a standalone reflection written in
+   * their journal, whichever is newer. Only shared entries count for staff (DECISIONS #7).
+   */
+  lastSelfActivity: { at: string; kind: 'check-in' | 'reflection' } | null;
   selfCheckIns30d: number;
+  /** Visible self journal entries (reflections and check-in notes) in the last 30 days; session entries are not counted. */
   journalEntries30d: number;
   sessionsCompleted: number;
 }
@@ -277,26 +286,36 @@ export interface CoachDashboard {
   coach: User;
   caseload: CaseloadEntry[];
   stats: {
+    /** Everyone in the caseload, paused and completed dreamers included. */
     dreamers: number;
+    activeDreamers: number;
+    /** Completed sessions this coach ran (whoever the dreamer is assigned to now). */
     sessionsThisMonth: number;
     sessionsLast30d: number;
+    /** Active dreamers in the caseload with a completed session (by anyone) in the last 45 days. */
     dreamersSeenLast45d: number;
     selfCheckInsLast30d: number;
+    /** In-progress sessions with dreamers in the caseload. */
     openSessions: number;
   };
 }
 
 /* ---------- Director ---------- */
 
+/**
+ * One coach's figures (or the whole team's). Session counts are coaching activity, credited to the
+ * person who ran each session. Everything else describes the coach's current caseload.
+ */
 export interface CoachSummary {
   coach: User;
   dreamers: number;
   activeDreamers: number;
+  /** Completed sessions this coach ran (for the team: every completed session). */
   sessionsLast30d: number;
   sessionsTotal: number;
   /** % of active dreamers with a completed session in the last 45 days. */
   participation45d: number | null;
-  /** Dreamers with self check-ins or journal entries in the last 30 days. */
+  /** Active dreamers with a shared self check-in or self journal entry in the last 30 days (out of activeDreamers). */
   engagedBetweenSessions30d: number;
   /** Mean change in CARE average between first and latest session (dreamers with >= 2 sessions). */
   careChange: { value: number; n: number } | null;
@@ -312,6 +331,7 @@ export interface CoachSummary {
 export interface MonthPoint {
   month: string; // YYYY-MM
   label: string; // "Feb 2026"
+  /** Completed sessions; on a coach's page, the sessions that coach ran. */
   sessions: number;
   selfCheckIns: number;
   journalEntries: number;

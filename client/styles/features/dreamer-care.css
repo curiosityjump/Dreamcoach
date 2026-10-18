@@ -30,6 +30,7 @@
 .dc-cat-value { font-family: var(--font-display); font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.02em; color: var(--ink); }
 .dc-cat-of { color: var(--muted-2); font-size: 14px; }
 .dc-cat-delta { margin-left: 4px; }
+.dc-cat-private { align-self: center; margin-left: 2px; }
 
 /* value badge in lists */
 .dc-val { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; background: var(--dc-tint, var(--surface-3)); color: var(--ink); font-family: var(--font-display); font-size: 19px; font-weight: 500; flex: none; box-shadow: inset 0 0 0 1.5px var(--dc-color, var(--border-strong)); }
@@ -51,8 +52,18 @@
 .dc-check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; line-height: 1.4; }
 .dc-check input { width: 18px; height: 18px; min-height: 0; margin: 2px 0 0; padding: 0; accent-color: var(--accent); flex: none; }
 
-.dc-side { position: sticky; top: calc(var(--nav-h) + 16px); }
+.dc-side { position: sticky; top: calc(var(--nav-h) + 16px); scroll-margin-top: calc(var(--nav-h) + 16px); }
 @media (max-width: 920px) { .dc-side { position: static; } }
+
+/* Phones/tablets: the pending panel is stacked below the wheel, so a floating bar says a change is unsaved. */
+.dc-pending-bar { display: none; }
+@media (max-width: 920px) {
+  .dc-pending-bar { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 40; display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding: 8px 8px 8px 14px; border-radius: var(--r-lg); background: rgba(255, 255, 255, 0.94); backdrop-filter: saturate(1.4) blur(10px); border: 1px solid var(--accent-soft-2); box-shadow: var(--shadow-md); animation: fade-in 0.2s ease-out; }
+  .dc-pending-bar-text { flex: 1 1 160px; line-height: 1.4; color: var(--ink-2); }
+  .dc-pending-bar-text b { color: var(--ink); }
+  .dc-pending-bar .row { gap: 6px; margin-left: auto; }
+}
+@media (max-width: 760px) { .dc-pending-bar { bottom: calc(72px + env(safe-area-inset-bottom)); } }
 .dc-hint { text-align: left; }
 .dc-hint h3 { margin: 10px 0 6px; font-size: 18px; }
 .dc-hint p + p { margin-top: 8px; }
@@ -78,6 +89,7 @@
 .dc-quick-when { margin-left: 6px; }
 .dc-quick-input { margin-top: 4px; transition: opacity 0.15s; }
 .dc-quick-input.is-busy { opacity: 0.55; pointer-events: none; }
+.dc-quick-draft { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--dc-color); animation: fade-in 0.2s ease-out; }
 
 .dc-chart-note { margin-top: 10px; max-width: 70ch; }
 

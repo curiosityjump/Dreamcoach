@@ -16,6 +16,11 @@
 .dh-open { margin-bottom: 14px; }
 .dh-private-hint { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-size: 13px; color: var(--private); }
 .dh-private-hint svg { width: 14px; height: 14px; }
+/* lock beside a value that comes from a private entry (PrivateMark) */
+.dh-private { display: inline-flex; flex: none; vertical-align: middle; }
+.dh-private .chip { padding: 2px 6px; }
+.stat-sub .dh-private { margin-left: 6px; }
+.dh-lock { width: 11px; height: 11px; color: var(--private); flex: none; margin-right: 3px; vertical-align: -1px; }
 
 /* ---------- Home layout ---------- */
 .dh-page .page-header { align-items: flex-start; }

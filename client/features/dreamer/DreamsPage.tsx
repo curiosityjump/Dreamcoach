@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { useDreams, useOverview } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
-import { Bar, Button, Card, Chip, Delta, EmptyState, PageHeader, Skeleton } from '@/components/ui';
+import { Bar, Button, Card, Chip, Delta, EmptyState, PageHeader, PrivateChip, Skeleton } from '@/components/ui';
 import { IconArrowRight, IconCheck, IconEdit, IconInfo, IconStar, IconTarget } from '@/components/icons';
 import { fmtDate, plural, relativeTime } from '@/lib/format';
 import type { Dream, Program } from '@shared/types';
@@ -87,6 +87,7 @@ function DreamCard({ dream, program }: { dream: Dream; program: Program | null }
           <div className="row dd-progress-head">
             <span className="dd-progress-value tnum" data-testid="dream-progress-value">{dream.progress == null ? '—' : `${dream.progress}%`}</span>
             {delta != null && <Delta value={delta} digits={0} suffix="%" />}
+            {dream.progressIsPrivate && <span data-testid="dream-progress-private"><PrivateChip /></span>}
             {dream.progress == null && <span className="muted small">No progress recorded yet</span>}
           </div>
           <Bar value={dream.progress} color={DREAM_COLOR} large label={`${dream.title} progress`} />

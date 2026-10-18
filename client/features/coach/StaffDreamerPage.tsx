@@ -7,7 +7,7 @@
  * apart (SourceChip, solid vs hollow chart markers, the session grid holds only
  * session values).
  */
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { CARE_CATEGORIES, CATEGORY_META, RATING_CATEGORIES, type CareCategory, type RatingCategory } from '@shared/care';
 import type { ActionItem, CoachingSession, Dream, DreamerOverview, JournalEntry, ProgressEntry, RatingEntry, Snapshot } from '@shared/types';
@@ -86,9 +86,41 @@ function sessionWheel(s: CoachingSession | undefined): WheelValues | null {
   return CARE_CATEGORIES.some((c) => v[c] != null) ? v : null;
 }
 
+/**
+ * What an Overview value's change is measured against: always a coaching session, named in the label,
+ * so the figure agrees with the session grid. A value recorded in session N is compared with the
+ * session before it (as the grid's column is); a self check-in since then with the latest session.
+ */
+function sessionBaseline(sessions: CoachingSession[], at: string, fromSession: boolean, valueOf: (s: CoachingSession) => number | undefined): { value: number; label: string } | null {
+  if (fromSession) {
+    const i = sessions.findIndex((s) => s.occurredAt === at);
+    const prev = i > 0 ? sessions[i - 1]! : null;
+    const v = prev ? valueOf(prev) : undefined;
+    return prev && v != null ? { value: v, label: `vs S${prev.number}` } : null;
+  }
+  const t = Date.parse(at);
+  for (let j = sessions.length - 1; j >= 0; j--) {
+    const s = sessions[j]!;
+    const v = valueOf(s);
+    if (Date.parse(s.occurredAt) <= t && v != null) return { value: v, label: `since S${s.number}` };
+  }
+  return null;
+}
+
+function BaselineDelta({ value, base, suffix = '' }: { value: number; base: { value: number; label: string } | null; suffix?: string }) {
+  if (!base) return null;
+  return (
+    <span className="cv-delta-ref" data-testid="overview-delta">
+      <Delta value={value - base.value} digits={0} suffix={suffix} />
+      <span className="muted tiny">{base.label}</span>
+    </span>
+  );
+}
+
 function OverviewTab({ id, overview }: { id: number; overview: DreamerOverview }) {
   const { snapshot, recentActivity } = overview;
   const sessions = useSessions(id);
+  const allSessions = sessions.data ?? [];
   const completed = useMemo(() => (sessions.data ?? []).filter((s) => s.status === 'completed'), [sessions.data]);
   const latest = completed[completed.length - 1];
   const previous = completed[completed.length - 2];
@@ -112,7 +144,13 @@ function OverviewTab({ id, overview }: { id: number; overview: DreamerOverview }
               <h3 className="cv-dream-title">{d.title}</h3>
               <div className="cv-dream-progress">
                 <span className="cv-dream-pct tnum">{d.progress == null ? '—' : `${d.progress}%`}</span>
-                {d.progress != null && d.previousProgress != null && <Delta value={d.progress - d.previousProgress} digits={0} suffix="%" />}
+                {d.progress != null && d.progressAt != null && (
+                  <BaselineDelta
+                    value={d.progress}
+                    suffix="%"
+                    base={sessionBaseline(allSessions, d.progressAt, allSessions.some((s) => s.occurredAt === d.progressAt && s.progress[d.id] === d.progress), (s) => s.progress[d.id])}
+                  />
+                )}
               </div>
               <Bar value={d.progress} large label={`${d.title}: ${d.progress ?? 0}% progress`} />
               <div className="cv-dream-foot">
@@ -151,8 +189,8 @@ function OverviewTab({ id, overview }: { id: number; overview: DreamerOverview }
           )}
         </Card>
 
-        <Card>
-          <CardHead title="Latest ratings" sub="The most recent value for each area, whichever way it was recorded" />
+        <Card className="cv-ratings-card">
+          <CardHead title="Latest ratings" sub="The most recent value for each area, whichever way it was recorded. Changes are measured against a coaching session." />
           <ul className="cv-ratings" data-testid="overview-latest-ratings">
             {RATING_CATEGORIES.map((c) => {
               const r = snapshot.latest[c];
@@ -163,7 +201,7 @@ function OverviewTab({ id, overview }: { id: number; overview: DreamerOverview }
                   {r ? (
                     <>
                       <span className="cv-val tnum">{r.value}</span>
-                      <span className="cv-rating-delta">{r.previous != null && <Delta value={r.value - r.previous} digits={0} />}</span>
+                      <span className="cv-rating-delta"><BaselineDelta value={r.value} base={sessionBaseline(allSessions, r.occurredAt, r.source === 'session', (s) => s.ratings[c])} /></span>
                       <SourceChip source={r.source} />
                       <span className="cv-rating-when muted small">{fmtDate(r.occurredAt)}</span>
                     </>
@@ -283,6 +321,24 @@ function SessionsTab({ id, snapshot, dreams }: { id: number; snapshot: Snapshot;
   const list = useMemo(() => (sessions.data ? newestFirst(sessions.data) : []), [sessions.data]);
   const selected = list.find((s) => s.id === selectedId) ?? list[0] ?? null;
   const prev = selected ? (sessions.data ?? []).find((s) => s.number === selected.number - 1) ?? null : null;
+  const listRef = useRef<HTMLOListElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+
+  // The details sit below the grid, often off-screen: picking a column brings them into view and
+  // keeps the matching row visible in the (scrollable) list.
+  const pickFromGrid = (sessionId: number) => {
+    setSelectedId(sessionId);
+    window.requestAnimationFrame(() => {
+      const listEl = listRef.current;
+      const row = listEl?.querySelector<HTMLElement>(`[data-session-id="${sessionId}"]`);
+      if (listEl && row) {
+        const offset = row.getBoundingClientRect().top - listEl.getBoundingClientRect().top;
+        if (offset < 0 || offset + row.offsetHeight > listEl.clientHeight) listEl.scrollTop += offset;
+      }
+      const detail = detailRef.current;
+      if (detail && detail.getBoundingClientRect().top > window.innerHeight - 160) detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
 
   if (sessions.isPending || grid.isPending) return <LoadingPage label="Loading sessions…" />;
   if (sessions.isError) return <ErrorCallout error={sessions.error} />;
@@ -302,12 +358,12 @@ function SessionsTab({ id, snapshot, dreams }: { id: number; snapshot: Snapshot;
     <div className="stack cv-stack">
       <Card>
         <CardHead title="Session grid" sub="One column per coaching session, oldest to newest. Small figures show the change from the previous session. Self check-ins are in History." />
-        <SessionGridView grid={grid.data} currentSessionId={selected?.id ?? null} showDeltas onSelectSession={setSelectedId} />
+        <SessionGridView grid={grid.data} currentSessionId={selected?.id ?? null} showDeltas onSelectSession={pickFromGrid} />
       </Card>
 
       <div className="cv-sessions">
         <Card pad={false} className="cv-session-list-card">
-          <ol className="cv-session-list" data-testid="sessions-list">
+          <ol ref={listRef} className="cv-session-list" data-testid="sessions-list">
             {list.map((s) => (
               <li key={s.id}>
                 <button
@@ -332,7 +388,9 @@ function SessionsTab({ id, snapshot, dreams }: { id: number; snapshot: Snapshot;
             ))}
           </ol>
         </Card>
-        {selected && <SessionDetail id={id} session={selected} prev={prev} dreams={dreams} actions={actions.data ?? []} />}
+        <div ref={detailRef} className="cv-session-detail-anchor">
+          {selected && <SessionDetail id={id} session={selected} prev={prev} dreams={dreams} actions={actions.data ?? []} />}
+        </div>
       </div>
     </div>
   );

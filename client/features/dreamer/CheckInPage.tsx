@@ -9,7 +9,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { useCreateCheckIn, useDreams, useOverview } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
 import { useToast } from '@/components/toast';
-import { Bar, Button, Card, CategoryChip, LoadingPage, PageHeader, PercentInput, PrivacyToggle, RatingInput, TextArea } from '@/components/ui';
+import { Bar, Button, Card, CategoryChip, LoadingPage, PageHeader, PercentInput, PrivacyToggle, PrivateChip, RatingInput, TextArea } from '@/components/ui';
 import { IconCalendar, IconInfo, IconStar, IconX } from '@/components/icons';
 import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, isRatingCategory, type RatingCategory } from '@shared/care';
 import type { CheckInInput, Dream, LatestRating } from '@shared/types';
@@ -267,6 +267,7 @@ function RatingCard({ category, draft, last, onChange, onRemove, disabled }: {
             <span className="muted small tnum" data-testid={`checkin-last-${category}`}>
               {last ? `Last: ${last.value} · ${fmtDate(last.occurredAt)} · ${last.source === 'session' ? 'session' : 'self check-in'}` : 'Not rated yet'}
             </span>
+            {last?.isPrivate && <span data-testid={`checkin-last-private-${category}`}><PrivateChip /></span>}
           </div>
           <div className="dci-prompt">{m.prompt}</div>
         </div>
@@ -304,7 +305,10 @@ function ProgressCard({ dream, draft, onChange, onRemove, disabled }: {
         <div className="grow">
           <div className="dc-eyebrow">{dream.slotLabel}</div>
           <h3 className="dci-dream-title">{dream.title}</h3>
-          <div className="muted small tnum">{dream.progress != null ? `Now ${dream.progress}%${dream.progressAt ? ` · ${fmtDate(dream.progressAt)}` : ''}` : 'No progress recorded yet'}</div>
+          <div className="row-wrap">
+            <span className="muted small tnum">{dream.progress != null ? `Now ${dream.progress}%${dream.progressAt ? ` · ${fmtDate(dream.progressAt)}` : ''}` : 'No progress recorded yet'}</span>
+            {dream.progressIsPrivate && <span data-testid={`checkin-dream-private-${dream.id}`}><PrivateChip /></span>}
+          </div>
         </div>
         <Button variant="ghost" icon size="sm" aria-label={`Remove ${dream.title}`} onClick={onRemove} disabled={disabled} data-testid={`checkin-remove-dream-${dream.id}`}><IconX /></Button>
       </div>

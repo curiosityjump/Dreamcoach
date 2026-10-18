@@ -43,6 +43,9 @@
 .cs-delta { font-size: 11px; font-weight: 600; letter-spacing: 0; }
 .cs-delta-up { color: var(--success); }
 .cs-delta-down { color: var(--ink-2); opacity: 0.8; }
+.cs-private { display: inline-flex; align-self: center; }
+.cs-private .chip { padding: 1px 5px; line-height: 1.4; }
+.cs-private .chip svg { width: 11px; height: 11px; }
 
 /* editable cell */
 .cs-cell-edit { display: inline-flex; align-items: center; justify-content: center; gap: 2px; }
@@ -116,6 +119,14 @@
 .cs-session-actions { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border); }
 .cs-notes { line-height: 1.55; white-space: pre-wrap; }
 
+/* last session's focus and notes, at the top of the review step */
+.cs-recap { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; padding: 10px 14px; border-radius: var(--r-md); background: var(--surface-2); border-left: 3px solid var(--gold); }
+.cs-recap-head { font-weight: 500; }
+.cs-recap-focus { display: flex; gap: 8px; align-items: baseline; font-size: 14.5px; color: var(--ink); line-height: 1.45; }
+.cs-recap-label { flex: none; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.cs-recap-notes { font-size: 13.5px; line-height: 1.55; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; margin-top: 4px; }
+.cs-recap .cs-text-btn { margin-top: 2px; }
+
 .cs-save { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 500; color: var(--muted); white-space: nowrap; }
 .cs-save svg { width: 13px; height: 13px; }
 .cs-save-saved { color: var(--success); }
@@ -175,7 +186,21 @@
 
 @media (max-width: 1040px) {
   .cs-layout { grid-template-columns: 1fr; }
-  .cs-side { position: static; }
+  /* Single column: the session flow leads (above the grid) instead of trailing after the notes;
+     "Since last session" and "Dreams at a glance" follow the main column as before. */
+  .cs-side { position: static; display: contents; }
+  .cs-steps-card { order: -1; }
+  .cs-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 14px; }
+  .cs-step:nth-child(-n + 3) { border-top: 0; }
+}
+@media (max-width: 640px) {
+  .cs-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 10px; }
+  .cs-step:nth-child(3) { border-top: 1px solid var(--border); }
+  .cs-step-btn { gap: 8px; padding: 6px; }
+  .cs-step-mark { width: 24px; height: 24px; font-size: 12px; }
+  .cs-step-label { font-size: 13px; line-height: 1.25; }
+  .cs-step-hint { display: none; }
+  .cs-step-toggle { padding: 0 8px; }
 }
 @media (max-width: 640px) {
   .cs-title { font-size: 24px; }

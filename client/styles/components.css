@@ -234,6 +234,8 @@ table.table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .nav { display: none; }
   .mobile-nav { display: flex; }
   .page { padding-bottom: 96px; }
+  /* Toasts sit above the bottom nav rather than over it. */
+  :root:has(.mobile-nav) .toasts { bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
 
 /* ---------- Privacy status pill (dreamer top bar) ---------- */

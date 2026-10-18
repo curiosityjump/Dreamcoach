@@ -183,6 +183,7 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
           if (mode === 'dreamer' && action.isPrivate) toast(auth?.privateUnlocked ? 'Added as a private action — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
           else toast('Action added.');
           onDone?.(action);
+          // Ready for the next one. (The title is read-only, not disabled, while saving: a disabled field loses focus.)
           titleRef.current?.focus();
         },
         onError: (err) => setError(errorMessage(err)),
@@ -209,7 +210,7 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
           aria-label="Action title"
           maxLength={300}
           autoFocus={autoFocus}
-          disabled={create.isPending}
+          readOnly={create.isPending}
           autoComplete="off"
           data-testid="action-title-input"
         />

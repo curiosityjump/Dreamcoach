@@ -286,11 +286,15 @@ export function ActionsChart({ rows }: { rows: Row[] }) {
 
 /* ---------- All four together (coach page) ---------- */
 
-export function DirectorTrendGrid({ months, scope, testPrefix }: { months: MonthPoint[]; scope: string; testPrefix: string }) {
+/** `sessionsBy` names the coach on a caseload: their bars are the sessions they ran, the rest follows their dreamers. */
+export function DirectorTrendGrid({ months, scope, sessionsBy, testPrefix }: { months: MonthPoint[]; scope: string; sessionsBy?: string; testPrefix: string }) {
   const rows = monthRows(months);
+  const sessionsDefinition = scope === 'team'
+    ? 'Completed coaching sessions and self check-ins recorded each month across the team.'
+    : `Completed coaching sessions ${sessionsBy ?? 'this coach'} ran, and self check-ins by dreamers in this caseload, each month.`;
   return (
     <div className="grid grid-2 dir-trend-grid">
-      <TrendCard title="Sessions & self check-ins" definition={`Completed coaching sessions and self check-ins recorded each month${scope === 'team' ? ' across the team' : ' in this caseload'}.`} rows={rows} testId={`${testPrefix}-chart-sessions`}>
+      <TrendCard title="Sessions & self check-ins" definition={sessionsDefinition} rows={rows} testId={`${testPrefix}-chart-sessions`}>
         <SessionsChart rows={rows} />
       </TrendCard>
       <TrendCard title="CARE ratings by month" definition="Average of the CARE ratings recorded in coaching sessions each month, per area." rows={rows} testId={`${testPrefix}-chart-care`}>

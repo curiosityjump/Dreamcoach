@@ -8,7 +8,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { useCreateCheckIn } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
 import { Button, Delta, Field, Modal, PercentInput, PrivacyToggle, TextArea } from '@/components/ui';
-import { IconSparkle } from '@/components/icons';
+import { IconLock, IconSparkle } from '@/components/icons';
 import { useToast } from '@/components/toast';
 import type { Dream } from '@shared/types';
 
@@ -36,7 +36,8 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
   const [error, setError] = useState<string | null>(null);
   const hasNote = note.trim().length > 0;
   const delta = dream.progress == null ? null : value - dream.progress;
-  const reachesHundred = value >= 100 && (dream.progress ?? 0) < 100;
+  // "Achieved" comes from shared progress only, so only a shared 100% can mark the dream achieved.
+  const reachesHundred = value >= 100 && !dream.achievedAt;
 
   const save = async () => {
     setError(null);
@@ -44,7 +45,12 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
       await create.mutateAsync({ progress: [{ dreamId: dream.id, value, isPrivate, note: hasNote ? note.trim() : undefined, notePrivate: hasNote ? notePrivate || isPrivate : undefined }] });
       const anyPrivate = isPrivate || (hasNote && notePrivate);
       const shared = value >= 100 ? 'Progress saved — this dream is achieved. Take a moment to celebrate.' : 'Progress updated.';
-      privacyToast(toast, anyPrivate, !!auth?.privateUnlocked, shared, value >= 100 ? 'Saved as private — and this dream is at 100%. Celebrate it.' : 'Saved as private.');
+      const privateMessage = value < 100
+        ? 'Saved as private.'
+        : isPrivate
+          ? 'Saved as private — a 100% only you can see. Your dream is marked achieved when a shared update reaches 100%.'
+          : 'Saved — your note is private, and this dream is achieved. Celebrate it.';
+      privacyToast(toast, anyPrivate, !!auth?.privateUnlocked, shared, privateMessage);
       onSaved?.(value);
       onClose();
     } catch (e) {
@@ -69,7 +75,7 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
           <div className="eyebrow dd-eyebrow">{dream.slotLabel}</div>
           <h3 className="dd-dialog-title">{dream.title}</h3>
         </div>
-        <Field label="How far along are you?" hint={dream.progress == null ? 'This is the first progress you record for this dream.' : `Last recorded at ${dream.progress}%.`}>
+        <Field label="How far along are you?" hint={dream.progress == null ? 'This is the first progress you record for this dream.' : `Last recorded at ${dream.progress}%${dream.progressIsPrivate ? ' (private)' : ''}.`}>
           <div className="dd-pct-row">
             <PercentInput value={value} onChange={setValue} color={DREAM_COLOR} label="Progress" />
           </div>
@@ -79,12 +85,17 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
             {delta === 0 && <span className="muted small">Same as last time — that’s fine too.</span>}
           </div>
         </Field>
-        {reachesHundred && (
+        {reachesHundred && (isPrivate ? (
+          <div className="callout callout-private" data-testid="progress-dialog-celebrate">
+            <IconLock />
+            <span>A private 100% is yours alone — only you will see it. Your dream is marked achieved when a shared update reaches 100%.</span>
+          </div>
+        ) : (
           <div className="callout callout-gold" data-testid="progress-dialog-celebrate">
             <IconSparkle />
             <span>100% means this dream is achieved. Saving will mark it so — worth celebrating.</span>
           </div>
-        )}
+        ))}
         <Field label="Add a note (optional)" htmlFor="dd-progress-note" hint="What moved, what you learned, what is next.">
           <TextArea id="dd-progress-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What’s behind this number?" rows={3} data-testid="progress-note" />
         </Field>

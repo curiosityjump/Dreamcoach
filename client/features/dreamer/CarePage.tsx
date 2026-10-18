@@ -2,15 +2,15 @@
  * CARE · Wheel of Life (/care). The dreamer's own view of the four CARE areas:
  * an interactive wheel (click or drag a quadrant to rate it, then save the
  * check-in), the latest values with deltas and sparklines, quick Commitment and
- * Satisfaction ratings, and the four lines over time.
+ * Satisfaction ratings (pick a number, then save), and the four lines over time.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '@/auth/AuthContext';
 import { useCreateCheckIn, useOverview, useRatings, useSessions } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
 import { useToast } from '@/components/toast';
-import { Button, Card, CardHead, CategoryChip, Delta, EmptyState, LoadingPage, PageHeader, PrivacyToggle, RatingInput, Segmented, SourceChip, Spinner, TextArea } from '@/components/ui';
+import { Button, Card, CardHead, CategoryChip, Delta, EmptyState, LoadingPage, PageHeader, PrivacyToggle, PrivateChip, RatingInput, Segmented, SourceChip, Spinner, TextArea } from '@/components/ui';
 import { MultiTrendChart, Sparkline } from '@/components/charts';
 import { WheelOfLife, type WheelValues } from '@/components/WheelOfLife';
 import { IconArrowRight, IconChart, IconInfo, IconSparkle, IconWheel } from '@/components/icons';
@@ -67,7 +67,7 @@ export function CarePage() {
 
       <section className="dc-section" aria-labelledby="dc-program-head">
         <h2 id="dc-program-head" className="dc-section-title">Commitment and satisfaction</h2>
-        <p className="muted small dc-section-sub">Two program ratings, usually set together with {coachName ? coachName.split(' ')[0] : 'your coach'} in a session. Tap a number to record where you are today.</p>
+        <p className="muted small dc-section-sub">Two program ratings, usually set together with {coachName ? coachName.split(' ')[0] : 'your coach'} in a session. Pick a number and save it to record where you are today.</p>
         <div className="grid grid-2 dc-cards">
           {PROGRAM_CATEGORIES.map((c) => (
             <QuickRatingCard key={c} category={c} latest={snapshot.latest[c]} />
@@ -94,6 +94,18 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
   const [notePriv, setNotePriv] = useState<Partial<Record<CareCategory, boolean>>>({});
   const [compare, setCompare] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sideRef = useRef<HTMLDivElement>(null);
+  const [panelActions, setPanelActions] = useState<HTMLDivElement | null>(null);
+  const [actionsBelow, setActionsBelow] = useState(true);
+
+  // On narrow screens the pending panel sits under the wheel, below the fold. While its Save button is
+  // still further down the page, a small bar (shown by CSS only when stacked) keeps the unsaved change visible.
+  useEffect(() => {
+    if (!panelActions) return;
+    const io = new IntersectionObserver(([e]) => setActionsBelow(!!e && !e.isIntersecting && e.boundingClientRect.top > 0), { rootMargin: '0px 0px -64px 0px' });
+    io.observe(panelActions);
+    return () => io.disconnect();
+  }, [panelActions]);
 
   const latest = snapshot.latest;
   const latestValues = useMemo<WheelValues>(() => Object.fromEntries(CARE_CATEGORIES.map((c) => [c, latest[c]?.value ?? null])) as WheelValues, [latest]);
@@ -101,6 +113,8 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
 
   /** Categories whose pending value differs from the latest recorded one. */
   const changed = CARE_CATEGORIES.filter((c) => pending[c] != null && pending[c] !== latestValues[c]);
+  const only = changed.length === 1 ? changed[0]! : null;
+  const changeSummary = only ? `${CATEGORY_META[only].label} ${latestValues[only] != null ? `${latestValues[only]} → ` : ''}${pending[only]}` : `${plural(changed.length, 'area')} changed`;
   const anyRated = CARE_CATEGORIES.some((c) => latest[c]);
 
   const compareValues = useMemo<WheelValues | null>(() => {
@@ -175,9 +189,20 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
             <span className="muted small">Once you’ve had a coaching session, you’ll be able to overlay its readings here.</span>
           )}
         </div>
+        {changed.length > 0 && actionsBelow && (
+          <div className="dc-pending-bar" role="status" data-testid="care-pending-bar">
+            <span className="dc-pending-bar-text small">
+              <b>Not saved yet</b> · {changeSummary}
+            </span>
+            <div className="row">
+              <Button variant="ghost" onClick={() => sideRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} data-testid="care-pending-bar-review">Add a note</Button>
+              <Button variant="primary" onClick={save} loading={create.isPending} data-testid="care-pending-bar-save">Save</Button>
+            </div>
+          </div>
+        )}
       </Card>
 
-      <div className="dc-side">
+      <div className="dc-side" ref={sideRef}>
         {changed.length ? (
           <Card className="dc-pending" data-testid="care-pending-panel" aria-live="polite">
             <CardHead title="Save check-in" sub={`${plural(changed.length, 'area')} changed on the wheel. Add a note if you like, then save.`} />
@@ -217,7 +242,7 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
               })}
             </div>
             {error && <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>}
-            <div className="dc-pending-actions">
+            <div className="dc-pending-actions" ref={setPanelActions}>
               <Button variant="ghost" onClick={reset} disabled={create.isPending} data-testid="care-pending-cancel">Cancel</Button>
               <Button variant="primary" onClick={save} loading={create.isPending} data-testid="care-pending-save">Save check-in</Button>
             </div>
@@ -231,7 +256,7 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
             </p>
             {anyRated && (
               <p className="muted small">
-                Latest readings: {CARE_CATEGORIES.filter((c) => latest[c]).map((c) => `${CATEGORY_META[c].label} ${latest[c]!.value}`).join(' · ')}.
+                Latest readings: {CARE_CATEGORIES.filter((c) => latest[c]).map((c) => `${CATEGORY_META[c].label} ${latest[c]!.value}${latest[c]!.isPrivate ? ' (private)' : ''}`).join(' · ')}.
               </p>
             )}
             <Link to="/check-in" className="dc-link" data-testid="care-hint-checkin">Prefer a form? Open the full check-in <IconArrowRight /></Link>
@@ -258,6 +283,7 @@ function CategoryCard({ category, latest, ratings, loading }: { category: CareCa
         <span className="dc-cat-value tnum" data-testid={`care-card-value-${category}`}>{latest ? latest.value : '–'}</span>
         <span className="dc-cat-of">/ 10</span>
         {latest && <span className="dc-cat-delta"><Delta value={delta} digits={0} /></span>}
+        {latest?.isPrivate && <span className="dc-cat-private" data-testid={`care-card-private-${category}`}><PrivateChip /></span>}
       </div>
       <div className="dc-cat-meta muted small">
         {latest ? `${latest.source === 'session' ? 'Session' : 'Self check-in'} · ${relativeTime(latest.occurredAt)}` : 'Not rated yet'}
@@ -272,19 +298,33 @@ function CategoryCard({ category, latest, ratings, loading }: { category: CareCa
   );
 }
 
+/** Commitment / Satisfaction: picking a number starts a draft; nothing is recorded until Save. */
 function QuickRatingCard({ category, latest }: { category: ProgramCategory; latest: LatestRating | undefined }) {
+  const { auth } = useAuth();
   const { toast } = useToast();
   const create = useCreateCheckIn('me');
   const m = CATEGORY_META[category];
   const delta = latest && latest.previous != null ? latest.value - latest.previous : null;
-  const [justSaved, setJustSaved] = useState<number | null>(null);
-  const shown = create.isPending && create.variables?.ratings?.[0] ? create.variables.ratings[0].value : (justSaved ?? latest?.value ?? null);
+  const [value, setValue] = useState<number | null>(null);
+  const [note, setNote] = useState('');
+  const [priv, setPriv] = useState(false);
+  const [notePriv, setNotePriv] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const text = note.trim();
 
-  const rate = (v: number | null) => {
-    if (v == null || create.isPending) return;
-    create.mutate({ ratings: [{ category, value: v }] }, {
-      onSuccess: () => { setJustSaved(v); toast(`${m.label} saved: ${v}.`); },
-      onError: (e) => toast(errorMessage(e), 'error'),
+  const pick = (v: number | null) => { if (v != null) { setError(null); setValue(v); } };
+  const reset = () => { setValue(null); setNote(''); setPriv(false); setNotePriv(false); setError(null); };
+
+  const save = () => {
+    if (value == null || create.isPending) return;
+    const anyPrivate = priv || (!!text && notePriv);
+    create.mutate({ ratings: [{ category, value, isPrivate: priv, ...(text ? { note: text, notePrivate: notePriv } : {}) }] }, {
+      onSuccess: () => {
+        const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, `${m.label} saved as private — only you can see it.`);
+        toast(msg, kind);
+        reset();
+      },
+      onError: (e) => setError(errorMessage(e)),
     });
   };
 
@@ -292,22 +332,36 @@ function QuickRatingCard({ category, latest }: { category: ProgramCategory; late
     <Card className="dc-quick-card" style={catVars(category)} data-testid={`care-quick-${category}`}>
       <div className="spread">
         <CategoryChip category={category} />
-        <span className="row">
-          {create.isPending && <Spinner />}
-          <Link to={`/care/${category}`} className="dc-link" data-testid={`care-quick-history-${category}`}>History <IconArrowRight /></Link>
-        </span>
+        <Link to={`/care/${category}`} className="dc-link" data-testid={`care-quick-history-${category}`}>History <IconArrowRight /></Link>
       </div>
       <p className="dc-quick-prompt">{m.prompt}</p>
       <div className="dc-cat-value-row">
         <span className="dc-cat-value tnum" data-testid={`care-quick-value-${category}`}>{latest ? latest.value : '–'}</span>
         <span className="dc-cat-of">/ 10</span>
         {latest && <span className="dc-cat-delta"><Delta value={delta} digits={0} /></span>}
+        {latest?.isPrivate && <span className="dc-cat-private" data-testid={`care-quick-private-${category}`}><PrivateChip /></span>}
         <span className="muted small dc-quick-when">{latest ? latestLine(latest) : 'Not rated yet'}</span>
       </div>
       <div className={`dc-quick-input${create.isPending ? ' is-busy' : ''}`} aria-busy={create.isPending || undefined} data-testid={`care-quick-input-${category}`}>
-        <RatingInput value={shown} onChange={rate} category={category} compact label={`Rate your ${m.label.toLowerCase()} today`} />
+        <RatingInput value={value ?? latest?.value ?? null} onChange={pick} category={category} compact label={`Rate your ${m.label.toLowerCase()} today`} disabled={create.isPending} />
       </div>
-      <div className="muted tiny">Tap a number to record it as a self check-in — it saves right away.</div>
+      {value == null ? (
+        <div className="muted tiny">Pick a number for today — you can add a note before you save it.</div>
+      ) : (
+        <div className="dc-quick-draft" data-testid={`care-quick-draft-${category}`}>
+          <div className="small tnum">{latest ? `${latest.value} → ` : ''}<b>{value}</b> <span className="muted">· not saved yet</span></div>
+          <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="What’s behind this number? (optional)" aria-label={`${m.label} note`} rows={2} maxLength={4000} disabled={create.isPending} data-testid={`care-quick-note-${category}`} />
+          <div className="row-wrap dc-privacy-row">
+            <span data-testid={`care-quick-privacy-${category}`}><PrivacyToggle size="sm" value={priv} onChange={setPriv} labels={['Rating shared with coach', 'Rating private']} /></span>
+            {text && <span data-testid={`care-quick-note-privacy-${category}`}><PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} /></span>}
+          </div>
+          {error && <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>}
+          <div className="dc-pending-actions">
+            <Button variant="ghost" onClick={reset} disabled={create.isPending} data-testid={`care-quick-cancel-${category}`}>Cancel</Button>
+            <Button variant="primary" onClick={save} loading={create.isPending} data-testid={`care-quick-save-${category}`}>Save {m.label.toLowerCase()}</Button>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

@@ -117,6 +117,7 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
             <div className="dd-hero-sub">
               {delta != null ? <Delta value={delta} digits={0} suffix="%" /> : <span className="muted small">{dream.progress == null ? 'Nothing recorded yet' : 'First update'}</span>}
               {delta != null && <span className="muted small">since the previous update</span>}
+              {dream.progressIsPrivate && <span data-testid="dream-hero-private"><PrivateChip /></span>}
             </div>
           </div>
           <div className="dd-hero-cta">
@@ -369,8 +370,9 @@ function EntryEditDialog({ entry, onClose }: { entry: ProgressEntry; onClose: ()
     if (trimmed && !entry.note) patch.notePrivate = notePrivate;
     if (patch.value === undefined && patch.note === undefined && patch.notePrivate === undefined) { onClose(); return; }
     try {
-      await update.mutateAsync(patch);
-      privacyToast(toast, !!(trimmed && notePrivate && !entry.isPrivate && patch.notePrivate !== undefined), !!auth?.privateUnlocked, patch.note === null ? 'Note removed.' : 'Update saved.', 'Saved — your note is private.');
+      const saved = await update.mutateAsync(patch);
+      // Judge by what was saved: a note can also be private because it replaced one that already was.
+      privacyToast(toast, !entry.isPrivate && !!saved.note?.isPrivate && !entry.note?.isPrivate, !!auth?.privateUnlocked, patch.note === null ? 'Note removed.' : 'Update saved.', 'Saved — your note is private.');
       onClose();
     } catch (e) {
       setError(errorMessage(e));

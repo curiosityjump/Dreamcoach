@@ -2,6 +2,7 @@ import { NavLink, Navigate, Outlet, useLocation } from 'react-router';
 import { useAuth } from '@/auth/AuthContext';
 import { Avatar, Dropdown, LoadingPage } from '@/components/ui';
 import { IconBrand, IconHome, IconList, IconLogout, IconPen, IconStar, IconUsers, IconWheel, IconChart, IconGrid } from '@/components/icons';
+import { useToast } from '@/components/toast';
 import { PrivacyControl } from '@/features/shared/PrivacyControl';
 import type { Role } from '@shared/types';
 import type { ReactNode } from 'react';
@@ -27,6 +28,7 @@ export function RequireAuth({ roles, children }: { roles?: Role[]; children: Rea
 
 function UserMenu() {
   const { auth, logout } = useAuth();
+  const { toast } = useToast();
   if (!auth) return null;
   const roleLabel = auth.user.role === 'dreamer' ? 'Dreamer' : auth.user.role === 'coach' ? 'Dream Coach' : 'Director';
   return (
@@ -42,7 +44,7 @@ function UserMenu() {
         <div style={{ fontWeight: 600 }}>{auth.user.name}</div>
         <div className="muted small">{roleLabel} · {auth.user.email}</div>
       </div>
-      <button type="button" className="menu-item" onClick={() => void logout()} data-testid="sign-out">
+      <button type="button" className="menu-item" onClick={() => void logout().catch(() => toast('Couldn’t sign you out — check your connection and try again.', 'error'))} data-testid="sign-out">
         <IconLogout /> Sign out
       </button>
     </Dropdown>

@@ -110,6 +110,14 @@
 
 .cv-tabs { margin: 18px 0 20px; }
 .cv-tabs .tab { min-height: 42px; display: inline-flex; align-items: center; }
+/* Phones: all five tabs share the width so none is cut off (the strip has no visible scrollbar). */
+@media (max-width: 560px) {
+  .cv-tabs { gap: 0; }
+  .cv-tabs .tab { flex: 1 0 auto; justify-content: center; padding: 10px 6px; font-size: 13.5px; }
+}
+@media (max-width: 380px) {
+  .cv-tabs .tab { padding: 10px 4px; font-size: 13px; }
+}
 
 /* ==========================================================================
    Overview
@@ -120,6 +128,7 @@
 .cv-dream-title { font-size: 16px; line-height: 1.3; min-height: 2.6em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .cv-dream-progress { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; }
 .cv-dream-pct { font-family: var(--font-display); font-size: 26px; font-weight: 500; line-height: 1; color: var(--ink); }
+.cv-delta-ref { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
 .cv-dream-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .cv-dream.is-achieved .bar > span { background: var(--success); }
 @media (max-width: 640px) { .cv-dream-title { min-height: 0; } }
@@ -132,16 +141,21 @@
 .cv-wheel svg { overflow: visible; }
 @media (max-width: 640px) { .cv-wheel { padding: 0 6px; } }
 
-.cv-ratings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.cv-rating { display: grid; grid-template-columns: minmax(110px, 1fr) auto minmax(64px, auto) auto auto; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border); }
+/* Rows share one set of columns (subgrid) so values, changes and sources line up. */
+.cv-ratings { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(96px, 1fr) auto auto auto auto; column-gap: 10px; }
+.cv-rating { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border); }
 .cv-rating:first-child { border-top: 0; padding-top: 0; }
 .cv-rating:last-child { padding-bottom: 0; }
 .cv-rating-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; color: var(--ink); }
 .cv-rating-delta { font-size: 12.5px; }
 .cv-rating-when { text-align: right; white-space: nowrap; }
 .cv-rating-none { grid-column: 2 / -1; text-align: right; }
-@media (max-width: 480px) {
+/* A narrow card (phones, and laptops between 900 and ~1100px) puts change, source and date on a second line. */
+.cv-ratings-card { container-type: inline-size; }
+@container (max-width: 500px) {
+  .cv-ratings { display: flex; flex-direction: column; }
   .cv-rating { grid-template-columns: minmax(0, 1fr) auto auto; row-gap: 4px; }
+  .cv-rating .cv-val { grid-column: 2 / -1; justify-self: end; }
   .cv-rating-delta { grid-column: 1; grid-row: 2; }
   .cv-rating .chip { grid-column: 2; grid-row: 2; }
   .cv-rating-when { grid-column: 3; grid-row: 2; }
@@ -160,6 +174,7 @@
    ========================================================================== */
 .cv-sessions { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 1.75fr); gap: 16px; align-items: start; }
 @media (max-width: 900px) { .cv-sessions { grid-template-columns: 1fr; } }
+.cv-session-detail-anchor { min-width: 0; scroll-margin-top: calc(var(--nav-h) + 14px); }
 .cv-session-list-card { overflow: hidden; }
 .cv-session-list { list-style: none; margin: 0; padding: 0; max-height: 640px; overflow-y: auto; }
 .cv-session-list li + li { border-top: 1px solid var(--border); }

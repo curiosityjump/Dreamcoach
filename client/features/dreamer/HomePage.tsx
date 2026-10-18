@@ -8,7 +8,7 @@ import { Link } from 'react-router';
 import { useAuth } from '@/auth/AuthContext';
 import { useActions, useOverview, useSessions } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
-import { Avatar, Bar, Button, Card, CardHead, Chip, Delta, EmptyState, LoadingPage, PageHeader, Skeleton, Stat } from '@/components/ui';
+import { Avatar, Bar, Button, Card, CardHead, Chip, Delta, EmptyState, LoadingPage, PageHeader, PrivateChip, Skeleton, Stat } from '@/components/ui';
 import { WheelOfLife, type WheelValues } from '@/components/WheelOfLife';
 import { IconArrowRight, IconCheck, IconEye, IconInfo, IconList, IconMessage, IconPen, IconPlus, IconSparkle, IconStar } from '@/components/icons';
 import { ActionComposer, ActionList } from '@/features/shared/ActionItems';
@@ -150,6 +150,7 @@ function DreamRow({ dream }: { dream: Dream }) {
       <Bar value={dream.progress} color={achieved ? 'var(--success)' : undefined} label={`${dream.title || 'Dream'} progress`} />
       <div className="dh-dream-meta">
         {achieved && <Chip className="chip-success"><IconCheck /> Achieved {fmtDate(dream.achievedAt)}</Chip>}
+        {dream.progressIsPrivate && <span data-testid="home-dream-private"><PrivateChip /></span>}
         {dream.progress == null ? (
           <span>No progress recorded yet</span>
         ) : delta != null ? (
@@ -185,7 +186,7 @@ function CareCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: stri
           const l = latest[c];
           return (
             <div key={c} data-testid={`home-stat-${c}`}>
-              <Stat label={CATEGORY_META[c].label} value={l ? l.value : '—'} sub={l ? sourceLabel(l) : 'Not rated yet'} delta={l && l.previous != null ? l.value - l.previous : null} />
+              <Stat label={CATEGORY_META[c].label} value={l ? l.value : '—'} sub={l ? <>{sourceLabel(l)}{l.isPrivate && <PrivateMark testId={`home-stat-private-${c}`} />}</> : 'Not rated yet'} delta={l && l.previous != null ? l.value - l.previous : null} />
             </div>
           );
         })}
@@ -204,10 +205,16 @@ function CareRow({ category, latest }: { category: CareCategory; latest: LatestR
         <span className="dh-care-label">{m.label}</span>
         <span className="dh-care-src">{latest ? sourceLabel(latest) : 'Not rated yet'}</span>
       </span>
+      {latest?.isPrivate && <PrivateMark testId={`home-care-private-${category}`} />}
       <span className="dh-care-delta">{latest && <Delta value={delta} digits={0} />}</span>
       <span className="dh-care-val tnum">{latest ? latest.value : '–'}</span>
     </Link>
   );
+}
+
+/** A lock next to a value that comes from one of the dreamer's private entries (only ever set while they are shown). */
+export function PrivateMark({ testId }: { testId?: string }) {
+  return <span className="dh-private" data-testid={testId}><PrivateChip compact /><span className="sr-only">Private</span></span>;
 }
 
 /* ---------- Actions ---------- */

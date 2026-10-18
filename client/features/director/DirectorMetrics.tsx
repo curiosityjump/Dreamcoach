@@ -5,9 +5,9 @@
  * The server already returns only what the director may see, so nothing here
  * filters or mentions privacy. Figures are context, never a ranking.
  */
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { CARE_CATEGORIES, CATEGORY_META } from '@shared/care';
-import type { CaseloadEntry, CoachSummary, DreamerStatus, LatestRating, Snapshot } from '@shared/types';
+import type { CoachSummary, DreamerStatus, LatestRating, Snapshot } from '@shared/types';
 import { Avatar, Bar, Chip, Stat } from '@/components/ui';
 import { IconInfo } from '@/components/icons';
 import { fmtDate, fmtDateTime, num, pct, plural, relativeTime, signed } from '@/lib/format';
@@ -89,13 +89,13 @@ export function summaryStatGroups(s: CoachSummary): { label: string; items: Stat
       label: 'Caseload & participation',
       items: [
         { key: 'dreamers', label: 'Dreamers', value: s.activeDreamers, sub: s.dreamers === s.activeDreamers ? 'all active' : `active of ${s.dreamers} in total` },
-        { key: 'sessions', label: 'Sessions (30d)', value: s.sessionsLast30d, sub: `${plural(s.sessionsTotal, 'session')} in the program` },
+        { key: 'sessions', label: 'Sessions run (30d)', value: s.sessionsLast30d, sub: `${s.sessionsTotal} in the program · counted for the coach who ran them` },
         { key: 'participation', label: 'Participation (45d)', value: pct(s.participation45d), sub: 'of active dreamers had a session in the last 45 days' },
-        { key: 'engaged', label: 'Engaged between sessions (30d)', value: plural(s.engagedBetweenSessions30d, 'dreamer'), sub: 'with a self check-in or reflection in the last 30 days' },
+        { key: 'engaged', label: 'Engaged between sessions (30d)', value: plural(s.engagedBetweenSessions30d, 'dreamer'), sub: `of ${s.activeDreamers} active, with a self check-in or reflection in the last 30 days` },
       ],
     },
     {
-      label: 'Outcomes',
+      label: 'Caseload outcomes',
       items: [
         { key: 'achieved', label: 'Dreams achieved', value: s.dreamsAchieved, sub: 'in this caseload' },
         { key: 'dream-progress', label: 'Avg dream progress', value: pct(s.avgDreamProgress), sub: 'latest progress across all dreams' },
@@ -119,8 +119,10 @@ export function ComparisonCaveat() {
 }
 
 const DEFINITIONS: { term: string; def: string }[] = [
-  { term: 'Participation (45d)', def: 'Share of active dreamers who had a completed coaching session in the last 45 days.' },
-  { term: 'Engaged between sessions (30d)', def: 'Dreamers with at least one self check-in or reflection in the last 30 days.' },
+  { term: 'Sessions run', def: 'Completed coaching sessions, counted for the coach who ran them, even if the dreamer has since moved to another coach.' },
+  { term: 'Caseload figures', def: 'Everything else on a coach’s row or page describes their current caseload: the dreamers assigned to them today, with each dreamer’s whole history.' },
+  { term: 'Participation (45d)', def: 'Share of active dreamers who had a completed coaching session, with any coach, in the last 45 days.' },
+  { term: 'Engaged between sessions (30d)', def: 'Active dreamers with at least one self check-in or reflection in the last 30 days, out of all active dreamers. Paused dreamers are left out of both participation and engagement.' },
   { term: 'CARE change', def: 'For each dreamer with two or more completed sessions that rated all four CARE areas: the latest session’s CARE average minus the first session’s. Shown as the mean, with n = dreamers counted.' },
   { term: 'Avg commitment / satisfaction', def: 'Mean of each dreamer’s most recent Commitment and Satisfaction ratings (0–10).' },
   { term: 'Avg dream progress', def: 'Mean of the latest recorded progress of every dream (0–100%). Dreams achieved counts dreams marked as achieved.' },
@@ -144,12 +146,54 @@ export function HowCalculated() {
   );
 }
 
-/* ---------- Cells shared by the dreamer tables ---------- */
+/* ---------- Table wrapper ---------- */
+
+/**
+ * The horizontal scroller around a director table. When the table is wider than its card it marks
+ * which edges have more columns, so the sticky first and last columns can cast a soft shadow there.
+ */
+export function TableScroll({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState({ start: false, end: false });
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => {
+      const start = el.scrollLeft > 1;
+      const end = el.scrollWidth - el.clientWidth - el.scrollLeft > 1;
+      setMore((m) => (m.start === start && m.end === end ? m : { start, end }));
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener('scroll', update);
+      ro.disconnect();
+    };
+  }, []);
+
+  return <div ref={ref} className={`table-wrap dir-table-wrap${more.start ? ' has-more-start' : ''}${more.end ? ' has-more-end' : ''}`}>{children}</div>;
+}
+
+/* ---------- Cells shared by the tables ---------- */
+
+/** A column header with an optional small second line (unit or time window). */
+export function Th({ children, sub, className = '' }: { children: ReactNode; sub?: string; className?: string }) {
+  return (
+    <th scope="col" className={className}>
+      <span className="dir-th">{children}{sub && <span className="dir-th-sub">{sub}</span>}</span>
+    </th>
+  );
+}
 
 const STATUS_LABEL: Record<DreamerStatus, string> = { active: 'Active', paused: 'Paused', completed: 'Completed program' };
 
-export function DreamerStatusChip({ status, always }: { status: DreamerStatus; always?: boolean }) {
-  if (status === 'active' && !always) return null;
+/** Shown only when a dreamer is not active, so paused and completed dreamers stand out. */
+export function DreamerStatusChip({ status }: { status: DreamerStatus }) {
+  if (status === 'active') return null;
   const cls = status === 'completed' ? 'chip-success' : status === 'paused' ? 'chip-muted' : 'chip-session';
   return <Chip className={cls} data-testid="dreamer-status">{STATUS_LABEL[status]}</Chip>;
 }
@@ -180,13 +224,16 @@ export function LastSessionCell({ snapshot, compact }: { snapshot: Snapshot; com
   );
 }
 
-export function LastSelfCell({ entry }: { entry: CaseloadEntry }) {
-  const at = entry.lastActivityKind === 'self' ? entry.lastActivityAt : entry.snapshot.lastSelfCheckIn;
-  if (!at) return <span className="muted">—</span>;
+const SELF_KIND_LABEL: Record<NonNullable<Snapshot['lastSelfActivity']>['kind'], string> = { 'check-in': 'Check-in', reflection: 'Reflection' };
+
+/** The dreamer's newest self activity — a check-in or a reflection, named as such — plus their check-ins in the last 30 days. */
+export function LastSelfCell({ snapshot }: { snapshot: Snapshot }) {
+  const last = snapshot.lastSelfActivity;
+  if (!last) return <span className="muted">—</span>;
   return (
     <span className="dir-cell-stack">
-      <span><span className="dir-strong">Self check-in</span> <span className="muted">· {relativeTime(at)}</span></span>
-      {entry.snapshot.selfCheckIns30d > 0 && <span className="muted tiny">{plural(entry.snapshot.selfCheckIns30d, 'check-in')} in 30 days</span>}
+      <span title={fmtDateTime(last.at)}><span className="dir-strong">{SELF_KIND_LABEL[last.kind]}</span> <span className="muted">· {relativeTime(last.at)}</span></span>
+      {snapshot.selfCheckIns30d > 0 && <span className="muted tiny">{plural(snapshot.selfCheckIns30d, 'check-in')} in 30 days</span>}
     </span>
   );
 }

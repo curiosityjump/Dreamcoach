@@ -9,7 +9,21 @@ export class ApiRequestError extends Error {
 
 export const UNAUTHENTICATED_EVENT = 'dc:unauthenticated';
 
+let readsHeld: Promise<unknown> | null = null;
+
+/** Reads wait until `until` settles, so none can reach the server first (e.g. before it has hidden private entries). */
+export async function holdReads<T>(until: Promise<T>): Promise<T> {
+  const held = until.catch(() => {});
+  readsHeld = held;
+  try {
+    return await until;
+  } finally {
+    if (readsHeld === held) readsHeld = null;
+  }
+}
+
 export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
+  if (method === 'GET' && readsHeld) await readsHeld;
   const res = await fetch(`/api${path}`, {
     method,
     headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
@@ -23,7 +37,9 @@ export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   }
   if (!res.ok) {
     const err = (data as ApiError) ?? { error: `Request failed (${res.status})` };
-    if (res.status === 401 && !path.startsWith('/auth/login') && !path.startsWith('/auth/privacy/unlock')) {
+    // A wrong password (signing in, or re-entering it to show private entries) stays in its form;
+    // any other 401 means the session is gone.
+    if (res.status === 401 && err.code !== 'bad_credentials') {
       window.dispatchEvent(new CustomEvent(UNAUTHENTICATED_EVENT));
     }
     throw new ApiRequestError(res.status, err);

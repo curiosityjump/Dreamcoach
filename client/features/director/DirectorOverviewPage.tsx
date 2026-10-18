@@ -3,7 +3,6 @@
  * totals, the CARE picture, month trends, and one row per coach that opens the
  * coach's page. Figures are context for conversations, never a ranking.
  */
-import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { CARE_CATEGORIES, CATEGORY_META, RATING_CATEGORIES } from '@shared/care';
 import type { CoachSummary, DirectorOverview } from '@shared/types';
@@ -13,7 +12,7 @@ import { Avatar, Button, Card, CardHead, Chip, EmptyState, LoadingPage, PageHead
 import { WheelOfLife } from '@/components/WheelOfLife';
 import { IconArrowRight, IconInfo, IconUsers } from '@/components/icons';
 import { num, pct, plural } from '@/lib/format';
-import { CareChangeValue, ComparisonCaveat, HowCalculated, RateWithN, StatGroup, fmtDayRange, programMonth, type StatItem } from './DirectorMetrics';
+import { CareChangeValue, ComparisonCaveat, HowCalculated, RateWithN, StatGroup, TableScroll, Th, fmtDayRange, programMonth, type StatItem } from './DirectorMetrics';
 import { ActionsChart, CareLinesChart, DreamProgressChart, SessionsChart, TrendCard, monthRows } from './DirectorCharts';
 
 const coachPath = (id: number) => `/director/coaches/${id}`;
@@ -27,7 +26,7 @@ function totalsGroups(t: DirectorOverview['totals']): { label: string; items: St
         { key: 'dreamers', label: 'Dreamers', value: t.activeDreamers, sub: t.activeDreamers === t.dreamers ? 'all active' : `active of ${t.dreamers} in the program` },
         { key: 'sessions', label: 'Sessions this month', value: t.sessionsThisMonth, sub: `${t.sessionsLast30d} in the last 30 days · ${t.sessionsTotal} in the program` },
         { key: 'participation', label: 'Participation (45d)', value: pct(t.participation45d), sub: 'of active dreamers had a session in the last 45 days' },
-        { key: 'engaged', label: 'Engaged between sessions (30d)', value: plural(t.engagedBetweenSessions30d, 'dreamer'), sub: 'with a self check-in or reflection in the last 30 days' },
+        { key: 'engaged', label: 'Engaged between sessions (30d)', value: plural(t.engagedBetweenSessions30d, 'dreamer'), sub: `of ${t.activeDreamers} active, with a self check-in or reflection in the last 30 days` },
       ],
     },
     {
@@ -86,36 +85,27 @@ function CoachName({ c }: { c: CoachSummary }) {
           <Link to={coachPath(c.coach.id)} className="dir-person-link" onClick={(e) => e.stopPropagation()}>{c.coach.name}</Link>
           {c.coach.role === 'director' && <Chip className="chip-muted" title="The Director’s own caseload">Director</Chip>}
         </span>
-        <span className="dir-person-about">{plural(c.sessionsTotal, 'session')} in the program</span>
+        <span className="dir-person-about">{plural(c.sessionsTotal, 'session')} run</span>
       </span>
     </span>
-  );
-}
-
-function Th({ children, sub, className = '' }: { children: ReactNode; sub?: string; className?: string }) {
-  return (
-    <th scope="col" className={className}>
-      <span className="dir-th">{children}{sub && <span className="dir-th-sub">{sub}</span>}</span>
-    </th>
   );
 }
 
 function CoachesTable({ coaches }: { coaches: CoachSummary[] }) {
   const nav = useNavigate();
   return (
-    <div className="table-wrap dir-table-wrap">
+    <TableScroll>
       <table className="table dir-table dir-coaches-table" data-testid="director-coaches-table">
         <thead>
           <tr>
             <Th>Coach</Th>
             <Th className="num" sub="active / total">Dreamers</Th>
-            <Th className="num" sub="last 30 days">Sessions</Th>
+            <Th className="num" sub="last 30 days">Sessions run</Th>
             <Th className="num" sub="45 days">Participation</Th>
             <Th className="num" sub="between sessions, 30d">Engaged</Th>
             <Th className="num" sub="first → latest session">CARE change</Th>
-            <Th className="num" sub="latest, 0–10">Commitment /<br />satisfaction</Th>
+            <Th className="num" sub="latest, 0–10">Commitment&nbsp;/<br />satisfaction</Th>
             <Th className="num" sub="avg progress">Dreams</Th>
-            <Th className="num">Achieved</Th>
             <Th className="num" sub="actions older than 30d">Follow-through</Th>
             <th scope="col"><span className="sr-only">Open</span></th>
           </tr>
@@ -138,15 +128,19 @@ function CoachesTable({ coaches }: { coaches: CoachSummary[] }) {
               <td className="num"><span className="tnum">{c.engagedBetweenSessions30d}</span><span className="muted"> of {c.activeDreamers}</span></td>
               <td className="num"><CareChangeValue change={c.careChange} /></td>
               <td className="num tnum">{num(c.avgCommitment)} <span className="dir-slash">/</span> {num(c.avgSatisfaction)}</td>
-              <td className="num tnum">{pct(c.avgDreamProgress)}</td>
-              <td className="num tnum">{c.dreamsAchieved}</td>
+              <td className="num">
+                <span className="dir-cell-stack dir-cell-end">
+                  <span className="tnum">{pct(c.avgDreamProgress)}</span>
+                  {c.dreamsAchieved > 0 && <span className="dir-achieved tnum">{c.dreamsAchieved} achieved</span>}
+                </span>
+              </td>
               <td className="num">{c.followThrough ? <RateWithN rate={c.followThrough.rate} n={c.followThrough.n} /> : <span className="muted">—</span>}</td>
               <td className="dir-row-open"><IconArrowRight /></td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
@@ -162,7 +156,7 @@ function CoachCards({ coaches }: { coaches: CoachSummary[] }) {
           </div>
           <dl className="dir-card-facts">
             <div><dt>Dreamers</dt><dd className="tnum">{c.activeDreamers} <span className="muted">/ {c.dreamers}</span></dd></div>
-            <div><dt>Sessions (30d)</dt><dd className="tnum">{c.sessionsLast30d}</dd></div>
+            <div><dt>Sessions run (30d)</dt><dd className="tnum">{c.sessionsLast30d}</dd></div>
             <div><dt>Participation (45d)</dt><dd className="tnum">{pct(c.participation45d)}</dd></div>
             <div><dt>Engaged (30d)</dt><dd className="tnum">{c.engagedBetweenSessions30d} <span className="muted">of {c.activeDreamers}</span></dd></div>
             <div><dt>CARE change</dt><dd><CareChangeValue change={c.careChange} /></dd></div>
@@ -254,6 +248,7 @@ export function DirectorOverviewPage() {
       <section className="dir-section" aria-labelledby="dir-coaches-heading">
         <div className="dir-section-head">
           <h2 id="dir-coaches-heading">Coaches</h2>
+          <span className="dir-section-sub">Sessions are counted for the coach who ran them. Every other column describes the coach’s current caseload.</span>
           <Link to="/director/dreamers" className="dir-link" data-testid="director-all-dreamers-link-2">All dreamers <IconArrowRight /></Link>
         </div>
         <Card pad={false} className="dir-table-card">

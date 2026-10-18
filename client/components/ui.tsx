@@ -68,7 +68,7 @@ export function Field({ label, hint, error, children, htmlFor }: { label?: React
     </div>
   );
 }
-export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
+export function TextInput(props: InputHTMLAttributes<HTMLInputElement> & { ref?: React.Ref<HTMLInputElement> }) {
   return <input {...props} />;
 }
 export function TextArea({ autoGrow = true, ref: outerRef, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { autoGrow?: boolean; ref?: React.Ref<HTMLTextAreaElement> }) {
@@ -107,6 +107,17 @@ export function RatingInput({
 }) {
   const meta = category ? CATEGORY_META[category] : null;
   const style = meta ? ({ '--rating-color': meta.color, '--rating-tint': meta.tint } as React.CSSProperties) : undefined;
+  // A radio group: one tab stop (the chosen number, or 0 before anything is chosen); arrow keys move
+  // focus and the choice together, stopping at 0 and 10 rather than wrapping round.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const next = Math.min(10, Math.max(0, i + step));
+    if (next === i) return;
+    (e.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus();
+    onChange(next);
+  };
   return (
     <div className={`rating-input${compact ? ' compact' : ''}`} role="radiogroup" aria-label={label ?? (meta ? `${meta.label} rating` : 'Rating')} aria-busy={disabled || undefined} style={style}>
       {Array.from({ length: 11 }, (_, i) => (
@@ -116,12 +127,10 @@ export function RatingInput({
           role="radio"
           disabled={disabled}
           aria-checked={value === i}
+          tabIndex={i === (value ?? 0) ? 0 : -1}
           className={value != null && i < value ? 'below' : ''}
           onClick={() => onChange(allowClear && value === i ? null : i)}
-          onKeyDown={(e) => {
-            if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); onChange(Math.min(10, (value ?? -1) + 1)); }
-            if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); onChange(Math.max(0, (value ?? 1) - 1)); }
-          }}
+          onKeyDown={(e) => onKeyDown(e, i)}
         >
           {i}
         </button>
@@ -283,18 +292,41 @@ export function Check({ checked, onChange, label, disabled }: { checked: boolean
 }
 
 /* ---------- Modal ---------- */
+const focusables = (root: HTMLElement) =>
+  [...root.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]')].filter((el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length > 0);
+
 export function Modal({ open, onClose, title, children, footer, size }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'lg' }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Callers often pass a new onClose on every render; the effect below must not re-run for that,
+  // or it would pull focus back to the first field while someone types in another.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const dialog = ref.current;
+    if (!open || !dialog) return;
+    const opener = document.activeElement instanceof HTMLElement && !dialog.contains(document.activeElement) ? document.activeElement : null;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current();
+      if (e.key !== 'Tab') return;
+      // Keep Tab inside the dialog.
+      const els = focusables(dialog);
+      const inside = dialog.contains(document.activeElement);
+      if (!els.length) return;
+      if (e.shiftKey && (!inside || document.activeElement === els[0])) { e.preventDefault(); els[els.length - 1].focus(); }
+      else if (!e.shiftKey && (!inside || document.activeElement === els[els.length - 1])) { e.preventDefault(); els[0].focus(); }
+    };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const first = ref.current?.querySelector<HTMLElement>('input, textarea, select, button:not(.modal-close)');
-    first?.focus();
-    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
-  }, [open, onClose]);
+    focusables(dialog).find((el) => el.matches('input, textarea, select, button:not(.modal-close)'))?.focus();
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+      // Give focus back to whatever opened the dialog, unless that is gone or focus has already moved on.
+      const active = document.activeElement;
+      if (opener?.isConnected && (!active || active === document.body || dialog.contains(active))) opener.focus();
+    };
+  }, [open]);
   if (!open) return null;
   return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -333,11 +365,13 @@ export function Dropdown({ trigger, children, align = 'right' }: { trigger: (ope
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => setOpen(false), open);
+  // Choosing an item hands focus back to the trigger, so a dialog the item opens can return it there.
+  const choose = () => { ref.current?.querySelector<HTMLElement>('button, a[href]')?.focus(); setOpen(false); };
   return (
     <div className="user-menu" ref={ref}>
       <div onClick={() => setOpen((o) => !o)}>{trigger(open)}</div>
       {open && (
-        <div className="menu" style={align === 'left' ? { left: 0, right: 'auto' } : undefined} onClick={() => setOpen(false)}>
+        <div className="menu" style={align === 'left' ? { left: 0, right: 'auto' } : undefined} onClick={choose}>
           {children}
         </div>
       )}

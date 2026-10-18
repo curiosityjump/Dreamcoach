@@ -169,7 +169,8 @@ test('a check-in whose every entry is private does not exist for staff', async (
   assert.equal(after.body.length, before.body.length);
   const afterSnap = await coach.get(`/dreamers/${dreamerId}/overview`);
   assert.equal(afterSnap.body.snapshot.selfCheckIns30d, beforeSnap.body.snapshot.selfCheckIns30d);
-  assert.equal(afterSnap.body.snapshot.lastSelfCheckIn, beforeSnap.body.snapshot.lastSelfCheckIn, 'last self activity does not move for a private-only check-in');
+  assert.equal(afterSnap.body.snapshot.lastSelfCheckIn, beforeSnap.body.snapshot.lastSelfCheckIn, 'last self check-in does not move for a private-only check-in');
+  assert.deepEqual(afterSnap.body.snapshot.lastSelfActivity, beforeSnap.body.snapshot.lastSelfActivity, 'last self activity does not move either');
   assert.ok(!allStrings(after.body).join().includes(marker));
 });
 

@@ -432,13 +432,13 @@ function mapSession(db: DB, scope: Scope, s: SessionRow, number: number): Coachi
   const progress = db
     .prepare(`SELECT dream_id, value, is_private FROM dream_progress WHERE session_id = ? AND (is_private = 0 OR ? = 1) ORDER BY is_private DESC, updated_at ASC`)
     .all(s.id, INC(scope)) as { dream_id: number; value: number; is_private: number }[];
+  // Actions chosen in this session, and how many of those have since been completed.
   const counts = db
     .prepare(
-      `SELECT SUM(CASE WHEN session_id = ? THEN 1 ELSE 0 END) AS created,
-              SUM(CASE WHEN status = 'completed' AND completed_at IS NOT NULL AND completed_at >= ? AND completed_at <= ? THEN 1 ELSE 0 END) AS completed
-       FROM actions WHERE dreamer_id = ? AND (is_private = 0 OR ? = 1)`,
+      `SELECT COUNT(*) AS created, SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed
+       FROM actions WHERE session_id = ? AND dreamer_id = ? AND (is_private = 0 OR ? = 1)`,
     )
-    .get(s.id, s.occurred_at, s.completed_at ?? '9999', s.dreamer_id, INC(scope)) as { created: number | null; completed: number | null };
+    .get(s.id, s.dreamer_id, INC(scope)) as { created: number | null; completed: number | null };
   const r: Partial<Record<RatingCategory, number>> = {};
   const privateRatings: RatingCategory[] = [];
   for (const row of ratings) {
@@ -487,7 +487,7 @@ export function getGrid(db: DB, scope: Scope): SessionGrid {
 
 /* ---------- Check-ins ---------- */
 
-export function listCheckIns(db: DB, scope: Scope, opts: { from?: string; to?: string } = {}): CheckIn[] {
+export function listCheckIns(db: DB, scope: Scope, opts: { from?: string; to?: string; limit?: number } = {}): CheckIn[] {
   const where = ['c.dreamer_id = ?'];
   const params: unknown[] = [scope.dreamerId];
   if (opts.from) { where.push('c.occurred_at >= ?'); params.push(opts.from); }
@@ -503,6 +503,7 @@ export function listCheckIns(db: DB, scope: Scope, opts: { from?: string; to?: s
     // A check-in whose every entry is hidden does not exist for this viewer.
     if (!ratings.length && !progress.length && !reflection) continue;
     out.push({ id: c.id, dreamerId: c.dreamer_id, occurredAt: c.occurred_at, source: 'self', sessionId: null, ratings, progress, reflection });
+    if (opts.limit && out.length >= opts.limit) break;
   }
   return out;
 }
@@ -531,19 +532,22 @@ export function getSnapshot(db: DB, scope: Scope): Snapshot {
   const completed = sessions.filter((s) => s.status === 'completed');
   const last = completed[completed.length - 1] ?? null;
   const open = sessions.find((s) => s.status === 'in_progress') ?? null;
-  // Self activity: only visible entries count.
-  const selfLatest = db
-    .prepare(
-      `SELECT MAX(t) AS t FROM (
-         SELECT MAX(occurred_at) AS t FROM ratings WHERE dreamer_id = ? AND source = 'self' AND (is_private = 0 OR ? = 1)
-         UNION ALL SELECT MAX(occurred_at) FROM dream_progress WHERE dreamer_id = ? AND source = 'self' AND (is_private = 0 OR ? = 1)
-         UNION ALL SELECT MAX(j.occurred_at) FROM journal_entries j WHERE j.dreamer_id = ? AND j.source = 'self' AND ${JOURNAL_VISIBLE('j')}
-       )`,
-    )
-    .get(scope.dreamerId, inc, scope.dreamerId, inc, scope.dreamerId, inc, inc, inc) as { t: string | null };
+  // Self activity: only visible entries count. A check-in counts when any of its entries is visible
+  // (the same rule as listCheckIns); a reflection is a standalone self journal entry outside a check-in.
+  const lastCheckIn = listCheckIns(db, scope, { limit: 1 })[0]?.occurredAt ?? null;
+  const lastReflection = (
+    db
+      .prepare(
+        `SELECT MAX(j.occurred_at) AS t FROM journal_entries j
+         WHERE j.dreamer_id = ? AND j.source = 'self' AND j.check_in_id IS NULL AND j.rating_id IS NULL AND j.progress_id IS NULL AND ${JOURNAL_VISIBLE('j')}`,
+      )
+      .get(scope.dreamerId, inc, inc, inc) as { t: string | null }
+  ).t;
+  const lastSelfActivity: Snapshot['lastSelfActivity'] =
+    lastReflection && (!lastCheckIn || lastReflection > lastCheckIn) ? { at: lastReflection, kind: 'reflection' } : lastCheckIn ? { at: lastCheckIn, kind: 'check-in' } : null;
   const checkIns30 = listCheckIns(db, scope, { from: d30 }).length;
   const journal30 = db
-    .prepare(`SELECT COUNT(*) AS n FROM journal_entries j WHERE j.dreamer_id = ? AND j.occurred_at >= ? AND ${JOURNAL_VISIBLE('j')}`)
+    .prepare(`SELECT COUNT(*) AS n FROM journal_entries j WHERE j.dreamer_id = ? AND j.source = 'self' AND j.occurred_at >= ? AND ${JOURNAL_VISIBLE('j')}`)
     .get(scope.dreamerId, d30, inc, inc, inc) as { n: number };
   return {
     latest: latestRatings(db, scope),
@@ -552,7 +556,8 @@ export function getSnapshot(db: DB, scope: Scope): Snapshot {
     completedActions30d: actions.done30 ?? 0,
     lastSession: last ? { id: last.id, occurredAt: last.occurredAt, number: last.number, status: last.status } : null,
     openSession: open ? { id: open.id, occurredAt: open.occurredAt } : null,
-    lastSelfCheckIn: selfLatest.t,
+    lastSelfCheckIn: lastCheckIn,
+    lastSelfActivity,
     selfCheckIns30d: checkIns30,
     journalEntries30d: journal30.n,
     sessionsCompleted: completed.length,

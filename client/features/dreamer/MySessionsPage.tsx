@@ -10,12 +10,13 @@ import { useActions, useDreams, useGrid, useOverview, useSession, useSessions } 
 import { errorMessage } from '@/api/client';
 import { Avatar, Bar, Card, CardHead, Chip, Delta, EmptyState, LoadingPage, PageHeader, Skeleton } from '@/components/ui';
 import { WheelOfLife, type WheelValues } from '@/components/WheelOfLife';
-import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconInfo, IconMessage } from '@/components/icons';
+import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconInfo, IconLock, IconMessage } from '@/components/icons';
 import { ActionList } from '@/features/shared/ActionItems';
 import { SessionGridView } from '@/features/coach/SessionGridView';
 import { CARE_CATEGORIES, CATEGORY_META, RATING_CATEGORIES, type RatingCategory } from '@shared/care';
 import type { ActionItem, CoachingSession, Dream } from '@shared/types';
 import { firstName, fmtDateLong, plural } from '@/lib/format';
+import { PrivateMark } from './HomePage';
 
 type DreamRef = Pick<Dream, 'id' | 'title' | 'slot' | 'slotLabel'>;
 
@@ -123,16 +124,17 @@ function SessionRow({ session: s, dreams }: { session: CoachingSession; dreams: 
         <IconChevronRight className="dh-srow-chev" />
       </div>
       <div className="dh-pills" aria-label="Ratings recorded">
-        {RATING_CATEGORIES.map((c) => <ValuePill key={c} category={c} value={s.ratings[c]} />)}
+        {RATING_CATEGORIES.map((c) => <ValuePill key={c} category={c} value={s.ratings[c]} isPrivate={s.privateRatings?.includes(c)} />)}
       </div>
       {dreams.length > 0 && (
         <div className="dh-minis" aria-label="Dream progress recorded">
           {dreams.map((d) => {
             const v = s.progress[d.id];
+            const priv = s.privateProgress?.includes(d.id);
             return (
-              <span key={d.id} className="dh-mini" title={`${d.slotLabel}: ${d.title}`}>
+              <span key={d.id} className="dh-mini" title={`${d.slotLabel}: ${d.title}${priv ? ' (private)' : ''}`}>
                 <span className="dh-mini-label truncate">{d.title || d.slotLabel}</span>
-                <span className="dh-mini-val tnum">{v != null ? `${v}%` : '—'}</span>
+                <span className="dh-mini-val tnum">{priv && <><IconLock className="dh-lock" /><span className="sr-only">Private</span></>}{v != null ? `${v}%` : '—'}</span>
               </span>
             );
           })}
@@ -148,10 +150,11 @@ function SessionRow({ session: s, dreams }: { session: CoachingSession; dreams: 
   );
 }
 
-function ValuePill({ category, value, delta }: { category: RatingCategory; value: number | undefined; delta?: number | null }) {
+function ValuePill({ category, value, delta, isPrivate }: { category: RatingCategory; value: number | undefined; delta?: number | null; isPrivate?: boolean }) {
   const m = CATEGORY_META[category];
   return (
-    <span className="dh-pill" style={{ '--dh-color': m.color, '--dh-tint': m.tint } as CSSProperties} title={`${m.label}${value != null ? `: ${value}` : ' (not recorded)'}`}>
+    <span className="dh-pill" style={{ '--dh-color': m.color, '--dh-tint': m.tint } as CSSProperties} title={`${m.label}${value != null ? `: ${value}${isPrivate ? ' (private)' : ''}` : ' (not recorded)'}`}>
+      {isPrivate && <><IconLock className="dh-lock" /><span className="sr-only">Private</span></>}
       <span className="dh-pill-k">{m.short}</span>
       <span className="dh-pill-v tnum">{value ?? '–'}</span>
       {delta != null && delta !== 0 && <span className="dh-pill-d tnum">{delta > 0 ? `+${delta}` : `−${Math.abs(delta)}`}</span>}
@@ -276,6 +279,7 @@ function SessionDetail({ sid, sessions, dreams, programName }: { sid: number; se
                       <div key={c} className="dh-rating-row" style={{ '--dh-color': m.color, '--dh-tint': m.tint } as CSSProperties} data-testid={`session-rating-${c}`}>
                         <span className="dh-care-swatch" aria-hidden />
                         <span className="dh-rating-label grow">{m.label}</span>
+                        {v != null && session.privateRatings?.includes(c) && <PrivateMark testId={`session-rating-private-${c}`} />}
                         <span className="dh-care-delta">{v != null && previous && <Delta value={delta} digits={0} />}</span>
                         <span className="dh-care-val tnum">{v ?? '–'}</span>
                       </div>
@@ -305,6 +309,7 @@ function SessionDetail({ sid, sessions, dreams, programName }: { sid: number; se
                           <span className="dh-eyebrow">{d.slotLabel}</span>
                           <span className="dh-progress-title">{d.title || 'Untitled dream'}</span>
                         </span>
+                        {v != null && session.privateProgress?.includes(d.id) && <PrivateMark testId={`session-progress-private-${d.id}`} />}
                         <span className="dh-progress-val tnum">{v != null ? `${v}%` : '—'}</span>
                       </div>
                       <Bar value={v ?? null} label={`${d.title || d.slotLabel} progress`} />

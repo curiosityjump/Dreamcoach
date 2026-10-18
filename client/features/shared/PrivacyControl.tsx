@@ -2,7 +2,7 @@
  * Dreamer-only control in the top bar: "Private: hidden / shown".
  * Hide = instant. Show = re-enter the account password (verified server-side).
  */
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useAuth } from '@/auth/AuthContext';
 import { Button, Field, Modal, TextInput } from '@/components/ui';
 import { IconEye, IconEyeOff, IconLock } from '@/components/icons';
@@ -46,7 +46,10 @@ export function UnlockDialog({ open, onClose, onUnlock }: { open: boolean; onClo
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  // Cancel, Escape and the close button all start the next attempt clean.
+  const close = () => { setPassword(''); setError(null); onClose(); };
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -58,22 +61,25 @@ export function UnlockDialog({ open, onClose, onUnlock }: { open: boolean; onClo
       toast('Private entries are now showing.', 'private');
     } catch (err) {
       setError(errorMessage(err));
+      // Ready for another try (disabling the busy submit button took focus with it).
+      input.current?.focus();
+      input.current?.select();
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Modal open={open} onClose={() => { setPassword(''); setError(null); onClose(); }} title="Show private entries">
+    <Modal open={open} onClose={close} title="Show private entries">
       <form onSubmit={submit} className="stack" data-testid="unlock-form">
         <div className="callout callout-private">
           <IconLock />
           <span>Private entries are only ever visible to you. Re-enter your password to show them on this device. They hide again automatically after 30 minutes without activity, or whenever you choose Hide private.</span>
         </div>
         <Field label="Your password" error={error} htmlFor="unlock-password">
-          <TextInput id="unlock-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus required />
+          <TextInput ref={input} id="unlock-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" onClick={close}>Cancel</Button>
           <Button variant="primary" type="submit" loading={busy} disabled={!password}>Show private entries</Button>
         </div>
       </form>

@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, PROGRESS_MAX, PROGRESS_MIN, RATING_MAX, RATING_MIN, type RatingCategory } from '@shared/care';
 import type { CoachingSession, SessionGrid } from '@shared/types';
-import { CategoryChip } from '@/components/ui';
+import { CategoryChip, PrivateChip } from '@/components/ui';
 import { fmtDate, fmtMonth } from '@/lib/format';
 
 export interface SessionGridViewProps {
@@ -52,9 +52,17 @@ function TinyDelta({ now, prev, suffix = '' }: { now: number | null; prev: numbe
 }
 
 /**
+ * The dreamer's own private session value. The server sends `privateRatings` / `privateProgress`
+ * only to the owner while private entries are shown, so staff grids never render this.
+ */
+function PrivateMark() {
+  return <span className="cs-private" data-testid="grid-private"><PrivateChip compact /><span className="sr-only">Private</span></span>;
+}
+
+/**
  * Compact number cell for the editable column. Keeps its own text while typing,
  * commits on change (after a short pause), on blur and on Enter; an empty field
- * clears the value. Arrow keys adjust by one.
+ * clears the value on blur or Enter. Arrow keys adjust by one; Escape cancels the edit.
  */
 function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cellId, trailing }: {
   value: number | null;
@@ -72,6 +80,8 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   const focused = useRef(false);
   const timer = useRef<number | null>(null);
   const lastSent = useRef<number | null>(value);
+  // The value when editing began, so Escape can put it back.
+  const atFocus = useRef<number | null>(value);
 
   // Reflect server changes when the coach isn't mid-edit.
   useEffect(() => {
@@ -111,7 +121,10 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
     const shown = parsed == null ? '' : String(parsed);
     // Keep what was typed unless it had to be clamped (e.g. "12" → "10").
     setText(parsed != null && Number(raw) !== parsed ? shown : raw);
-    scheduleCommit(shown);
+    // An emptied cell is usually about to get a new number, so a pause never deletes the value:
+    // clearing commits on blur or Enter.
+    if (parsed == null) { if (timer.current) { window.clearTimeout(timer.current); timer.current = null; } }
+    else scheduleCommit(shown);
   };
 
   const step = (delta: number) => {
@@ -126,7 +139,17 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
     if (e.key === 'ArrowUp') { e.preventDefault(); step(1); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); step(-1); }
     else if (e.key === 'Enter') { e.preventDefault(); commit(text); moveDown(e.currentTarget); }
-    else if (e.key === 'Escape') { setText(value == null ? '' : String(value)); e.currentTarget.blur(); }
+    else if (e.key === 'Escape') {
+      // Cancel the edit, as in a spreadsheet: the cell gets back the value it had when editing began
+      // and stays selected. Nothing is sent unless a pause already saved the typed value, in which
+      // case the original goes back.
+      e.preventDefault();
+      const original = atFocus.current == null ? '' : String(atFocus.current);
+      setText(original);
+      commit(original);
+      const el = e.currentTarget;
+      window.requestAnimationFrame(() => el.select());
+    }
   };
 
   return (
@@ -143,7 +166,7 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
         aria-label={label}
         data-testid={testId}
         data-cs-cell={cellId}
-        onFocus={(e) => { focused.current = true; e.currentTarget.select(); }}
+        onFocus={(e) => { focused.current = true; atFocus.current = lastSent.current; e.currentTarget.select(); }}
         onBlur={() => { focused.current = false; commit(text); }}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
@@ -184,11 +207,13 @@ export function SessionGridView({ grid, currentSessionId, editable, onRating, on
   // Keep the current (or newest) column in view when there are many months.
   const wrapRef = useRef<HTMLDivElement>(null);
   const targetId = currentSessionId ?? sessions[sessions.length - 1]?.id ?? null;
+  const targetRef = useRef(targetId);
+  targetRef.current = targetId;
   useEffect(() => {
     const wrap = wrapRef.current;
-    if (!wrap || targetId == null) return;
+    if (!wrap || targetRef.current == null) return;
     const snap = () => {
-      const cell = wrap.querySelector<HTMLElement>(`[data-cs-col="${targetId}"]`);
+      const cell = wrap.querySelector<HTMLElement>(`[data-cs-col="${targetRef.current}"]`);
       const corner = wrap.querySelector<HTMLElement>('.cs-corner');
       if (!cell || !corner) return;
       const stickyW = corner.offsetWidth;
@@ -216,7 +241,22 @@ export function SessionGridView({ grid, currentSessionId, editable, onRating, on
     ro?.observe(wrap);
     if (table) ro?.observe(table);
     return () => ro?.disconnect();
-  }, [targetId, sessions.length]);
+  }, [sessions.length]);
+
+  // When another session is selected (e.g. a column header was picked), scroll only as far as needed
+  // to show its column — re-snapping would pull the column the coach just clicked out from under them.
+  const firstTarget = useRef(true);
+  useEffect(() => {
+    if (firstTarget.current) { firstTarget.current = false; return; }
+    const wrap = wrapRef.current;
+    const cell = wrap?.querySelector<HTMLElement>(`[data-cs-col="${targetId}"]`);
+    const corner = wrap?.querySelector<HTMLElement>('.cs-corner');
+    if (!wrap || !cell || !corner) return;
+    const left = cell.offsetLeft - corner.offsetWidth;
+    const right = cell.offsetLeft + cell.offsetWidth - wrap.clientWidth;
+    if (wrap.scrollLeft > left) wrap.scrollLeft = left;
+    else if (wrap.scrollLeft < right) wrap.scrollLeft = right;
+  }, [targetId]);
 
   if (sessions.length === 0) {
     return <div className="cs-grid-empty muted small" data-testid="session-grid-empty">No coaching sessions yet. The first session starts the grid.</div>;
@@ -254,6 +294,7 @@ export function SessionGridView({ grid, currentSessionId, editable, onRating, on
         <span className="cs-val tnum" data-testid={isCur ? `grid-rating-${row.category}` : undefined}>
           {v == null ? <span className="cs-none" aria-label="not recorded">–</span> : v}
           {showDeltas && <TinyDelta now={v} prev={pv} />}
+          {s.privateRatings?.includes(row.category) && <PrivateMark />}
         </span>
       );
     }
@@ -278,6 +319,7 @@ export function SessionGridView({ grid, currentSessionId, editable, onRating, on
       <span className="cs-val tnum" data-testid={isCur ? `grid-progress-${row.dreamId}` : undefined}>
         {v == null ? <span className="cs-none" aria-label="not recorded">–</span> : `${v}%`}
         {showDeltas && <TinyDelta now={v} prev={pv} suffix="%" />}
+        {s.privateProgress?.includes(row.dreamId) && <PrivateMark />}
       </span>
     );
   };

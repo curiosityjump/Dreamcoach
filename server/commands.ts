@@ -163,6 +163,20 @@ export function createCheckIn(db: DB, scope: Scope, input: CheckInInput): CheckI
 
 /* ---------- Ratings ---------- */
 
+/**
+ * Who may change what on a rating/progress entry. Values: the dreamer edits their own self entries,
+ * the coach edits session entries. Notes and privacy belong to the dreamer on every entry, including
+ * session-recorded ones (DECISIONS #2), so a staff write can never touch a dreamer's private note.
+ */
+function assertEntryEdit(scope: Scope, existing: { source: 'session' | 'self' }, patch: { value?: number; isPrivate?: boolean; note?: string | null; notePrivate?: boolean }) {
+  if (patch.isPrivate !== undefined || patch.notePrivate !== undefined) assertOwner(scope, 'privacy');
+  if (patch.note !== undefined) assertOwner(scope, 'notes on their entries');
+  const canEditValue = (scope.isOwner && existing.source === 'self') || (scope.isCoachFor && existing.source === 'session');
+  if (patch.value !== undefined && !canEditValue) {
+    throw new HttpError(403, existing.source === 'session' ? 'Session values are recorded by your coach. You can still add a note or make this entry private.' : 'Not allowed.', 'forbidden');
+  }
+}
+
 export function updateRating(
   db: DB,
   scope: Scope,
@@ -171,13 +185,7 @@ export function updateRating(
 ): RatingEntry {
   const existing = q.getRating(db, scope, id);
   if (!existing) throw new HttpError(404, 'Entry not found.', 'not_found');
-  if (patch.isPrivate !== undefined || patch.notePrivate !== undefined) assertOwner(scope, 'privacy');
-  // Values and notes: the dreamer edits their own self entries; the coach edits session entries.
-  // (A dreamer may still change the privacy of a session-recorded entry — that is theirs to decide.)
-  const canEditContent = (scope.isOwner && existing.source === 'self') || (scope.isCoachFor && existing.source === 'session');
-  if ((patch.value !== undefined || patch.note !== undefined) && !canEditContent) {
-    throw new HttpError(403, existing.source === 'session' ? 'Session values are recorded by your coach. You can still make this entry private.' : 'Not allowed.', 'forbidden');
-  }
+  assertEntryEdit(scope, existing, patch);
   const now = nowIso();
   if (patch.isPrivate !== undefined && existing.sessionId != null && patch.isPrivate !== existing.isPrivate) {
     const clash = db.prepare('SELECT 1 FROM ratings WHERE session_id = ? AND category = ? AND is_private = ? AND id <> ?').get(existing.sessionId, existing.category, patch.isPrivate ? 1 : 0, id);
@@ -231,11 +239,7 @@ export function updateProgress(
 ): ProgressEntry {
   const existing = q.getProgressEntry(db, scope, id);
   if (!existing) throw new HttpError(404, 'Entry not found.', 'not_found');
-  if (patch.isPrivate !== undefined || patch.notePrivate !== undefined) assertOwner(scope, 'privacy');
-  const canEditContent = (scope.isOwner && existing.source === 'self') || (scope.isCoachFor && existing.source === 'session');
-  if ((patch.value !== undefined || patch.note !== undefined) && !canEditContent) {
-    throw new HttpError(403, existing.source === 'session' ? 'Session values are recorded by your coach. You can still make this entry private.' : 'Not allowed.', 'forbidden');
-  }
+  assertEntryEdit(scope, existing, patch);
   const now = nowIso();
   if (patch.isPrivate !== undefined && existing.sessionId != null && patch.isPrivate !== existing.isPrivate) {
     const clash = db.prepare('SELECT 1 FROM dream_progress WHERE session_id = ? AND dream_id = ? AND is_private = ? AND id <> ?').get(existing.sessionId, existing.dreamId, patch.isPrivate ? 1 : 0, id);

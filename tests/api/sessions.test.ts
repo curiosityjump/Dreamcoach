@@ -74,6 +74,47 @@ test('a coach runs a full session and the dreamer sees it; values upsert, not du
   assert.equal((await dreamer.post(`/dreamers/me/sessions`, {})).status, 403);
 });
 
+test('a session counts the actions chosen in it, and how many of those are now completed', async () => {
+  const coach = new Client(s.base);
+  await coach.login('priya@dreamcoach.demo');
+  const entry = (await coach.get('/coach/dashboard')).body.caseload.find((c: any) => !c.snapshot.openSession);
+  const id = entry.dreamer.id;
+  const sid = (await coach.post(`/dreamers/${id}/sessions`, {})).body.id;
+  const chosen: any[] = [];
+  for (const title of ['Book the pottery taster', 'Phone Gran on Sunday', 'Draft the cover letter']) chosen.push((await coach.post(`/dreamers/${id}/actions`, { title, sessionId: sid })).body);
+  // An action from outside this session, completed while it is open, is not this session's.
+  const elsewhere = (await coach.post(`/dreamers/${id}/actions`, { title: 'Water the balcony plants' })).body;
+  await coach.patch(`/dreamers/${id}/actions/${elsewhere.id}`, { status: 'completed' });
+  await coach.patch(`/dreamers/${id}/actions/${chosen[0].id}`, { status: 'completed' });
+  await coach.patch(`/dreamers/${id}/actions/${chosen[1].id}`, { status: 'archived' });
+  let session = (await coach.patch(`/dreamers/${id}/sessions/${sid}`, { status: 'completed' })).body;
+  assert.equal(session.actionsCreated, 3);
+  assert.equal(session.actionsCompleted, 1);
+  // Completing a chosen action after the session still counts for the session it was chosen in.
+  await coach.patch(`/dreamers/${id}/actions/${chosen[2].id}`, { status: 'completed' });
+  session = (await coach.get(`/dreamers/${id}/sessions/${sid}`)).body;
+  assert.equal(session.actionsCompleted, 2);
+  // Every session's counts match its own actions.
+  const actions = (await coach.get(`/dreamers/${id}/actions`)).body;
+  for (const x of (await coach.get(`/dreamers/${id}/sessions`)).body) {
+    const mine = actions.filter((a: any) => a.sessionId === x.id);
+    assert.equal(x.actionsCreated, mine.length, `session ${x.number} created`);
+    assert.equal(x.actionsCompleted, mine.filter((a: any) => a.status === 'completed').length, `session ${x.number} completed`);
+  }
+  // A chosen action the dreamer makes private drops out of the coach's counts, not the dreamer's.
+  const dreamer = new Client(s.base);
+  await dreamer.login(entry.dreamer.email);
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  assert.equal((await dreamer.patch(`/dreamers/me/actions/${chosen[0].id}`, { isPrivate: true })).status, 200);
+  const coachView = (await coach.get(`/dreamers/${id}/sessions/${sid}`)).body;
+  assert.equal(coachView.actionsCreated, 2);
+  assert.equal(coachView.actionsCompleted, 1);
+  const ownerView = (await dreamer.get(`/dreamers/me/sessions/${sid}`)).body;
+  assert.equal(ownerView.actionsCreated, 3);
+  assert.equal(ownerView.actionsCompleted, 2);
+  await dreamer.patch(`/dreamers/me/actions/${chosen[0].id}`, { isPrivate: false });
+});
+
 test('an empty in-progress session can be deleted; a completed one cannot', async () => {
   const coach = new Client(s.base);
   await coach.login('priya@dreamcoach.demo');
@@ -152,4 +193,58 @@ test('dreamers can change privacy of session-recorded entries but not their valu
   // Coach's edit shows for the dreamer.
   const after = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => r.id === sessionRating.id);
   assert.equal(after.value, 9);
+});
+
+test('dreamers add, edit and remove their own notes on session-recorded entries; the value stays the coach’s', async () => {
+  const dreamer = new Client(s.base);
+  const auth = await dreamer.login('owen@dreamcoach.demo');
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const coach = new Client(s.base);
+  await coach.login('maya@dreamcoach.demo');
+  const id = auth.dreamerId;
+  const rating = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => r.source === 'session' && !r.note);
+  const progress = (await dreamer.get('/dreamers/me/progress')).body.find((p: any) => p.source === 'session' && !p.note);
+  assert.ok(rating && progress);
+  const coachEnergy = async () => (await coach.get(`/dreamers/${id}/care/energy`)).body.entries.find((e: any) => e.id === rating.id);
+
+  // A shared note: the coach sees it next to the value they recorded.
+  const added = await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: 'Tired, but it was a good tired.' });
+  assert.equal(added.status, 200, JSON.stringify(added.body));
+  assert.equal(added.body.value, rating.value);
+  assert.equal(added.body.note.body, 'Tired, but it was a good tired.');
+  assert.equal(added.body.note.isPrivate, false);
+  assert.equal((await coachEnergy()).note.body, 'Tired, but it was a good tired.');
+
+  // Edited and made private: the coach sees the value with no note.
+  const edited = await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: 'Honestly I was running on empty.', notePrivate: true });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.note.isPrivate, true);
+  const seen = await coachEnergy();
+  assert.equal(seen.value, rating.value);
+  assert.equal(seen.note, null);
+
+  // Staff can neither write, overwrite nor clear the dreamer's note, and the value stays theirs to record.
+  assert.equal((await coach.patch(`/dreamers/${id}/ratings/${rating.id}`, { note: 'Coach words' })).status, 403);
+  assert.equal((await coach.patch(`/dreamers/${id}/ratings/${rating.id}`, { note: null })).status, 403);
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { value: 10 })).status, 403);
+  assert.equal((await coach.patch(`/dreamers/${id}/ratings/${rating.id}`, { value: rating.value })).status, 200);
+  const kept = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => r.id === rating.id);
+  assert.equal(kept.note.body, 'Honestly I was running on empty.');
+  assert.equal(kept.note.isPrivate, true);
+
+  // Removing the note.
+  const removed = await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: null });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.body.note, null);
+
+  // Progress entries work the same way, including a private note in one step.
+  const p = await dreamer.patch(`/dreamers/me/progress/${progress.id}`, { note: 'Slower than I hoped.', notePrivate: true });
+  assert.equal(p.status, 200, JSON.stringify(p.body));
+  assert.equal(p.body.value, progress.value);
+  assert.equal(p.body.note.isPrivate, true);
+  const coachProgress = (await coach.get(`/dreamers/${id}/progress`)).body.find((e: any) => e.id === progress.id);
+  assert.equal(coachProgress.note, null);
+  assert.equal((await dreamer.patch(`/dreamers/me/progress/${progress.id}`, { value: 99 })).status, 403);
+  assert.equal((await coach.patch(`/dreamers/${id}/progress/${progress.id}`, { note: 'x' })).status, 403);
+  await dreamer.patch(`/dreamers/me/progress/${progress.id}`, { note: null });
 });

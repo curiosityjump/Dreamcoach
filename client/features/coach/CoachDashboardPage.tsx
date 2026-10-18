@@ -164,7 +164,7 @@ function CaseloadTable({ rows, sort, onSort }: { rows: CaseloadEntry[]; sort: { 
               key={e.dreamer.id}
               className="clickable cv-row"
               onClick={() => nav(staffDreamerPath(e.dreamer.id))}
-              onKeyDown={(ev) => { if (ev.key === 'Enter') nav(staffDreamerPath(e.dreamer.id)); }}
+              onKeyDown={(ev) => { if (ev.key === 'Enter' && ev.target === ev.currentTarget) nav(staffDreamerPath(e.dreamer.id)); }}
               tabIndex={0}
               data-testid="caseload-row"
               data-dreamer-id={e.dreamer.id}

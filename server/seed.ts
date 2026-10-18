@@ -28,9 +28,19 @@ const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)]!;
 const chance = (p: number) => rand() < p;
 const jitter = (n: number) => Math.round((rand() * 2 - 1) * n);
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const lerp = (a: number, b: number, f: number) => a + (b - a) * f;
+/** An item this dreamer has not used yet, so no text repeats verbatim for one person; null once all are used. */
+function pickUnused<T>(xs: readonly T[], used: Set<T>): T | null {
+  const fresh = xs.filter((x) => !used.has(x));
+  if (!fresh.length) return null;
+  const x = pick(fresh);
+  used.add(x);
+  return x;
+}
 
 /* ---------- dates ---------- */
 const NOW = new Date();
+const HOUR = 3600000;
 const DAY = 86400000;
 function monthStartUTC(monthsAgo: number): Date {
   return new Date(Date.UTC(NOW.getUTCFullYear(), NOW.getUTCMonth() - monthsAgo, 1));
@@ -197,41 +207,115 @@ const DREAMERS: DreamerSpec[] = [
 ];
 
 /* ---------- text banks ---------- */
+// The brief's Energy story for Darnell Price; kept out of the shared banks so nobody else writes it.
+const ENERGY_STORY = {
+  low: 'I haven’t been sleeping well this week. Work has been stressful, and I haven’t been exercising.',
+  high: 'Getting back into my morning routine has made a big difference. I feel much more stable.',
+};
 const NOTES: Record<RatingCategory, { low: string[]; mid: string[]; high: string[] }> = {
   energy: {
     low: [
-      'I haven’t been sleeping well this week. Work has been stressful, and I haven’t been exercising.',
       'Running on fumes. Too many late nights and I skipped every workout.',
       'Allergies plus a rough stretch at work. I feel flat most afternoons.',
       'Tired in a way that sleep doesn’t fix. I think it’s the constant interruptions.',
+      'Caught the cold that’s going around. Doing the minimum and resting.',
+      'Back-to-back late shifts. My body is asking for a break.',
+      'Skipped lunch most days this week and I can feel it.',
     ],
     mid: [
       'Decent week. Walked most mornings, though sleep is still inconsistent.',
-      'Better than last month. Cut back on the late coffee and it shows.',
+      'Cut back on the late coffee, and the afternoons are easier.',
       'Up and down. Good energy early in the week, crashed by Thursday.',
       'Okay. Not great, not bad — I notice I feel best on the days I move.',
+      'Steady. Not much in the tank on weekends, but the weekdays hold up.',
+      'Getting to bed earlier most nights. Still a work in progress.',
     ],
     high: [
-      'Getting back into my morning routine has made a big difference. I feel much more stable.',
       'Sleeping seven hours most nights. Mornings feel like mine again.',
-      'Strong week. Three runs, early nights, and I actually felt rested.',
+      'Strong week. Moved every day, early nights, and I actually felt rested.',
       'Energy is the best it has been all year. The routine is holding.',
+      'Lots of energy this week — even had some left over for the evenings.',
+      'Feeling strong. Walking to work instead of driving has made a difference.',
+      'Woke up before the alarm three days in a row, feeling rested.',
     ],
   },
   contribution: {
-    low: ['Feeling stuck professionally — same tasks, no stretch.', 'I haven’t learned anything new in a while and I can feel it.', 'Busy but not growing. The days blur together.'],
-    mid: ['Picked up a new responsibility at work; a little nervous, mostly glad.', 'Growing slowly. Finished a course module and it felt good.', 'Some growth. I’m asking for more feedback than I used to.'],
-    high: ['I can feel myself growing — at work and in how I show up at home.', 'Led something for the first time this month and it went well.', 'Learning a lot right now. Stretching in good ways.'],
+    low: [
+      'Feeling stuck professionally — same tasks, no stretch.',
+      'I haven’t learned anything new in a while and I can feel it.',
+      'Busy but not growing. The days blur together.',
+      'Covering for two people at work. No room to grow right now.',
+      'I keep putting off the course I signed up for.',
+      'Not much stretch this month — mostly keeping things running.',
+    ],
+    mid: [
+      'Picked up a new responsibility at work; a little nervous, mostly glad.',
+      'Growing slowly. Finished a course module and it felt good.',
+      'Some growth. I’m asking for more feedback than I used to.',
+      'Learning a new system at work. Slow going, but it’s something.',
+      'Helped a newer colleague find their feet. Felt useful.',
+      'Read two articles in my field this week. Small, but I’m curious again.',
+    ],
+    high: [
+      'I can feel myself growing — at work and in how I show up at home.',
+      'Led something for the first time this month and it went well.',
+      'Learning a lot right now. Stretching in good ways.',
+      'My manager asked me to present our results. I said yes before I could talk myself out of it.',
+      'Taught a colleague something I only learned last month. That’s how I know it stuck.',
+      'Volunteered for the new project. Nervous and excited in equal parts.',
+    ],
   },
   alignment: {
-    low: ['My days don’t match what I say matters to me. That gap is loud right now.', 'Going through the motions. Hard to connect what I do to any bigger purpose.', 'Feeling pulled in directions that aren’t mine.'],
-    mid: ['Clearer on my values than I was, still working on living them daily.', 'Mostly aligned. A couple of commitments I should let go of.', 'Getting there. Saying no more often, which helps.'],
-    high: ['The work and the dreams point the same direction right now. Rare and good.', 'I know why I’m doing what I’m doing. That makes the hard parts easier.', 'Living closer to my values than I have in years.'],
+    low: [
+      'My days don’t match what I say matters to me. That gap is loud right now.',
+      'Going through the motions. Hard to connect what I do to any bigger purpose.',
+      'Feeling pulled in directions that aren’t mine.',
+      'Said yes to too many things again. None of them were really mine.',
+      'I know what matters to me; I just haven’t been acting like it.',
+      'Lost the thread this month. Need to remember why I started.',
+    ],
+    mid: [
+      'Clearer on my values than I was, still working on living them daily.',
+      'Mostly aligned. A couple of commitments I should let go of.',
+      'Getting there. Saying no more often, which helps.',
+      'Some days line up with what matters, some don’t. More good days lately.',
+      'Thinking about what I want my weekends to be for.',
+      'Made one decision this week purely on my values. It felt right.',
+    ],
+    high: [
+      'The work and the dreams point the same direction right now. Rare and good.',
+      'I know why I’m doing what I’m doing. That makes the hard parts easier.',
+      'Living closer to my values than I have in years.',
+      'Every big choice this month felt like mine.',
+      'I feel like the same person at work and at home. That’s new.',
+      'Clear on what matters, and my calendar finally shows it.',
+    ],
   },
   relationships: {
-    low: ['I’ve been isolating. Haven’t seen friends in weeks.', 'Tension at home. We’re both tired and it shows.', 'My space is a mess and it’s affecting how I feel in it.'],
-    mid: ['Reconnected with an old friend. Want more of that.', 'Home feels calmer. Still working on being present.', 'Good with people, less good with my surroundings — the apartment needs attention.'],
-    high: ['Full week of good conversations. I feel connected.', 'Family dinners are back. It changes everything.', 'Cleared out the spare room and it feels like a new place. Lighter.'],
+    low: [
+      'I’ve been isolating. Haven’t seen friends in weeks.',
+      'Tension at home. We’re both tired and it shows.',
+      'My space is a mess and it’s affecting how I feel in it.',
+      'Missed two plans with friends this month. I miss them.',
+      'Work has been eating my evenings, and home feels the strain.',
+      'Feeling disconnected, even around people.',
+    ],
+    mid: [
+      'Reconnected with an old friend. Want more of that.',
+      'Home feels calmer. Still working on being present.',
+      'Good with people, less good with my surroundings — the apartment needs attention.',
+      'Had a long phone call with my cousin. Should do that more often.',
+      'Fine with family, a bit distant from friends lately.',
+      'Cleared the kitchen table so we can actually eat at it.',
+    ],
+    high: [
+      'Full week of good conversations. I feel connected.',
+      'Family dinners are back. It changes everything.',
+      'Cleared out the spare room and it feels like a new place. Lighter.',
+      'Hosted friends on Saturday. The house felt full in the best way.',
+      'Really present with the people I love this week.',
+      'The neighbors invited us over. Feels like we belong here.',
+    ],
   },
   commitment: {
     low: ['Hard to stay committed when everything else is on fire.'],
@@ -256,6 +340,24 @@ const REFLECTIONS_SHARED = [
   'Talked about the dream out loud at dinner. Saying it made it feel real.',
   'I am learning to let the plan change without letting the dream change.',
   'Grateful for the people who ask how it’s going and actually wait for the answer.',
+  'Said no to something today without over-explaining. Felt strange, then good.',
+  'A quiet Sunday with nothing scheduled. I forgot how much I need those.',
+  'Wrote down three things that went right this week. The third took a while, but I found it.',
+  'Someone at work asked me for advice. I didn’t realize people saw me that way.',
+  'I keep coming back to the same question: what would I do if I knew it would work?',
+  'Took a walk at lunch instead of eating at my desk. Small, but the afternoon felt different.',
+  'My coach asked what I’d tell a friend in my position. I’d be much kinder to them than I am to me.',
+  'Finally cleared out my inbox. Felt like opening a window.',
+  'Had a good laugh with the team today. I want to remember that work can feel like this.',
+  'Not every week has to be a breakthrough. This one was just steady, and steady is good.',
+  'I noticed I sleep better on the days I write things down.',
+  'Caught myself planning the next step without being asked. That feels like ownership.',
+  'Told a friend about one of my dreams. She didn’t laugh. She asked how she could help.',
+  'Some days the dream feels close, some days far. Today it felt close.',
+  'Spent the evening on something just for me. No guilt.',
+  'I used to think rest was something I had to earn. Starting to question that.',
+  'Asked for help with something I usually push through alone. It went better than I expected.',
+  'Getting clearer on which dream matters most right now. The others can wait a little.',
 ];
 const REFLECTIONS_PRIVATE = [
   'Had a hard conversation with my sister tonight. I don’t want to bring this to coaching yet, but I need to write it down.',
@@ -265,19 +367,53 @@ const REFLECTIONS_PRIVATE = [
   'I think I want something different from what I said I wanted. Sitting with that before I say it out loud.',
   'Argument with my partner about time. We’re both right, which is the hard part.',
   'Doctor’s appointment next week. Trying not to spiral.',
+  'I compare myself to my brother more than I admit. Writing it down so I can look at it.',
+  'Some mornings I don’t want to do any of this. Today was one of them.',
+  'Still upset about how my review went. Not ready to talk about it with anyone.',
+  'Bad night. Old worries came back. I know they pass, but they’re loud right now.',
+  'I feel guilty spending time on my own dreams when the family needs so much.',
+  'Sometimes I wonder if I picked the safe dreams so I couldn’t fail at the big ones.',
+  'Lonelier than I let on. Most people would never guess.',
 ];
 const PRIVATE_NOTES = [
   'Part of this is the medication change — not ready to share that yet.',
   'The real reason is my mom’s health. Keeping that to myself for now.',
   'Didn’t mention it in the session, but I’ve been anxious about money again.',
   'Not sharing this one — I need to figure out how I feel first.',
+  'Honestly, it’s the situation at home. That stays here for now.',
+  'I haven’t told anyone I’m thinking about leaving my job.',
+  'Some of this is grief. The anniversary is coming up.',
+  'Keeping this between me and the page: I’m not sure I want the promotion.',
+  'The part I left out: I’ve been skipping meals when work gets busy.',
 ];
+const PROGRESS_NOTES = {
+  small: [
+    'Small step, but a real one.',
+    'Slower than I hoped, but moving.',
+    'A little further along.',
+    'Not much, but not nothing.',
+    'Inching forward — that counts.',
+    'One small thing done this week.',
+  ],
+  big: [
+    'Momentum is back.',
+    'Did the thing I said I would do.',
+    'Good week for this one.',
+    'A real jump — felt great to update this.',
+    'Put real time into this one this week.',
+    'Further along than I expected by now.',
+  ],
+};
 const PRIVATE_ACTIONS = [
   'Make the therapy appointment I keep putting off',
   'Tell my partner about the job I applied for',
   'Look at the budget honestly — all of it',
   'Call Dad',
   'Write the apology letter, even if I never send it',
+  'Book a check-up — it’s been three years',
+  'Ask my sister how she’s really doing',
+  'Cancel the subscriptions I don’t use',
+  'Write down what I actually want from the next five years',
 ];
 const CARE_ACTIONS: Record<CareCategory, string[]> = {
   energy: ['Lights out by 10:30 on weeknights', 'Walk 20 minutes at lunch', 'No coffee after 2pm', 'Stretch for ten minutes before bed'],
@@ -285,23 +421,105 @@ const CARE_ACTIONS: Record<CareCategory, string[]> = {
   alignment: ['Write my top three values on a card for my desk', 'Say no to one thing that isn’t mine this week', 'Ten quiet minutes each morning'],
   relationships: ['Text one friend I’ve lost touch with', 'Clear one surface at home every evening', 'Plan one phone-free dinner'],
 };
-const FOCUS = [
-  'Energy — rebuild the morning routine',
-  'Dream 1 — the next concrete step',
-  'Relationships — reconnect with people who matter',
-  'Alignment — say no to what isn’t mine',
-  'Dream 2 — keep the streak alive',
-  'Contribution — ask for the stretch',
-  'Dream 3 — gather information before deciding',
+
+// Session notes in the coach's voice. The opener matches the mood of the session's ratings; a CARE rating that
+// moved two or more points is described by its direction and by where it landed.
+const OPENERS: Record<'first' | 'up' | 'steady' | 'down' | 'tired', string[]> = {
+  first: ['First session — got to know each other and set starting points.', 'First conversation: the four dreams, the CARE wheel, and how we’ll work together.'],
+  up: ['In good spirits today.', 'Upbeat and ready to go.', 'Came in smiling — a good month.', 'Lots to share today, most of it good news.'],
+  steady: ['Arrived a little rushed but settled quickly.', 'A steady month; came in with a clear list.', 'Calm and focused today.', 'Easy conversation; picked up right where we left off.'],
+  down: ['Reflective mood; wanted to talk before rating.', 'A heavier month — we took our time.', 'Quiet at first, opened up around the dreams.'],
+  tired: ['Tired but engaged — a long week.', 'Low on energy today; we kept the pace gentle.', 'Worn out from a busy stretch, still showed up ready to talk.'],
+};
+const CARE_MOVES: Record<CareCategory, Record<'upHigh' | 'up' | 'down' | 'downLow', string[]>> = {
+  energy: {
+    upHigh: ['sleeping better, and the morning routine is back.', 'more rest and regular movement are paying off.', 'early nights most of the month; feeling rested.'],
+    up: ['recovering after a draining stretch; sleep still uneven.', 'a little more rest this month, still running low by Friday.', 'cut back on late coffee and the afternoons are easier.'],
+    down: ['a busier month, still in a reasonable place.', 'dipped with the schedule changes; the routine is mostly intact.', 'a bit flatter than last month; sleep slipped during the busy weeks.'],
+    downLow: ['a draining month: short nights and a heavy workload. We kept the plan light.', 'running low; constant interruptions at work are taking a toll.', 'tired in a way sleep doesn’t fix. Agreed to protect one quiet evening a week.'],
+  },
+  contribution: {
+    upHigh: ['led something new at work and it went well.', 'learning a lot right now, stretching in good ways.', 'asked for more responsibility and got it.'],
+    up: ['picked up a new responsibility — a little nervous, mostly glad.', 'finished a course module; growth feels possible again.', 'asking for feedback more often.'],
+    down: ['a maintenance month at work, less stretch than before.', 'growth on hold while covering for a colleague.', 'fewer new challenges this month; that’s okay for now.'],
+    downLow: ['feeling stuck — same tasks, no stretch.', 'busy but not growing; the days blur together.', 'no room to learn anything new lately.'],
+  },
+  alignment: {
+    upHigh: ['work and dreams point the same direction right now.', 'clear on the why, which makes the hard parts easier.', 'saying no more often, and it shows.'],
+    up: ['clearer on values, still working on living them daily.', 'let go of one commitment that didn’t fit.', 'getting closer to what matters, one choice at a time.'],
+    down: ['a few extra commitments crept back in.', 'the big picture got crowded out this month.', 'still aligned overall; the schedule got in the way.'],
+    downLow: ['days don’t match what matters right now, and that gap feels loud.', 'going through the motions; hard to connect the work to a bigger purpose.', 'pulled in other people’s directions this month.'],
+  },
+  relationships: {
+    upHigh: ['a month of good conversations; feeling connected.', 'family dinners are back, and it shows.', 'cleared out the spare room — home feels lighter.'],
+    up: ['reconnected with an old friend and wants more of that.', 'home feels calmer; still working on being present.', 'reaching out to people a little more.'],
+    down: ['less time with friends during a busy month.', 'some friction at home; talking it through.', 'a quieter month socially.'],
+    downLow: ['has been isolating; hasn’t seen friends in weeks.', 'tension at home — everyone is tired.', 'the living space is cluttered and it’s weighing on things.'],
+  },
+};
+// Focus for the coming month: a CARE area that slipped or sits low, otherwise the dream the new actions serve.
+const CARE_FOCUS: Record<CareCategory, string[]> = {
+  energy: ['Energy — rebuild the morning routine', 'Energy — protect sleep on weeknights'],
+  contribution: ['Contribution — ask for the stretch', 'Contribution — make room to learn something new'],
+  alignment: ['Alignment — say no to what doesn’t fit', 'Alignment — let the week reflect what matters'],
+  relationships: ['Relationships — reconnect with people who matter', 'Relationships — make home a calmer place'],
+};
+const DREAM_FOCUS = {
+  early: ['gather information before deciding', 'sketch the first small step'],
+  middle: ['the next concrete step', 'make room in the week for it'],
+  late: ['plan the last stretch', 'protect what’s working'],
+  done: ['celebrate, then decide what comes next'],
+};
+
+// How each dream horizon moves from session to session: nearer dreams most months, the 3–5 year and lifetime
+// dreams in small, occasional steps. Only the nearer-term dreams take the odd honest dip.
+const DREAM_PACE = [
+  { move: 0.85, wobble: 3, dip: 0.08 }, // 6–12 month dream
+  { move: 0.9, wobble: 3, dip: 0 }, // program dream
+  { move: 0.55, wobble: 2, dip: 0.05 }, // 3–5 year dream
+  { move: 0.35, wobble: 1, dip: 0 }, // lifetime dream
 ];
-const OPENERS = [
-  'Arrived a little rushed but settled quickly.',
-  'In good spirits today.',
-  'Tired but engaged — a long week.',
-  'Reflective mood; wanted to talk before rating.',
-  'Energetic and ready to go.',
-  'Quiet at first, opened up around the dreams.',
-];
+
+/** A monthly one-on-one, planned before anything is written so the activity between sessions can lead into the next. */
+interface PlannedSession {
+  m: number; // months ago
+  start: number;
+  end: number;
+  held: boolean; // false for a session still to come
+  ratings: Record<RatingCategory, number>;
+  progress: number[];
+}
+
+// Guaranteed privacy examples for the main demo dreamers — a private action, a private reflection, a private
+// Alignment rating with a note, and a shared Energy rating whose note is private — 4–10 days ago so they are
+// easy to find. Times are [days ago, hour, minute] (UTC).
+type When = [number, number, number];
+const PRIVACY_EXAMPLES: Record<string, { action: string; actionDetails: string; reflection: string; alignmentNote: string; energyNote: string; times: { action: When; reflection: When; checkIn: When } }> = {
+  'alicia@dreamcoach.demo': {
+    action: 'Ask HR about tuition reimbursement before I tell anyone',
+    actionDetails: 'If the answer is no, I want time to work out the next step on my own.',
+    reflection: 'Mom asked again when I’ll “finally” finish my degree. I laughed it off, but it stung. I want to finish it for me, not to end that conversation.',
+    alignmentNote: 'Picked up two extra weekend shifts for the money, and the garden plan slid again. That isn’t a trade I want to keep making.',
+    energyNote: 'Long run on Saturday felt good. What I didn’t say in the session: I’m only sleeping five hours on shift weeks.',
+    times: { action: [9, 21, 5], reflection: [7, 22, 40], checkIn: [4, 7, 20] },
+  },
+  'darnell@dreamcoach.demo': {
+    action: 'Book the physical I keep pushing back',
+    actionDetails: 'Haven’t told Keisha that the pharmacy machine read my blood pressure high.',
+    reflection: 'Some nights I wonder if the mentoring program is me trying to give those kids what nobody gave me. Maybe that’s a fine reason. I just want to be honest about it.',
+    alignmentNote: 'Said yes to the church board because I couldn’t say no to Pastor James. It takes the evenings I promised the boys.',
+    energyNote: 'Morning walks are holding. Not ready to say this out loud yet: the new blood-pressure pills leave me foggy until noon.',
+    times: { action: [10, 19, 30], reflection: [5, 23, 10], checkIn: [6, 6, 45] },
+  },
+  'grace@dreamcoach.demo': {
+    action: 'Update my résumé for the People Ops role at Fernhill Collective',
+    actionDetails: 'Not ready for anyone at work to know I’m looking.',
+    reflection: 'Got passed over for the HR business partner role and smiled through the team announcement. I’m not fine about it yet. Writing it here so I can be honest somewhere.',
+    alignmentNote: 'Spent the week defending a leave policy I don’t believe in. Repeating the company line is costing me something.',
+    energyNote: 'Planning the next dinner gave me a lift this week. Also: I started seeing a therapist on Thursdays, and that’s mine for now.',
+    times: { action: [8, 12, 50], reflection: [6, 20, 55], checkIn: [5, 21, 5] },
+  },
+};
 
 /* ---------- insert helpers ---------- */
 function insertUser(db: DB, p: Person, role: 'dreamer' | 'coach' | 'director', hash: string): number {
@@ -361,6 +579,8 @@ export function resetAndSeed(db: DB): SeedSummary {
       `INSERT INTO actions (dreamer_id, title, details, status, dream_id, category, is_private, created_by, session_id, created_at, completed_at, archived_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
+    const coachCalendars = new Map<number, [number, number][]>(); // booked [start, end] per coach
+
     for (const spec of DREAMERS) {
       const userId = insertUser(db, { name: spec.name, email: spec.email }, 'dreamer', hash);
       counts.users++;
@@ -380,29 +600,89 @@ export function resetAndSeed(db: DB): SeedSummary {
         dreamIds.push(Number(r.lastInsertRowid));
       });
 
-      // ---- monthly sessions ----
-      const totalMonths = spec.joinedMonthsAgo + 1; // including the current month
+      // ---- plan the monthly sessions (dates and values) before writing anything ----
       const sessionMonths: number[] = [];
       for (let m = spec.joinedMonthsAgo; m >= 0; m--) {
         if (spec.missedMonths?.includes(m)) continue;
         sessionMonths.push(m);
       }
-      const lastDreamValue = spec.dreams.map((d) => d.start);
-      const lastCare: Record<RatingCategory, number> = { contribution: 0, alignment: 0, relationships: 0, energy: 0, commitment: 0, satisfaction: 0 };
+      const calendar = coachCalendars.get(coachUserId) ?? [];
+      coachCalendars.set(coachUserId, calendar);
+      const plan: PlannedSession[] = [];
+      const planSession = (m: number, upcoming: boolean): PlannedSession => {
+        const prev = plan[plan.length - 1];
+        const monthStart = monthStartUTC(m);
+        // session day: 3rd–20th, starting 14:00–19:45 for 15–30 minutes, clear of the coach's other sessions
+        let day: number, start: number, end: number;
+        do {
+          day = 3 + Math.floor(rand() * 17);
+          start = Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), day, 14 + Math.floor(rand() * 6), pick([0, 15, 30, 45]));
+          end = start + (15 + Math.floor(rand() * 15)) * 60000;
+        } while (calendar.some(([a, b]) => start < b + 15 * 60000 && a < end + 15 * 60000));
+        // in the current month only if that day has already passed
+        const held = !upcoming && Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), day) <= NOW.getTime() - DAY;
+        if (held) calendar.push([start, end]);
+        const progressT = Math.min(1, (spec.joinedMonthsAgo - m) / Math.max(1, spec.joinedMonthsAgo)); // 0..1
+
+        // CARE + program ratings
+        const ratings = {} as Record<RatingCategory, number>;
+        for (const cat of CARE_CATEGORIES) {
+          const [s, e] = spec.care[cat];
+          let v = Math.round(s + (e - s) * progressT + jitter(1));
+          // Darnell's energy story: a dip two months ago, back to 8 by the next session.
+          if (spec.email === 'darnell@dreamcoach.demo' && cat === 'energy' && m === 2) v = 4;
+          if (spec.email === 'darnell@dreamcoach.demo' && cat === 'energy' && m === 1) v = 8;
+          ratings[cat] = clamp(v, 1, 10);
+        }
+        const [cs, ce] = spec.commitment;
+        ratings.commitment = clamp(Math.round(cs + (ce - cs) * progressT + jitter(0.6)), 1, 10);
+        const [ss, se] = spec.satisfaction;
+        ratings.satisfaction = clamp(Math.round(ss + (se - ss) * progressT + jitter(0.6)), 1, 10);
+
+        // Dream progress: catches up with the planned path at each dream's own pace, never sliding back
+        // except for the odd honest dip (never two in a row).
+        const progress = spec.dreams.map((d, i) => {
+          const pace = DREAM_PACE[i]!;
+          const was = prev?.progress[i];
+          const dipped = was != null && was < (plan[plan.length - 2]?.progress[i] ?? 0);
+          let v: number;
+          if (was == null) v = d.start;
+          else if (!dipped && chance(pace.dip)) v = was - (2 + Math.floor(rand() * 3));
+          else if (chance(pace.move)) v = Math.max(was, Math.round(d.start + (d.end - d.start) * progressT + jitter(pace.wobble)));
+          else v = was;
+          if (d.end >= 100 && progressT >= 0.85) v = 100;
+          return clamp(v, 0, 100);
+        });
+        return { m, start, end, held, ratings, progress };
+      };
+      for (const m of sessionMonths) {
+        plan.push(planSession(m, false));
+        if (!plan[plan.length - 1]!.held) break; // this month's session has not happened yet
+      }
+      // After the latest session, self activity leans toward where next month's session would land.
+      const latest = plan[plan.length - 1]!;
+      if (latest.held) plan.push(planSession(latest.m - 1, true));
+      // A planned value on the way from session k to the next one, for the self activity in between.
+      const along = (k: number, t: number, read: (s: PlannedSession) => number): number => {
+        const a = plan[k]!;
+        const b = plan[k + 1];
+        if (!b) return read(a);
+        const until = b.held ? b.start : Math.max(b.start, NOW.getTime());
+        return lerp(read(a), read(b), clamp((t - a.end) / (until - a.end), 0, 1));
+      };
+
+      // ---- monthly sessions ----
+      const lastProgress = [...plan[0]!.progress]; // latest recorded value per dream, session or self
       const dreamActionIdx = spec.dreams.map(() => 0);
       const openActions: { id: number; createdAt: string }[] = [];
-      const careActionsUsed = new Set<string>();
-      let prevSessionEnd: string | null = null;
+      const used = new Set<string>(); // texts and titles this dreamer already has
 
-      for (const m of sessionMonths) {
-        const monthStart = monthStartUTC(m);
-        // session day: 3rd–20th; in the current month only if that day has already passed
-        const day = 3 + Math.floor(rand() * 17);
-        const sessionDate = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), day));
-        if (sessionDate.getTime() > NOW.getTime() - DAY) continue;
-        const occurredAt = at(sessionDate, 14 + Math.floor(rand() * 6), pick([0, 15, 30, 45]));
-        const completedAt = new Date(new Date(occurredAt).getTime() + (15 + Math.floor(rand() * 15)) * 60000).toISOString();
-        const progressT = (spec.joinedMonthsAgo - m) / Math.max(1, spec.joinedMonthsAgo); // 0..1
+      for (let k = 0; k < plan.length && plan[k]!.held; k++) {
+        const p = plan[k]!;
+        const prev = plan[k - 1];
+        const next = plan[k + 1];
+        const occurredAt = new Date(p.start).toISOString();
+        const completedAt = new Date(p.end).toISOString();
 
         const sessionId = Number(
           db
@@ -410,52 +690,39 @@ export function resetAndSeed(db: DB): SeedSummary {
             .run(dreamerId, coachUserId, occurredAt, completedAt, occurredAt, completedAt).lastInsertRowid,
         );
         counts.sessions++;
-
-        // CARE + program ratings
-        const ratings: Partial<Record<RatingCategory, number>> = {};
-        const lines: string[] = [pick(OPENERS)];
-        for (const cat of CARE_CATEGORIES) {
-          const [s, e] = spec.care[cat];
-          let v = Math.round(s + (e - s) * progressT + jitter(1));
-          // Darnell's energy story: a dip two months ago, recovered since.
-          if (spec.email === 'darnell@dreamcoach.demo' && cat === 'energy' && m === 2) v = 4;
-          v = clamp(v, 1, 10);
-          ratings[cat] = v;
-          if (lastCare[cat] && Math.abs(v - lastCare[cat]) >= 2) {
-            lines.push(`${cat[0]!.toUpperCase()}${cat.slice(1)} ${v > lastCare[cat] ? 'up' : 'down'} to ${v} (from ${lastCare[cat]}). ${v > lastCare[cat] ? pick(NOTES[cat].high) : pick(NOTES[cat].low)}`);
-          }
-          lastCare[cat] = v;
-        }
-        const [cs, ce] = spec.commitment;
-        ratings.commitment = clamp(Math.round(cs + (ce - cs) * progressT + jitter(0.6)), 1, 10);
-        const [ss, se] = spec.satisfaction;
-        ratings.satisfaction = clamp(Math.round(ss + (se - ss) * progressT + jitter(0.6)), 1, 10);
-        for (const [cat, v] of Object.entries(ratings) as [RatingCategory, number][]) {
+        for (const [cat, v] of Object.entries(p.ratings) as [RatingCategory, number][]) {
           insRating.run(dreamerId, cat, v, occurredAt, 'session', sessionId, null, coachUserId, 0, occurredAt, completedAt);
           counts.ratings++;
         }
-
-        // Dream progress
-        spec.dreams.forEach((d, i) => {
-          const target = d.start + (d.end - d.start) * progressT;
-          let v = Math.round(Math.max(lastDreamValue[i]!, target) + (chance(0.15) ? -jitter(3) : jitter(3)));
-          if (chance(0.12) && i !== 1) v = Math.max(0, lastDreamValue[i]! - 3); // an honest dip
-          v = clamp(v, 0, 100);
-          if (d.end >= 100 && progressT >= 0.85) v = 100;
-          lastDreamValue[i] = v;
+        p.progress.forEach((v, i) => {
           insProgress.run(dreamerId, dreamIds[i], v, occurredAt, 'session', sessionId, null, coachUserId, 0, occurredAt, completedAt);
           counts.progress++;
+          lastProgress[i] = v;
           if (v >= 100) db.prepare('UPDATE dreams SET achieved_at = COALESCE(achieved_at, ?) WHERE id = ?').run(occurredAt, dreamIds[i]);
         });
-        const best = lastDreamValue.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v)[0]!;
-        lines.push(`Most movement on “${spec.dreams[best.i]!.title}” — now at ${best.v}%.`);
+
+        // Coach notes: an opener that fits the ratings, the CARE moves, and the dream that moved most.
+        const careShift = prev ? CARE_CATEGORIES.reduce((n, c) => n + p.ratings[c] - prev.ratings[c], 0) / CARE_CATEGORIES.length : 0;
+        const mood = !prev ? 'first' : p.ratings.energy <= 4 ? 'tired' : careShift >= 0.75 ? 'up' : careShift <= -0.75 ? 'down' : 'steady';
+        const lines: string[] = [pickUnused(OPENERS[mood], used) ?? pick(OPENERS[mood])];
+        for (const cat of CARE_CATEGORIES) {
+          const v = p.ratings[cat];
+          const was = prev?.ratings[cat];
+          if (was == null || Math.abs(v - was) < 2) continue;
+          const moves = CARE_MOVES[cat][v > was ? (v >= 7 ? 'upHigh' : 'up') : v <= 4 ? 'downLow' : 'down'];
+          lines.push(`${cat[0]!.toUpperCase()}${cat.slice(1)} ${v > was ? 'up' : 'down'} to ${v} (from ${was}) — ${pickUnused(moves, used) ?? pick(moves)}`);
+        }
+        if (prev) {
+          const moved = p.progress.map((v, i) => ({ i, v, by: v - prev.progress[i]! })).sort((a, b) => b.by - a.by)[0]!;
+          if (moved.by >= 3) lines.push(`Most movement on “${spec.dreams[moved.i]!.title}” — up ${moved.by} points to ${moved.v}%.`);
+        }
 
         // Review previous actions: complete / archive some
         for (const a of [...openActions]) {
           const roll = rand();
           if (roll < 0.55) {
             const doneAt = new Date(new Date(a.createdAt).getTime() + (3 + rand() * 25) * DAY);
-            const finalDone = doneAt.getTime() > new Date(occurredAt).getTime() ? occurredAt : doneAt.toISOString();
+            const finalDone = doneAt.getTime() > p.start ? occurredAt : doneAt.toISOString();
             db.prepare(`UPDATE actions SET status = 'completed', completed_at = ?, updated_at = ? WHERE id = ?`).run(finalDone, finalDone, a.id);
             openActions.splice(openActions.indexOf(a), 1);
           } else if (roll < 0.7) {
@@ -464,11 +731,17 @@ export function resetAndSeed(db: DB): SeedSummary {
           }
         }
 
-        // New actions chosen in this session (1–3), tied to dreams or CARE
+        // New actions chosen in this session (1–3), tied to dreams or CARE. A CARE area that slipped two points
+        // or sits at 4 or below becomes the focus, and the first action is a habit for it.
+        const drop = (c: CareCategory) => (prev ? prev.ratings[c] - p.ratings[c] : 0);
+        const slipped = CARE_CATEGORIES.filter((c) => drop(c) >= 2 || p.ratings[c] <= 4).sort((a, b) => drop(b) - drop(a) || p.ratings[a] - p.ratings[b])[0];
         const nActions = 1 + Math.floor(rand() * 3);
         const chosen: string[] = [];
-        for (let k = 0; k < nActions; k++) {
-          if (chance(0.7)) {
+        let focusDream: number | null = null;
+        let focusCare: CareCategory | null = slipped ?? null;
+        for (let n = 0; n < nActions; n++) {
+          const forSlipped = n === 0 && !!slipped && CARE_ACTIONS[slipped].some((t) => !used.has(t));
+          if (!forSlipped && chance(0.7)) {
             const di = pick([0, 0, 1, 1, 2, 3]);
             const list = spec.dreams[di]!.actions;
             if (dreamActionIdx[di]! < list.length) {
@@ -478,60 +751,68 @@ export function resetAndSeed(db: DB): SeedSummary {
               openActions.push({ id: Number(r.lastInsertRowid), createdAt: completedAt });
               chosen.push(title);
               counts.actions++;
+              focusDream ??= di;
               continue;
             }
           }
-          const cat = pick(CARE_CATEGORIES);
-          const candidates = CARE_ACTIONS[cat].filter((t) => !careActionsUsed.has(t));
-          if (!candidates.length) continue;
-          const title = pick(candidates);
-          careActionsUsed.add(title);
+          const cat = forSlipped ? slipped : pick(CARE_CATEGORIES);
+          const title = pickUnused(CARE_ACTIONS[cat], used);
+          if (!title) continue;
           const r = insAction.run(dreamerId, title, '', 'active', null, cat, 0, coachUserId, sessionId, completedAt, null, null, completedAt);
           openActions.push({ id: Number(r.lastInsertRowid), createdAt: completedAt });
           chosen.push(title);
           counts.actions++;
+          if (focusDream == null) focusCare ??= cat;
         }
-        const focus = pick(FOCUS);
+        let focus: string;
+        if (focusDream != null && !slipped) {
+          const v = p.progress[focusDream]!;
+          const stage = DREAM_FOCUS[v >= 100 ? 'done' : v >= 65 ? 'late' : v >= 15 ? 'middle' : 'early'];
+          focus = `${spec.dreams[focusDream]!.title} — ${pickUnused(stage, used) ?? pick(stage)}`;
+        } else {
+          const cat = focusCare ?? [...CARE_CATEGORIES].sort((a, b) => p.ratings[a] - p.ratings[b])[0]!;
+          focus = pickUnused(CARE_FOCUS[cat], used) ?? pick(CARE_FOCUS[cat]);
+        }
         if (chosen.length) lines.push(`Actions chosen: ${chosen.join('; ')}.`);
-        lines.push(`Commitment ${ratings.commitment}, satisfaction ${ratings.satisfaction}.`);
+        lines.push(`Commitment ${p.ratings.commitment}, satisfaction ${p.ratings.satisfaction}.`);
         db.prepare('UPDATE coaching_sessions SET notes = ?, focus = ? WHERE id = ?').run(lines.join('\n'), focus, sessionId);
 
-        // ---- between-session self activity (until next month's session or now) ----
-        const windowStart = new Date(completedAt);
-        const nextMonth = monthStartUTC(m - 1);
-        const windowEnd = new Date(Math.min(NOW.getTime() - 3600000, nextMonth.getTime() + 20 * DAY));
-        const freq = spec.engagement === 'high' ? 4 : spec.engagement === 'moderate' ? 1.5 : 0.3;
-        let nCheckIns = Math.floor(freq + (rand() < freq % 1 ? 1 : 0));
-        if (spec.email === 'darnell@dreamcoach.demo' && m === 2) nCheckIns = Math.max(nCheckIns, 2);
-        const slots: Date[] = [];
-        for (let k = 0; k < nCheckIns; k++) {
-          const t = windowStart.getTime() + 2 * DAY + rand() * Math.max(DAY, windowEnd.getTime() - windowStart.getTime() - 3 * DAY);
-          if (t < NOW.getTime() - 3600000) slots.push(new Date(t));
-        }
-        slots.sort((a, b) => a.getTime() - b.getTime());
-        slots.forEach((d, idx) => {
-          const when = at(d, 12 + Math.floor(rand() * 10), pick([0, 10, 20, 30, 40, 50]));
+        // ---- between-session self activity: until the next session (or now), tailing off 20 days into next month ----
+        const windowStart = p.end;
+        const windowEnd = Math.min(next?.held ? next.start : NOW.getTime(), monthStartUTC(p.m - 1).getTime() + 20 * DAY) - HOUR;
+        const span = windowEnd - windowStart;
+        // Check-ins spread through the window (weekly for the most engaged), each a day clear of either session.
+        const perMonth = spec.engagement === 'high' ? 4 : spec.engagement === 'moderate' ? 1.5 : 0.3;
+        let nCheckIns = span > 2 * DAY ? Math.floor((perMonth * span) / (30 * DAY) + rand()) : 0;
+        const story = spec.email === 'darnell@dreamcoach.demo' && p.m === 2;
+        if (story) nCheckIns = Math.max(nCheckIns, 2);
+        for (let idx = 0; idx < nCheckIns; idx++) {
+          const t = windowStart + DAY + (span - 2 * DAY) * ((idx + 0.2 + rand() * 0.6) / nCheckIns);
+          const when = at(new Date(t), 12 + Math.floor(rand() * 10), pick([0, 10, 20, 30, 40, 50]));
+          const tWhen = new Date(when).getTime();
           const ciId = Number(db.prepare('INSERT INTO check_ins (dreamer_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?)').run(dreamerId, when, userId, when).lastInsertRowid);
           counts.checkIns++;
           // Which categories? 1–3 of them
           let cats: RatingCategory[] = CARE_CATEGORIES.filter(() => chance(0.45));
           if (!cats.length) cats = [pick(CARE_CATEGORIES)];
+          // Darnell's story: Energy 4 in the first check-in after August's session, 8 by the last one.
           let scripted: { cat: RatingCategory; value: number; note: string } | null = null;
-          if (spec.email === 'darnell@dreamcoach.demo' && m === 2 && idx === 0) scripted = { cat: 'energy', value: 4, note: NOTES.energy.low[0]! };
-          if (spec.email === 'darnell@dreamcoach.demo' && m === 2 && idx === 1) scripted = { cat: 'energy', value: 8, note: NOTES.energy.high[0]! };
+          if (story && idx === 0) scripted = { cat: 'energy', value: 4, note: ENERGY_STORY.low };
+          if (story && idx === nCheckIns - 1) scripted = { cat: 'energy', value: 8, note: ENERGY_STORY.high };
           if (scripted) cats = [scripted.cat, ...cats.filter((c) => c !== scripted!.cat)].slice(0, 2);
-          let wroteSomething = false;
           for (const cat of cats) {
-            let v = clamp(lastCare[cat] + jitter(2), 1, 10);
+            // Self ratings travel from this session's value toward the next one, with the odd one-point wobble.
+            let v = clamp(Math.round(along(k, tWhen, (s) => s.ratings[cat])) + (chance(0.2) ? jitter(1) : 0), 1, 10);
             let noteText: string | null = null;
             let ratingPrivate = false;
             let notePrivate = false;
             if (scripted && cat === scripted.cat) { v = scripted.value; noteText = scripted.note; }
             else {
-              if (chance(0.6)) noteText = v <= 4 ? pick(NOTES[cat].low) : v <= 7 ? pick(NOTES[cat].mid) : pick(NOTES[cat].high);
+              if (chance(0.6)) noteText = pickUnused(NOTES[cat][v <= 4 ? 'low' : v <= 7 ? 'mid' : 'high'], used);
               ratingPrivate = chance(0.12);
               notePrivate = !ratingPrivate && !!noteText && chance(0.2);
-              if (notePrivate) noteText = `${noteText} ${pick(PRIVATE_NOTES)}`;
+              const aside = notePrivate ? pickUnused(PRIVATE_NOTES, used) : null;
+              if (aside) noteText = `${noteText} ${aside}`;
             }
             const rr = insRating.run(dreamerId, cat, v, when, 'self', null, ciId, userId, ratingPrivate ? 1 : 0, when, when);
             counts.ratings++;
@@ -541,92 +822,101 @@ export function resetAndSeed(db: DB): SeedSummary {
               counts.journal++;
               if (notePrivate) counts.private++;
             }
-            wroteSomething = true;
           }
-          // Occasionally a self progress update
+          // Occasionally a self progress update, for a dream that has moved on since its last entry
           if (chance(0.3)) {
-            const di = pick([0, 1, 1, 2]);
-            const v = clamp(lastDreamValue[di]! + 1 + Math.floor(rand() * 5), 0, 100);
-            lastDreamValue[di] = v;
-            const isPriv = chance(0.15);
-            const pr = insProgress.run(dreamerId, dreamIds[di], v, when, 'self', null, ciId, userId, isPriv ? 1 : 0, when, when);
-            counts.progress++;
-            if (isPriv) counts.private++;
-            if (chance(0.5)) {
-              insJournal.run(dreamerId, pick(['Small step, but a real one.', 'Did the thing I said I would do.', 'Slower than I hoped, but moving.', 'Momentum is back.']), when, 0, 'self', null, ciId, null, Number(pr.lastInsertRowid), dreamIds[di], null, userId, when, when);
-              counts.journal++;
+            const movedOn = [0, 1, 1, 2].filter((i) => Math.round(along(k, tWhen, (s) => s.progress[i]!)) > lastProgress[i]!);
+            if (movedOn.length) {
+              const di = pick(movedOn);
+              const v = Math.round(along(k, tWhen, (s) => s.progress[di]!));
+              const step = v - lastProgress[di]!;
+              lastProgress[di] = v;
+              const isPriv = chance(0.15);
+              const pr = insProgress.run(dreamerId, dreamIds[di], v, when, 'self', null, ciId, userId, isPriv ? 1 : 0, when, when);
+              counts.progress++;
+              if (isPriv) counts.private++;
+              const note = chance(0.5) ? pickUnused(step >= 5 ? PROGRESS_NOTES.big : PROGRESS_NOTES.small, used) : null;
+              if (note) {
+                insJournal.run(dreamerId, note, when, 0, 'self', null, ciId, null, Number(pr.lastInsertRowid), dreamIds[di], null, userId, when, when);
+                counts.journal++;
+              }
+              if (v >= 100 && !isPriv) db.prepare('UPDATE dreams SET achieved_at = COALESCE(achieved_at, ?) WHERE id = ?').run(when, dreamIds[di]);
             }
-            if (v >= 100 && !isPriv) db.prepare('UPDATE dreams SET achieved_at = COALESCE(achieved_at, ?) WHERE id = ?').run(when, dreamIds[di]);
           }
           // Check-in level reflection
           if (chance(spec.engagement === 'high' ? 0.5 : 0.3)) {
             const priv = chance(0.3);
-            insJournal.run(dreamerId, priv ? pick(REFLECTIONS_PRIVATE) : pick(REFLECTIONS_SHARED), when, priv ? 1 : 0, 'self', null, ciId, null, null, null, null, userId, when, when);
-            counts.journal++;
-            if (priv) counts.private++;
+            const body = pickUnused(priv ? REFLECTIONS_PRIVATE : REFLECTIONS_SHARED, used);
+            if (body) {
+              insJournal.run(dreamerId, body, when, priv ? 1 : 0, 'self', null, ciId, null, null, null, null, userId, when, when);
+              counts.journal++;
+              if (priv) counts.private++;
+            }
           }
-          void wroteSomething;
-        });
+        }
 
         // Standalone journal entries & dreamer-created actions in this window
         const nJournal = spec.engagement === 'high' ? 2 : spec.engagement === 'moderate' ? 1 : 0;
-        for (let k = 0; k < nJournal; k++) {
-          const t = windowStart.getTime() + rand() * Math.max(DAY, windowEnd.getTime() - windowStart.getTime());
-          if (t > NOW.getTime() - 3600000) continue;
-          const when = new Date(t).toISOString();
+        for (let j = 0; j < nJournal && span > 0; j++) {
+          const when = new Date(windowStart + rand() * span).toISOString();
           const priv = chance(0.35);
           const dreamTag = chance(0.3) ? dreamIds[Math.floor(rand() * 4)]! : null;
-          insJournal.run(dreamerId, priv ? pick(REFLECTIONS_PRIVATE) : pick(REFLECTIONS_SHARED), when, priv ? 1 : 0, 'self', null, null, null, null, dreamTag, null, userId, when, when);
+          const body = pickUnused(priv ? REFLECTIONS_PRIVATE : REFLECTIONS_SHARED, used);
+          if (!body) continue;
+          insJournal.run(dreamerId, body, when, priv ? 1 : 0, 'self', null, null, null, null, dreamTag, null, userId, when, when);
           counts.journal++;
           if (priv) counts.private++;
         }
-        if (spec.engagement !== 'light' && chance(0.6)) {
-          const t = windowStart.getTime() + rand() * Math.max(DAY, windowEnd.getTime() - windowStart.getTime());
-          if (t <= NOW.getTime() - 3600000) {
-            const when = new Date(t).toISOString();
-            const priv = chance(0.35);
-            const di = Math.floor(rand() * 4);
-            const list = spec.dreams[di]!.actions;
-            let title: string;
-            if (priv) title = pick(PRIVATE_ACTIONS);
-            else if (dreamActionIdx[di]! < list.length) { title = list[dreamActionIdx[di]!]!; dreamActionIdx[di]!++; }
-            else title = pick(CARE_ACTIONS[pick(CARE_CATEGORIES)]);
+        if (spec.engagement !== 'light' && chance(0.6) && span > 0) {
+          const t = windowStart + rand() * span;
+          const when = new Date(t).toISOString();
+          const priv = chance(0.35);
+          const di = Math.floor(rand() * 4);
+          const list = spec.dreams[di]!.actions;
+          // A private action, the dream's next step, or — once those run out — a CARE habit linked to its area.
+          let title: string | null;
+          let dreamId: number | null = null;
+          let category: CareCategory | null = null;
+          if (priv) title = pickUnused(PRIVATE_ACTIONS, used);
+          else if (dreamActionIdx[di]! < list.length) { title = list[dreamActionIdx[di]!]!; dreamActionIdx[di]!++; dreamId = dreamIds[di]!; }
+          else { category = pick(CARE_CATEGORIES); title = pickUnused(CARE_ACTIONS[category], used); }
+          if (title) {
             const done = chance(0.4);
             const doneAt = done ? new Date(t + (2 + rand() * 12) * DAY) : null;
             const doneIso = doneAt && doneAt.getTime() < NOW.getTime() ? doneAt.toISOString() : null;
-            const r = insAction.run(dreamerId, title, '', doneIso ? 'completed' : 'active', priv ? null : dreamIds[di], null, priv ? 1 : 0, userId, null, when, doneIso, null, doneIso ?? when);
-            if (!doneIso) openActions.push({ id: Number(r.lastInsertRowid), createdAt: when });
+            const r = insAction.run(dreamerId, title, '', doneIso ? 'completed' : 'active', dreamId, category, priv ? 1 : 0, userId, null, when, doneIso, null, doneIso ?? when);
+            // Shared open actions come up for review at the next session; private ones are the dreamer's alone.
+            if (!doneIso && !priv) openActions.push({ id: Number(r.lastInsertRowid), createdAt: when });
             counts.actions++;
             if (priv) counts.private++;
           }
         }
-        prevSessionEnd = completedAt;
       }
-      void prevSessionEnd;
-      void totalMonths;
 
-      // ---- Guaranteed demo privacy examples for the main demo dreamers ----
-      // (a private action, a private reflection, a private rating, and a shared rating
-      // with a private note), recorded within the last ten days so they are easy to find.
-      if (['alicia@dreamcoach.demo', 'darnell@dreamcoach.demo', 'grace@dreamcoach.demo'].includes(spec.email)) {
-        const tenDaysAgo = new Date(NOW.getTime() - 10 * DAY);
-        const whenA = at(tenDaysAgo, 20, 10);
-        const r = insAction.run(dreamerId, pick(PRIVATE_ACTIONS), 'Only I can see this one.', 'active', null, null, 1, userId, null, whenA, null, null, whenA);
-        void r;
+      // ---- Guaranteed demo privacy examples, personal to each main demo dreamer ----
+      const example = PRIVACY_EXAMPLES[spec.email];
+      if (example) {
+        const time = ([daysAgo, hour, minute]: When) => at(new Date(NOW.getTime() - daysAgo * DAY), hour, minute);
+        const whenA = time(example.times.action);
+        insAction.run(dreamerId, example.action, example.actionDetails, 'active', null, null, 1, userId, null, whenA, null, null, whenA);
         counts.actions++; counts.private++;
-        const whenJ = at(new Date(NOW.getTime() - 6 * DAY), 21, 30);
-        insJournal.run(dreamerId, REFLECTIONS_PRIVATE[0]!, whenJ, 1, 'self', null, null, null, null, null, null, userId, whenJ, whenJ);
+        const whenJ = time(example.times.reflection);
+        insJournal.run(dreamerId, example.reflection, whenJ, 1, 'self', null, null, null, null, null, null, userId, whenJ, whenJ);
         counts.journal++; counts.private++;
-        const whenC = at(new Date(NOW.getTime() - 4 * DAY), 8, 15);
+        const whenC = time(example.times.checkIn);
+        const tC = new Date(whenC).getTime();
         const ciId = Number(db.prepare('INSERT INTO check_ins (dreamer_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?)').run(dreamerId, whenC, userId, whenC).lastInsertRowid);
         counts.checkIns++;
+        // Values sit on the dreamer's path at that moment; the private Alignment rating is an honest dip below it.
+        let k = 0;
+        while (plan[k + 1]?.held && plan[k + 1]!.start <= tC) k++;
         // Private Alignment rating with a note.
-        const pr = insRating.run(dreamerId, 'alignment', clamp(lastCare.alignment - 2, 1, 10), whenC, 'self', null, ciId, userId, 1, whenC, whenC);
-        insJournal.run(dreamerId, NOTES.alignment.low[0]!, whenC, 0, 'self', null, ciId, Number(pr.lastInsertRowid), null, null, 'alignment', userId, whenC, whenC);
+        const pr = insRating.run(dreamerId, 'alignment', clamp(Math.round(along(k, tC, (s) => s.ratings.alignment)) - 2, 1, 10), whenC, 'self', null, ciId, userId, 1, whenC, whenC);
+        insJournal.run(dreamerId, example.alignmentNote, whenC, 0, 'self', null, ciId, Number(pr.lastInsertRowid), null, null, 'alignment', userId, whenC, whenC);
         counts.ratings++; counts.journal++; counts.private++;
         // Shared Energy rating whose note is private.
-        const sr = insRating.run(dreamerId, 'energy', clamp(lastCare.energy, 1, 10), whenC, 'self', null, ciId, userId, 0, whenC, whenC);
-        insJournal.run(dreamerId, `${NOTES.energy.mid[1]!} ${PRIVATE_NOTES[0]!}`, whenC, 1, 'self', null, ciId, Number(sr.lastInsertRowid), null, null, 'energy', userId, whenC, whenC);
+        const sr = insRating.run(dreamerId, 'energy', clamp(Math.round(along(k, tC, (s) => s.ratings.energy)), 1, 10), whenC, 'self', null, ciId, userId, 0, whenC, whenC);
+        insJournal.run(dreamerId, example.energyNote, whenC, 1, 'self', null, ciId, Number(sr.lastInsertRowid), null, null, 'energy', userId, whenC, whenC);
         counts.ratings++; counts.journal++; counts.private++;
       }
     }

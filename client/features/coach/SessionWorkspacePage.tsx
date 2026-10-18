@@ -145,6 +145,9 @@ export function SessionWorkspacePage() {
   const setRating = useSetSessionRating(id);
   const setProgress = useSetSessionProgress(id);
   const updateSession = useUpdateSession(id);
+  // Notes/focus autosave runs on its own mutation: a blur-triggered save must never put
+  // "Complete session" into its loading state (disabled, shrunk) in the middle of a click.
+  const autosaveSession = useUpdateSession(id);
   const deleteSession = useDeleteSession(id);
 
   const [editValues, setEditValues] = useState(false);
@@ -165,7 +168,7 @@ export function SessionWorkspacePage() {
     qc.setQueryData<SessionGrid>(['dreamer', id, 'grid'], (g) => (g ? { ...g, sessions: g.sessions.map((x) => (x.id === data.id ? data : x)) } : g));
   }, [qc, id, sid]);
 
-  const { mutateAsync: patchSession } = updateSession;
+  const { mutateAsync: patchSession } = autosaveSession;
   const saveNotes = useCallback((value: string) => patchSession({ sessionId: sid, notes: value }).then((data) => { applySession(data); return data; }), [patchSession, sid, applySession]);
   const saveFocus = useCallback((value: string) => patchSession({ sessionId: sid, focus: value }).then((data) => { applySession(data); return data; }), [patchSession, sid, applySession]);
   const notes = useAutosave(s?.notes ?? '', saveNotes);
@@ -234,6 +237,15 @@ export function SessionWorkspacePage() {
     return before[before.length - 1] ?? null;
   }, [grid.data, s]);
 
+  // Actions to review: everything still open, plus whatever was completed or set aside since the
+  // previous session — by the dreamer in between, or just now in this conversation — so there is
+  // something to celebrate and a ticked-off action stays on the list instead of vanishing.
+  const reviewActions = useMemo(() => {
+    const from = previousSession ? Date.parse(previousSession.occurredAt) : -Infinity;
+    const since = (iso: string | null) => iso != null && Date.parse(iso) > from;
+    return previousActions.filter((a) => a.status === 'active' || since(a.status === 'completed' ? a.completedAt : a.archivedAt));
+  }, [previousActions, previousSession]);
+
   const since = useMemo(() => {
     if (!s) return { checkIns: [] as CheckIn[], reflections: [] as JournalEntry[] };
     const from = previousSession ? new Date(previousSession.occurredAt).getTime() : -Infinity;
@@ -252,7 +264,9 @@ export function SessionWorkspacePage() {
   const focusDone = (focus.text.trim().length > 0) || sessionActions.length > 0;
   const isCompleted = s?.status === 'completed';
   const editable = !!s && (!isCompleted || editValues);
-  const isEmpty = !!s && Object.keys(s.ratings).length === 0 && Object.keys(s.progress).length === 0 && !s.notes.trim() && !s.focus.trim() && s.actionsCreated === 0;
+  // Typed-but-unsaved notes count too, so the delete button goes away while typing rather than
+  // when the autosave lands (which would shift "Complete session" under the pointer).
+  const isEmpty = !!s && Object.keys(s.ratings).length === 0 && Object.keys(s.progress).length === 0 && !notes.text.trim() && !focus.text.trim() && s.actionsCreated === 0;
 
   const scrollTo = (el: HTMLElement | null) => el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const focusCell = (cell: string) => {
@@ -361,19 +375,20 @@ export function SessionWorkspacePage() {
           <Card className="cs-card">
             <CardHead
               title="Review previous actions"
-              sub={previousSession ? `Chosen before today — complete, set aside, or edit inline.` : 'Actions already on the list — complete, set aside, or edit inline.'}
+              sub={previousSession ? `Still open, plus anything completed or set aside since Session ${previousSession.number}.` : 'Actions already on the list — complete, set aside, or edit inline.'}
               actions={
                 <Button variant={reviewed ? 'secondary' : 'ghost'} size="sm" onClick={() => setReviewed((v) => !v)} aria-pressed={reviewed} data-testid="review-toggle">
                   <IconCheck /> {reviewed ? 'Reviewed' : 'Mark reviewed'}
                 </Button>
               }
             />
+            {previousSession && <PreviousSessionRecap session={previousSession} />}
             {actions.isLoading ? (
               <LoadingPage label="Loading actions…" />
             ) : actions.error ? (
               <div className="callout callout-muted" role="alert"><IconInfo /><span>{errorMessage(actions.error)}</span></div>
             ) : (
-              <ActionList dreamerRef={id} actions={previousActions} dreams={dreamRefs} mode="staff" filter="active" compact emptyTitle="No open actions to review" emptyBody="Everything chosen before today has been completed or set aside. A good moment to celebrate before choosing what comes next." />
+              <ActionList dreamerRef={id} actions={reviewActions} dreams={dreamRefs} mode="staff" filter="all" compact emptyTitle="No open actions to review" emptyBody="Everything chosen before today has been completed or set aside. A good moment to celebrate before choosing what comes next." />
             )}
           </Card>
           </div>
@@ -476,6 +491,33 @@ export function SessionWorkspacePage() {
         danger
         loading={deleteSession.isPending}
       />
+    </div>
+  );
+}
+
+/* ---------- Last session's focus and notes, for the review step ---------- */
+
+function PreviousSessionRecap({ session: p }: { session: CoachingSession }) {
+  const [showNotes, setShowNotes] = useState(false);
+  const notes = p.notes.trim();
+  if (!p.focus.trim() && !notes) return null;
+  return (
+    <div className="cs-recap" data-testid="previous-session-recap">
+      <div className="cs-recap-head muted tiny">Session {p.number} · {fmtDate(p.occurredAt)}</div>
+      {p.focus.trim() && (
+        <div className="cs-recap-focus" data-testid="previous-session-focus">
+          <span className="cs-recap-label">Focus</span>
+          <span>{p.focus}</span>
+        </div>
+      )}
+      {notes && (
+        <>
+          {showNotes && <div className="cs-recap-notes" data-testid="previous-session-notes">{notes}</div>}
+          <button type="button" className="cs-text-btn" onClick={() => setShowNotes((v) => !v)} aria-expanded={showNotes} data-testid="previous-session-notes-toggle">
+            {showNotes ? 'Hide notes' : `Show Session ${p.number} notes`}
+          </button>
+        </>
+      )}
     </div>
   );
 }
