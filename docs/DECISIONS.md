@@ -68,9 +68,11 @@ why, and what was traded off.
 11. **Unlock state lives on the server session, slides with real activity, and
     expires after 30 idle minutes.** "Activity" means the person touched the page:
     polling, focus refetches and expiry checks don't count, so a live page left
-    open still re-hides. If the Hide request can't reach the server, the screen
-    stays hidden and keeps retrying rather than showing private entries again. Sign-in always starts hidden; sign-out destroys the
-    session; switching accounts therefore starts hidden. Wrong-password attempts
+    open still re-hides — while someone reading or typing without saving keeps
+    it alive (the browser checks in just before the window closes). If the Hide
+    request can't reach the server, the screen stays hidden and keeps retrying
+    rather than showing private entries again. Sign-in always starts hidden;
+    sign-out destroys the session; switching accounts therefore starts hidden. Wrong-password attempts
     on unlock are rate-limited like logins (5 → 60s lockout).
 
 12. **The dreamer can create private entries while private is hidden.** The entry
@@ -90,8 +92,11 @@ why, and what was traded off.
     previous actions" is the one step with nothing to infer from, so its tick is
     saved with the session. The review list shows what was open when the session
     began plus whatever was completed or set aside since the previous session
-    ended — never actions from later months — and the previous session's focus
-    and notes sit above it.
+    ended — never actions from later months, even when an old session is reopened
+    (its window ends where the next session began) — and the previous session's
+    focus and notes sit above it. An action typed but not yet added is never
+    dropped silently: completing the session asks whether to add it. A grid value
+    that fails to save stays marked on its cell and is retried.
 
 14. **Session entries are upserts keyed by (session, category) / (session,
     dream) among *shared* rows.** Correcting a number during a conversation never
@@ -106,8 +111,10 @@ why, and what was traded off.
     value while it is private, since that changes nothing staff can see; sharing
     a hidden value back is refused kindly once the coach has recorded a newer one
     for that session. When staff clear or delete an entry, a note the dreamer
-    attached to it is kept as a standalone entry — staff actions never destroy a
-    dreamer's words.
+    attached to it is kept as a standalone reflection of theirs (no longer tied to
+    the session) — staff actions never destroy a dreamer's words. Staff payloads
+    are always ordered by things staff can see, so a private row can't even move
+    the order of what they get.
 
 15. **One open session per dreamer.** "Start session" returns the existing
     in-progress session if there is one. Completed sessions can be reopened or
@@ -147,7 +154,8 @@ why, and what was traded off.
     - A session's "N actions chosen · M completed" counts the actions chosen in
       that session and how many of those are now done.
     - "Last self activity" names what it was (check-in or reflection), and the
-      column sorts by what it shows.
+      column sorts by what it shows. A dreamer's own note on a session value
+      counts as a reflection here and in "Engaged", dated when it was written.
     A visible caveat states caseloads differ and these are not rankings.
 
 ## Technical
@@ -167,7 +175,9 @@ why, and what was traded off.
 
 21. **Deterministic, relative-dated demo data.** The seed is a seeded PRNG
     anchored to "now", so the demo always looks current and reproduces the same
-    shapes. Includes guaranteed privacy examples for the main demo dreamers and
+    shapes. Times are written as if the program runs in US Eastern time (sessions
+    in working hours, reflections in waking hours, "tonight" in the evening);
+    viewers elsewhere see the same moments in their own local time. Includes guaranteed privacy examples for the main demo dreamers and
     the brief's Energy 4 → 8 journal story (Darnell Price).
 
 22. **Validated chart palette.** CARE colors come from the dataviz skill's

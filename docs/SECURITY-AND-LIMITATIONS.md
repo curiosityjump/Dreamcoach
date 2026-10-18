@@ -67,5 +67,5 @@ personal information. This document is honest about the gap.
 - No notifications, email, calendar integration or file attachments.
 - Light theme only; no offline mode.
 - Timestamps are stored in UTC and shown in the browser's local time; the seed
-  generates data in UTC.
+  writes its times for a program running in US Eastern time.
 - The demo database lives in `data/dreamcoach.db`; `npm run seed` resets it.
