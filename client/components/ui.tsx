@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type Inp
 import { createPortal } from 'react-dom';
 import { CATEGORY_META, type RatingCategory } from '@shared/care';
 import type { EntrySource } from '@shared/types';
+import { textShade } from '@/lib/color';
 import { IconCheck, IconLock, IconUnlock, IconX } from './icons';
 
 /* ---------- Button ---------- */
@@ -106,7 +107,7 @@ export function RatingInput({
   disabled?: boolean;
 }) {
   const meta = category ? CATEGORY_META[category] : null;
-  const style = meta ? ({ '--rating-color': meta.color, '--rating-tint': meta.tint } as React.CSSProperties) : undefined;
+  const style = meta ? ({ '--rating-color': meta.color, '--rating-tint': meta.tint, '--rating-ink': textShade(meta.color) } as React.CSSProperties) : undefined;
   // A radio group: one tab stop (the chosen number, or 0 before anything is chosen); arrow keys move
   // focus and the choice together, stopping at 0 and 10 rather than wrapping round.
   const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
@@ -194,8 +195,9 @@ export function CategoryChip({ category, short }: { category: RatingCategory; sh
     </Chip>
   );
 }
-export function SourceChip({ source, coachName }: { source: EntrySource; coachName?: string }) {
-  return <Chip className={source === 'session' ? 'chip-session' : 'chip-self'}>{source === 'session' ? (coachName ? `Session · ${coachName}` : 'Coaching session') : 'Self check-in'}</Chip>;
+/** Where an entry came from. `reflection`: a journal entry written on its own, which is a "Reflection", not a check-in. */
+export function SourceChip({ source, coachName, reflection }: { source: EntrySource; coachName?: string; reflection?: boolean }) {
+  return <Chip className={source === 'session' ? 'chip-session' : 'chip-self'}>{source === 'session' ? (coachName ? `Session · ${coachName}` : 'Coaching session') : reflection ? 'Reflection' : 'Self check-in'}</Chip>;
 }
 export function PrivateChip({ compact }: { compact?: boolean }) {
   return (
@@ -270,7 +272,9 @@ export function Delta({ value, digits = 1, suffix = '' }: { value: number | null
   if (value == null) return null;
   const cls = value > 0 ? 'delta-up' : value < 0 ? 'delta-down' : 'delta-flat';
   const s = Math.abs(value).toFixed(digits).replace(/\.0$/, '');
-  return <span className={`delta ${cls} tnum`}>{value > 0 ? '▲' : value < 0 ? '▼' : '•'} {value === 0 ? 'no change' : `${s}${suffix}`}</span>;
+  // Unit suffixes are written plural (" pts"); one point reads singular.
+  const unit = s === '1' && suffix.endsWith('s') ? suffix.slice(0, -1) : suffix;
+  return <span className={`delta ${cls} tnum`}>{value > 0 ? '▲' : value < 0 ? '▼' : '•'} {value === 0 ? 'no change' : `${s}${unit}`}</span>;
 }
 
 /* ---------- Progress bar ---------- */
@@ -367,8 +371,21 @@ export function Dropdown({ trigger, children, align = 'right' }: { trigger: (ope
   useClickOutside(ref, () => setOpen(false), open);
   // Choosing an item hands focus back to the trigger, so a dialog the item opens can return it there.
   const choose = () => { ref.current?.querySelector<HTMLElement>('button, a[href]')?.focus(); setOpen(false); };
+  // Escape closes (back to the trigger), the arrow keys move through the items, and tabbing away closes.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!open) return;
+    if (e.key === 'Escape') { e.stopPropagation(); choose(); return; }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const items = [...ref.current!.querySelectorAll<HTMLElement>('.menu button:not(:disabled), .menu a[href]')];
+    if (!items.length) return;
+    e.preventDefault();
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    items[e.key === 'ArrowDown' ? (i + 1) % items.length : i <= 0 ? items.length - 1 : i - 1]!.focus();
+  };
+  // Only a move to another element counts: a click elsewhere (which may focus nothing) is the mousedown handler's.
+  const onBlur = (e: React.FocusEvent) => { if (e.relatedTarget instanceof Node && !ref.current?.contains(e.relatedTarget)) setOpen(false); };
   return (
-    <div className="user-menu" ref={ref}>
+    <div className="user-menu" ref={ref} onKeyDown={onKeyDown} onBlur={open ? onBlur : undefined}>
       <div onClick={() => setOpen((o) => !o)}>{trigger(open)}</div>
       {open && (
         <div className="menu" style={align === 'left' ? { left: 0, right: 'auto' } : undefined} onClick={choose}>

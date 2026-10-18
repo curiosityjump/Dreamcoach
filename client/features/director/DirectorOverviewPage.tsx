@@ -17,13 +17,16 @@ import { ActionsChart, CareLinesChart, DreamProgressChart, SessionsChart, TrendC
 
 const coachPath = (id: number) => `/director/coaches/${id}`;
 
-function totalsGroups(t: DirectorOverview['totals']): { label: string; items: StatItem[] }[] {
+function totalsGroups(t: DirectorOverview['totals'], coaches: CoachSummary[]): { label: string; items: StatItem[] }[] {
+  // The Director is listed among the coaches when they coach dreamers or have run sessions.
+  const director = coaches.find((c) => c.coach.role === 'director');
+  const coachesSub = !director ? 'on the Dream Team' : director.dreamers > 0 ? 'including the Director’s own caseload' : 'including the Director, for the sessions they ran';
   return [
     {
       label: 'Team & participation',
       items: [
-        { key: 'coaches', label: 'Coaches', value: t.coaches, sub: 'including the Director’s own caseload' },
-        { key: 'dreamers', label: 'Dreamers', value: t.activeDreamers, sub: t.activeDreamers === t.dreamers ? 'all active' : `active of ${t.dreamers} in the program` },
+        { key: 'coaches', label: 'Coaches', value: t.coaches, sub: coachesSub },
+        { key: 'dreamers', label: 'Dreamers', value: t.activeDreamers, sub: t.dreamers === 0 ? 'none in the program yet' : t.activeDreamers === t.dreamers ? 'all active' : `active of ${t.dreamers} in the program` },
         { key: 'sessions', label: 'Sessions this month', value: t.sessionsThisMonth, sub: `${t.sessionsLast30d} in the last 30 days · ${t.sessionsTotal} in the program` },
         { key: 'participation', label: 'Participation (45d)', value: pct(t.participation45d), sub: 'of active dreamers had a session in the last 45 days' },
         { key: 'engaged', label: 'Engaged between sessions (30d)', value: plural(t.engagedBetweenSessions30d, 'dreamer'), sub: `of ${t.activeDreamers} active, with a self check-in or reflection in the last 30 days` },
@@ -36,7 +39,7 @@ function totalsGroups(t: DirectorOverview['totals']): { label: string; items: St
         { key: 'dream-progress', label: 'Avg dream progress', value: pct(t.avgDreamProgress), sub: 'latest progress across all dreams' },
         { key: 'commitment', label: 'Avg commitment / satisfaction', value: <>{num(t.avgCommitment)} <span className="dir-slash">/</span> {num(t.avgSatisfaction)}</>, sub: 'latest ratings, 0–10' },
         { key: 'care-change', label: 'CARE change since first session', value: <CareChangeValue change={t.careChange} size="lg" />, sub: t.careChange ? `n = ${plural(t.careChange.n, 'dreamer')} with 2+ sessions` : 'needs dreamers with 2+ sessions' },
-        { key: 'follow-through', label: 'Follow-through', value: t.followThrough ? pct(t.followThrough.rate) : '—', sub: t.followThrough ? `of ${plural(t.followThrough.n, 'shared action')} older than 30 days completed` : 'no actions older than 30 days yet' },
+        { key: 'follow-through', label: 'Follow-through', value: t.followThrough ? pct(t.followThrough.rate) : '—', sub: t.followThrough ? `of ${plural(t.followThrough.n, 'action')} older than 30 days completed` : 'no actions older than 30 days yet' },
       ],
     },
   ];
@@ -155,7 +158,7 @@ function CoachCards({ coaches }: { coaches: CoachSummary[] }) {
             <IconArrowRight className="dir-card-arrow" />
           </div>
           <dl className="dir-card-facts">
-            <div><dt>Dreamers</dt><dd className="tnum">{c.activeDreamers} <span className="muted">/ {c.dreamers}</span></dd></div>
+            <div><dt>Dreamers</dt><dd className="tnum">{c.activeDreamers} <span className="muted">active of {c.dreamers}</span></dd></div>
             <div><dt>Sessions run (30d)</dt><dd className="tnum">{c.sessionsLast30d}</dd></div>
             <div><dt>Participation (45d)</dt><dd className="tnum">{pct(c.participation45d)}</dd></div>
             <div><dt>Engaged (30d)</dt><dd className="tnum">{c.engagedBetweenSessions30d} <span className="muted">of {c.activeDreamers}</span></dd></div>
@@ -211,7 +214,7 @@ export function DirectorOverviewPage() {
       />
 
       <div className="dir-stat-groups">
-        {totalsGroups(totals).map((g) => <StatGroup key={g.label} label={g.label} items={g.items} testPrefix="director-stat" />)}
+        {totalsGroups(totals, coaches).map((g) => <StatGroup key={g.label} label={g.label} items={g.items} testPrefix="director-stat" />)}
       </div>
 
       <section className="dir-section" aria-labelledby="dir-care-heading">
@@ -239,7 +242,7 @@ export function DirectorOverviewPage() {
           <TrendCard title="Dream progress by month" definition="Average dream progress recorded in coaching sessions each month." rows={rows} testId="director-chart-dreams">
             <DreamProgressChart rows={rows} />
           </TrendCard>
-          <TrendCard title="Actions created vs completed" definition="Shared actions created and completed each month." rows={rows} testId="director-chart-actions">
+          <TrendCard title="Actions created vs completed" definition="Actions created and completed each month." rows={rows} testId="director-chart-actions">
             <ActionsChart rows={rows} />
           </TrendCard>
         </div>
@@ -251,6 +254,15 @@ export function DirectorOverviewPage() {
           <span className="dir-section-sub">Sessions are counted for the coach who ran them. Every other column describes the coach’s current caseload.</span>
           <Link to="/director/dreamers" className="dir-link" data-testid="director-all-dreamers-link-2">All dreamers <IconArrowRight /></Link>
         </div>
+        {totals.unassignedDreamers > 0 && (
+          <div className="callout dir-unassigned" data-testid="director-unassigned">
+            <IconUsers />
+            <span className="grow">
+              {totals.unassignedDreamers === 1 ? '1 dreamer has no coach assigned and isn’t' : `${totals.unassignedDreamers} dreamers have no coach assigned and aren’t`} in any coach’s row below.
+            </span>
+            <Link to="/director/dreamers?coach=none" className="btn btn-secondary btn-sm" data-testid="director-unassigned-link">Assign a coach</Link>
+          </div>
+        )}
         <Card pad={false} className="dir-table-card">
           {coaches.length === 0 ? (
             <EmptyState icon={<IconUsers />} title="No coaches yet">Coaches appear here once dreamers are assigned to them.</EmptyState>

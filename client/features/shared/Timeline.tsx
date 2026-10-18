@@ -206,7 +206,7 @@ function ActionRow({ action: a, event, mode, dreams, compact, showDate }: { acti
       <div className="dj-tl-head">
         <span className="dj-tl-text">{ACTION_VERB[event]} <b>{a.title}</b></span>
         {dream && <DreamChip dream={dream} link={isDreamer} />}
-        {a.category && <CategoryChip category={a.category} short={compact} />}
+        {a.category && <CategoryChip category={a.category} />}
         {a.sessionId != null && <Chip className="chip-session" title="Chosen together in a coaching session">Coaching session</Chip>}
         {isDreamer && a.isPrivate && <PrivateChip compact={compact} />}
         <span className="dj-tl-end"><When at={event === 'completed' && a.completedAt ? a.completedAt : event === 'archived' && a.archivedAt ? a.archivedAt : a.createdAt} showDate={showDate} /></span>
@@ -284,8 +284,14 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
 
   const busy = update.isPending || remove.isPending;
   const attached = shown.ratingId != null || shown.progressId != null;
+  const parentNoun = shown.ratingId != null ? 'rating' : 'progress update';
+  // A note on a private rating or progress update is private with it, whatever its own switch says
+  // (the server only tells the owner, and only while private entries are shown).
+  const privateWithParent = isDreamer && attached && !!shown.parentPrivate;
+  const isPrivate = isDreamer && (shown.isPrivate || privateWithParent);
   const dream = shown.dreamId != null ? dreams?.find((d) => d.id === shown.dreamId) : undefined;
   const coachAuthored = shown.author.role !== 'dreamer';
+  const standalone = !attached && shown.checkInId == null;
 
   const contextText: string | null =
     shown.ratingId != null
@@ -318,7 +324,7 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
 
   return (
     <article
-      className={`dj-entry${compact ? ' dj-entry-compact' : ''}${isDreamer && shown.isPrivate ? ' is-private' : ''}${busy ? ' is-busy' : ''}${editing ? ' is-editing' : ''}`}
+      className={`dj-entry${compact ? ' dj-entry-compact' : ''}${isPrivate ? ' is-private' : ''}${busy ? ' is-busy' : ''}${editing ? ' is-editing' : ''}`}
       data-testid="journal-entry"
       data-entry-id={entry.id}
       data-mode={mode}
@@ -326,22 +332,23 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
     >
       <div className="dj-entry-main">
         {editing ? (
-          <JournalEditForm entry={shown} dreams={dreams} attached={attached} pending={update.isPending} onSave={onSave} onCancel={() => setEditing(false)} />
+          <JournalEditForm entry={shown} dreams={dreams} attached={attached} privateWith={privateWithParent ? parentNoun : null} pending={update.isPending} onSave={onSave} onCancel={() => setEditing(false)} />
         ) : (
           <>
             <div className="dj-entry-body" data-testid="journal-entry-body">{shown.body}</div>
             <div className="dj-entry-meta" data-testid="journal-entry-meta">
               {when}
-              <SourceChip source={shown.source} coachName={shown.source === 'session' && coachAuthored ? shown.author.name : undefined} />
+              {/* A reflection written on its own is a "Reflection"; "Self check-in" is kept for what was written in one. */}
+              <SourceChip source={shown.source} reflection={standalone} coachName={shown.source === 'session' && coachAuthored ? shown.author.name : undefined} />
               {contextText && (
                 isDreamer && shown.ratingId != null && shown.category
                   ? <Link to={`/care/${shown.category}`} className="dj-entry-context" data-testid="journal-entry-context">{contextText}</Link>
                   : <span className="dj-entry-context" data-testid="journal-entry-context">{contextText}</span>
               )}
               {dream && <DreamChip dream={dream} link={isDreamer} />}
-              {shown.category && <CategoryChip category={shown.category} short={compact} />}
+              {shown.category && <CategoryChip category={shown.category} />}
               {!isDreamer && coachAuthored && shown.source !== 'session' && <Chip className="chip-muted">Written by {firstName(shown.author.name)}</Chip>}
-              {isDreamer && shown.isPrivate && <PrivateChip compact={compact} />}
+              {isPrivate && <PrivateChip compact={compact} />}
             </div>
           </>
         )}
@@ -357,9 +364,9 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
             )}
           >
             <button type="button" className="menu-item" onClick={() => setEditing(true)} data-testid="journal-entry-edit"><IconEdit /> Edit</button>
-            {shown.isPrivate
+            {!privateWithParent && (shown.isPrivate
               ? <button type="button" className="menu-item" onClick={share} data-testid="journal-entry-share"><IconUnlock /> Share with coach</button>
-              : <button type="button" className="menu-item" onClick={makePrivate} data-testid="journal-entry-make-private"><IconLock /> Make private</button>}
+              : <button type="button" className="menu-item" onClick={makePrivate} data-testid="journal-entry-make-private"><IconLock /> Make private</button>)}
             <div className="divider" />
             <button type="button" className="menu-item dj-menu-danger" onClick={() => setConfirmDelete(true)} data-testid="journal-entry-delete"><IconTrash /> Delete</button>
           </Dropdown>
@@ -373,8 +380,10 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
           onConfirm={confirmRemove}
           title={attached ? 'Delete this note?' : 'Delete this reflection?'}
           body={attached
-            ? 'The rating it belongs to stays; only the note is removed. This cannot be undone.'
-            : <>It will be gone for good. If you’d rather keep it to yourself, <b>Make private</b> keeps it in your journal where only you can see it.</>}
+            ? `The ${parentNoun} it belongs to stays; only the note is removed. This cannot be undone.`
+            : isPrivate
+              ? 'It will be gone for good. This cannot be undone.'
+              : <>It will be gone for good. If you’d rather keep it to yourself, <b>Make private</b> keeps it in your journal where only you can see it.</>}
           confirmLabel="Delete"
           danger
           loading={remove.isPending}
@@ -386,11 +395,13 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
 
 /* ---------- Inline edit form ---------- */
 
-function JournalEditForm({ entry, dreams, attached, pending, onSave, onCancel }: {
+function JournalEditForm({ entry, dreams, attached, privateWith, pending, onSave, onCancel }: {
   entry: JournalEntry;
   dreams?: DreamRef[];
   /** Notes attached to a rating/progress entry keep their context; only body and privacy can change. */
   attached: boolean;
+  /** Set when the note is private because its rating / progress update is: its own switch then has no say. */
+  privateWith: string | null;
   pending: boolean;
   onSave: (changes: { body?: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null }) => void;
   onCancel: () => void;
@@ -463,7 +474,9 @@ function JournalEditForm({ entry, dreams, attached, pending, onSave, onCancel }:
             </select>
           </>
         )}
-        <span data-testid="journal-entry-edit-privacy"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>
+        {privateWith
+          ? <Chip className="chip-private" title={`Share the ${privateWith} to share this note too.`} data-testid="journal-entry-edit-privacy-with"><IconLock /> Private with its {privateWith}</Chip>
+          : <span data-testid="journal-entry-edit-privacy"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>}
         <div className="dj-edit-actions">
           <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={pending} data-testid="journal-entry-edit-cancel">Cancel</Button>
           <Button type="submit" variant="primary" size="sm" disabled={pending || !trimmed} loading={pending} data-testid="journal-entry-edit-save">Save</Button>

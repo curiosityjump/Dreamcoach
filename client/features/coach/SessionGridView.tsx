@@ -39,14 +39,15 @@ type RowDef =
 const ratingOf = (s: CoachingSession, c: RatingCategory): number | null => s.ratings[c] ?? null;
 const progressOf = (s: CoachingSession, dreamId: number): number | null => s.progress[dreamId] ?? null;
 
-function TinyDelta({ now, prev, suffix = '' }: { now: number | null; prev: number | null; suffix?: string }) {
+function TinyDelta({ now, prev, points }: { now: number | null; prev: number | null; points?: boolean }) {
   if (now == null || prev == null) return null;
   const d = now - prev;
   if (d === 0) return null;
   const cls = d > 0 ? 'cs-delta-up' : 'cs-delta-down';
+  // Dream progress changes are percentage points, so they read "pts", never "%".
   return (
-    <span className={`cs-delta ${cls} tnum`} aria-label={`${d > 0 ? 'up' : 'down'} ${Math.abs(d)}${suffix} from the previous session`}>
-      {d > 0 ? '+' : '−'}{Math.abs(d)}{suffix}
+    <span className={`cs-delta ${cls} tnum`} aria-label={`${d > 0 ? 'up' : 'down'} ${Math.abs(d)}${points ? ' points' : ''} from the previous session`}>
+      {d > 0 ? '+' : '−'}{Math.abs(d)}{points && <span className="cs-delta-unit"> pts</span>}
     </span>
   );
 }
@@ -62,7 +63,9 @@ function PrivateMark() {
 /**
  * Compact number cell for the editable column. Keeps its own text while typing,
  * commits on change (after a short pause), on blur and on Enter; an empty field
- * clears the value on blur or Enter. Arrow keys adjust by one; Escape cancels the edit.
+ * clears the value on blur or Enter. As in a spreadsheet, Enter and the up/down
+ * arrows move between rows (they never change the number), a new number replaces
+ * the old one until the coach starts typing, and Escape cancels the edit.
  */
 function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cellId, trailing }: {
   value: number | null;
@@ -82,6 +85,9 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   const lastSent = useRef<number | null>(value);
   // The value when editing began, so Escape can put it back.
   const atFocus = useRef<number | null>(value);
+  // Nothing typed since the cell was focused (or since Escape): the whole value stays selected,
+  // so a click inside the cell can't drop the caret after it and have the next digits appended.
+  const untouched = useRef(true);
 
   // Reflect server changes when the coach isn't mid-edit.
   useEffect(() => {
@@ -101,14 +107,32 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
     return Math.max(min, Math.min(max, Math.round(n)));
   };
 
+  /** Sends the value if it changed; says whether it did. */
   const commit = (t: string) => {
     if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
     const parsed = parse(t);
-    if (parsed === undefined) return;
-    if (parsed === lastSent.current) return;
+    if (parsed === undefined) return false;
+    if (parsed === lastSent.current) return false;
     lastSent.current = parsed;
     onCommit(parsed);
+    return true;
   };
+
+  // Closing or reloading the tab doesn't blur the cell: send what's typed straight away (as a blur
+  // would) and, if that had to happen, let the browser ask before leaving while it saves.
+  const latest = useRef({ text, commit });
+  latest.current = { text, commit };
+  useEffect(() => {
+    const save = () => latest.current.commit(latest.current.text);
+    const onHide = () => { if (document.visibilityState === 'hidden') save(); };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { if (save()) e.preventDefault(); };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, []);
 
   const scheduleCommit = (t: string) => {
     if (timer.current) window.clearTimeout(timer.current);
@@ -116,6 +140,7 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   };
 
   const onChange = (raw: string) => {
+    untouched.current = false;
     const parsed = parse(raw);
     if (parsed === undefined) { setText(raw); return; }
     const shown = parsed == null ? '' : String(parsed);
@@ -127,19 +152,14 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
     else scheduleCommit(shown);
   };
 
-  const step = (delta: number) => {
-    const cur = parse(text);
-    const base = cur == null ? (delta > 0 ? min - 1 : max + 1) : cur;
-    const next = Math.max(min, Math.min(max, base + delta));
-    setText(String(next));
-    commit(String(next));
-  };
-
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'ArrowUp') { e.preventDefault(); step(1); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); step(-1); }
-    else if (e.key === 'Enter') { e.preventDefault(); commit(text); moveDown(e.currentTarget); }
-    else if (e.key === 'Escape') {
+    // A number field would step its value on the arrow keys; here they move to the next or previous
+    // row, so a coach used to the spreadsheet can't change a value (or mark a dream achieved) by accident.
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
+      e.preventDefault();
+      commit(text);
+      moveBy(e.currentTarget, e.key === 'ArrowUp' || (e.key === 'Enter' && e.shiftKey) ? -1 : 1);
+    } else if (e.key === 'Escape') {
       // Cancel the edit, as in a spreadsheet: the cell gets back the value it had when editing began
       // and stays selected. Nothing is sent unless a pause already saved the typed value, in which
       // case the original goes back.
@@ -147,6 +167,7 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
       const original = atFocus.current == null ? '' : String(atFocus.current);
       setText(original);
       commit(original);
+      untouched.current = true;
       const el = e.currentTarget;
       window.requestAnimationFrame(() => el.select());
     }
@@ -166,7 +187,8 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
         aria-label={label}
         data-testid={testId}
         data-cs-cell={cellId}
-        onFocus={(e) => { focused.current = true; atFocus.current = lastSent.current; e.currentTarget.select(); }}
+        onFocus={(e) => { focused.current = true; untouched.current = true; atFocus.current = lastSent.current; e.currentTarget.select(); }}
+        onMouseUp={(e) => { if (untouched.current) { e.preventDefault(); e.currentTarget.select(); } }}
         onBlur={() => { focused.current = false; commit(text); }}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
@@ -177,11 +199,10 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   );
 }
 
-/** Enter behaves like Tab: move to the next editable cell in the column. */
-function moveDown(from: HTMLInputElement) {
+/** Enter and ↓ behave like Tab (↑ and Shift+Enter like Shift+Tab): move to the next editable cell in the column. */
+function moveBy(from: HTMLInputElement, delta: 1 | -1) {
   const all = Array.from(from.closest('table')?.querySelectorAll<HTMLInputElement>('input[data-cs-cell]') ?? []);
-  const i = all.indexOf(from);
-  const next = all[i + 1];
+  const next = all[all.indexOf(from) + delta];
   if (next) next.focus();
 }
 
@@ -317,14 +338,14 @@ export function SessionGridView({ grid, currentSessionId, editable, onRating, on
           onCommit={(nv) => onProgress?.(row.dreamId, nv)}
           testId={`grid-progress-${row.dreamId}`}
           cellId={`progress-${row.dreamId}`}
-          trailing={showDeltas ? <TinyDelta now={v} prev={pv} suffix="%" /> : null}
+          trailing={showDeltas ? <TinyDelta now={v} prev={pv} points /> : null}
         />
       );
     }
     return (
       <span className="cs-val tnum" data-testid={isCur ? `grid-progress-${row.dreamId}` : undefined}>
         {v == null ? <span className="cs-none" aria-label="not recorded">–</span> : `${v}%`}
-        {showDeltas && <TinyDelta now={v} prev={pv} suffix="%" />}
+        {showDeltas && <TinyDelta now={v} prev={pv} points />}
         {s.privateProgress?.includes(row.dreamId) && <PrivateMark />}
       </span>
     );

@@ -40,10 +40,13 @@ const anyFilter = (f: Filters) => f.dreamId != null || f.category != null || f.p
 
 const norm = (s: string) => s.toLowerCase();
 
+/** A note on a private rating or progress update is private with it, whatever its own flag (the server says so). */
+const entryPrivate = (e: JournalEntry) => e.isPrivate || !!e.parentPrivate;
+
 function entryMatches(e: JournalEntry, f: Filters, dreams: DreamRef[], q: string): boolean {
   if (f.dreamId != null && e.dreamId !== f.dreamId) return false;
   if (f.category != null && e.category !== f.category) return false;
-  if (f.privateOnly && !e.isPrivate) return false;
+  if (f.privateOnly && !entryPrivate(e)) return false;
   if (q) {
     const hay = [e.body, e.category ? CATEGORY_META[e.category].label : '', e.dreamId != null ? dreams.find((d) => d.id === e.dreamId)?.title ?? '' : '', e.author.name].join(' ');
     if (!norm(hay).includes(q)) return false;
@@ -54,9 +57,15 @@ function entryMatches(e: JournalEntry, f: Filters, dreams: DreamRef[], q: string
 function itemMatches(it: TimelineItem, f: Filters, dreams: DreamRef[], q: string): boolean {
   const dreamId = it.kind === 'progress' ? it.item.dreamId : it.kind === 'journal' || it.kind === 'action' ? it.item.dreamId : null;
   const category = it.kind === 'rating' || it.kind === 'journal' || it.kind === 'action' ? it.item.category : null;
-  const isPrivate = it.kind === 'session' ? false : it.item.isPrivate;
-  if (f.dreamId != null && dreamId !== f.dreamId) return false;
-  if (f.category != null && category !== f.category) return false;
+  const isPrivate = it.kind === 'session' ? false : it.kind === 'journal' ? entryPrivate(it.item) : it.item.isPrivate;
+  // A coaching session carries the values recorded in it, so it belongs under any area or dream it has a value for.
+  if (it.kind === 'session') {
+    if (f.dreamId != null && it.item.progress[f.dreamId] == null) return false;
+    if (f.category != null && it.item.ratings[f.category] == null) return false;
+  } else {
+    if (f.dreamId != null && dreamId !== f.dreamId) return false;
+    if (f.category != null && category !== f.category) return false;
+  }
   if (f.privateOnly && !isPrivate) return false;
   if (q) {
     const parts: string[] = [];
@@ -163,7 +172,7 @@ export function JournalPage() {
         )}
       </div>
 
-      <FilterBar filters={filters} onChange={setFilters} dreams={dreamRefs} categories={categoryChips} showPrivate={!!auth?.privateUnlocked} />
+      <FilterBar filters={filters} onChange={setFilters} dreams={dreamRefs} categories={categoryChips} showPrivate={!!auth?.privateUnlocked} placeholder={view === 'reflections' ? 'Search your reflections' : 'Search everything'} />
 
       {active.isLoading ? (
         <div className="stack" aria-busy data-testid="journal-loading">
@@ -249,7 +258,7 @@ function ReflectionsList({ entries, dreams }: { entries: JournalEntry[]; dreams:
 
 /* ---------- Filters ---------- */
 
-function FilterBar({ filters, onChange, dreams, categories, showPrivate }: { filters: Filters; onChange: (f: Filters) => void; dreams: DreamRef[]; categories: RatingCategory[]; showPrivate: boolean }) {
+function FilterBar({ filters, onChange, dreams, categories, showPrivate, placeholder }: { filters: Filters; onChange: (f: Filters) => void; dreams: DreamRef[]; categories: RatingCategory[]; showPrivate: boolean; placeholder: string }) {
   const set = (patch: Partial<Filters>) => onChange({ ...filters, ...patch });
   const clearable = anyFilter(filters);
   return (
@@ -260,7 +269,7 @@ function FilterBar({ filters, onChange, dreams, categories, showPrivate }: { fil
           type="search"
           value={filters.search}
           onChange={(e) => set({ search: e.target.value })}
-          placeholder="Search your reflections"
+          placeholder={placeholder}
           aria-label="Search"
           autoComplete="off"
           data-testid="journal-search"
@@ -342,8 +351,9 @@ function Composer({ dreams, coachName, expanded, autoFocus, onOpen, onClose, can
     create.mutate(
       { body: trimmed, isPrivate, dreamId, category },
       {
-        onSuccess: (entry) => {
-          if (entry.isPrivate) toast(auth?.privateUnlocked ? 'Saved as a private reflection — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
+        // Judge by what was asked for: a private reflection saved while private entries are hidden comes back as null.
+        onSuccess: () => {
+          if (isPrivate) toast(auth?.privateUnlocked ? 'Saved as a private reflection — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
           else toast('Reflection saved.');
           reset();
           onClose();

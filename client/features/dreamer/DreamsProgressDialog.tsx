@@ -81,7 +81,7 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
           </div>
           <div className="row dd-pct-summary">
             <span className="dd-pct-big tnum" data-testid="progress-dialog-value">{value}%</span>
-            {delta != null && delta !== 0 && <Delta value={delta} digits={0} suffix="%" />}
+            {delta != null && delta !== 0 && <Delta value={delta} digits={0} suffix=" pts" />}
             {delta === 0 && <span className="muted small">Same as last time — that’s fine too.</span>}
           </div>
         </Field>

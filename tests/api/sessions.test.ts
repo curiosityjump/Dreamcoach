@@ -248,3 +248,87 @@ test('dreamers add, edit and remove their own notes on session-recorded entries;
   assert.equal((await coach.patch(`/dreamers/${id}/progress/${progress.id}`, { note: 'x' })).status, 403);
   await dreamer.patch(`/dreamers/me/progress/${progress.id}`, { note: null });
 });
+
+test('one open session per dreamer: reopening waits for the open one; completing again keeps the original end', async () => {
+  const coach = new Client(s.base);
+  await coach.login('daniel@dreamcoach.demo');
+  const id = (await coach.get('/coach/dashboard')).body.caseload.find((c: any) => c.dreamer.name === 'Darnell Price').dreamer.id;
+  const last = (await coach.get(`/dreamers/${id}/sessions`)).body.filter((x: any) => x.status === 'completed').slice(-1)[0];
+  const open = (await coach.post(`/dreamers/${id}/sessions`, {})).body;
+  const refused = await coach.patch(`/dreamers/${id}/sessions/${last.id}`, { status: 'in_progress' });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.error, 'Finish or delete the open session first.');
+  assert.equal((await coach.del(`/dreamers/${id}/sessions/${open.id}`)).status, 200);
+
+  const reopened = await coach.patch(`/dreamers/${id}/sessions/${last.id}`, { status: 'in_progress' });
+  assert.equal(reopened.status, 200);
+  assert.equal(reopened.body.completedAt, null);
+  assert.equal((await coach.get(`/dreamers/${id}/overview`)).body.snapshot.openSession.id, last.id);
+  const again = await coach.patch(`/dreamers/${id}/sessions/${last.id}`, { status: 'completed' });
+  assert.equal(again.body.completedAt, last.completedAt, 'the session still ended when it first ended');
+  assert.equal(again.body.coach.id, last.coach.id);
+});
+
+test('a session is credited to the coach who completes it', async () => {
+  const director = new Client(s.base);
+  await director.login('director@dreamcoach.demo');
+  const daniel = new Client(s.base);
+  await daniel.login('daniel@dreamcoach.demo');
+  const priya = new Client(s.base);
+  const priyaUser = (await priya.login('priya@dreamcoach.demo')).user;
+  const hana = (await daniel.get('/coach/dashboard')).body.caseload.find((c: any) => c.dreamer.name === 'Hana Sato').dreamer;
+  const credit = async (name: string) => (await director.get('/director/overview')).body.coaches.find((c: any) => c.coach.name === name).sessionsTotal;
+  const before = { daniel: await credit('Daniel Okafor'), priya: await credit('Priya Raman') };
+
+  // Daniel starts a session, then Hana moves to Priya, who finishes it.
+  const sid = (await daniel.post(`/dreamers/${hana.id}/sessions`, {})).body.id;
+  await daniel.put(`/dreamers/${hana.id}/sessions/${sid}/ratings`, { category: 'energy', value: 7 });
+  await director.patch(`/director/dreamers/${hana.id}`, { coachUserId: priyaUser.id });
+  const done = await priya.patch(`/dreamers/${hana.id}/sessions/${sid}`, { status: 'completed' });
+  assert.equal(done.status, 200);
+  assert.equal(done.body.coach.name, 'Priya Raman');
+  assert.equal(await credit('Priya Raman'), before.priya + 1);
+  assert.equal(await credit('Daniel Okafor'), before.daniel);
+  await director.patch(`/director/dreamers/${hana.id}`, { coachUserId: (await daniel.get('/auth/me')).body.user.id });
+});
+
+test('entries and sessions cannot be dated in the future', async () => {
+  const dreamer = new Client(s.base);
+  await dreamer.login('owen@dreamcoach.demo');
+  const future = new Date(Date.now() + 2 * 86400000).toISOString();
+  const soon = new Date(Date.now() + 60000).toISOString();
+  const res = await dreamer.post('/dreamers/me/check-ins', { occurredAt: future, reflection: { body: 'From the future' } });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /Choose a date and time up to now/);
+  assert.equal((await dreamer.post('/dreamers/me/journal', { body: 'x', occurredAt: future })).status, 400);
+  const ok = await dreamer.post('/dreamers/me/check-ins', { occurredAt: soon, ratings: [{ category: 'energy', value: 6 }] });
+  assert.equal(ok.status, 201, 'a minute of clock difference is fine');
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${ok.body.ratings[0].id}`, { occurredAt: future })).status, 400);
+  const j = (await dreamer.post('/dreamers/me/journal', { body: 'Dated today' })).body;
+  assert.equal((await dreamer.patch(`/dreamers/me/journal/${j.id}`, { occurredAt: future })).status, 400);
+
+  const coach = new Client(s.base);
+  await coach.login('maya@dreamcoach.demo');
+  const id = (await dreamer.get('/auth/me')).body.dreamerId;
+  assert.equal((await coach.post(`/dreamers/${id}/sessions`, { occurredAt: future })).status, 400);
+  const sid = (await coach.post(`/dreamers/${id}/sessions`, {})).body.id;
+  assert.equal((await coach.patch(`/dreamers/${id}/sessions/${sid}`, { occurredAt: future })).status, 400);
+  await coach.del(`/dreamers/${id}/sessions/${sid}`);
+});
+
+test('a journal entry can only be tagged with the dreamer’s own dreams', async () => {
+  const dreamer = new Client(s.base);
+  await dreamer.login('alicia@dreamcoach.demo');
+  const director = new Client(s.base);
+  await director.login('director@dreamcoach.demo');
+  const mine = (await dreamer.get('/dreamers/me/dreams')).body[0];
+  const other = (await director.get('/director/dreamers')).body.find((r: any) => r.dreamer.name === 'Darnell Price').snapshot.dreams[0];
+  const j = (await dreamer.post('/dreamers/me/journal', { body: 'Tag me' })).body;
+  for (const dreamId of [other.id, 999999]) {
+    const res = await dreamer.patch(`/dreamers/me/journal/${j.id}`, { dreamId });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'Unknown dream.');
+  }
+  assert.equal((await dreamer.patch(`/dreamers/me/journal/${j.id}`, { dreamId: mine.id })).body.dreamId, mine.id);
+  await dreamer.del(`/dreamers/me/journal/${j.id}`);
+});

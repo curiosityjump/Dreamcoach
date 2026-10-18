@@ -132,7 +132,7 @@ export function SourceLegend({ color }: { color: string }) {
   return (
     <div className="legend">
       <span className="legend-item"><span className="legend-swatch" style={{ background: color }} />Coaching session</span>
-      <span className="legend-item" style={{ color }}><span className="legend-swatch hollow" />Self check-in</span>
+      <span className="legend-item"><span className="legend-swatch hollow" style={{ color }} />Self check-in</span>
     </div>
   );
 }

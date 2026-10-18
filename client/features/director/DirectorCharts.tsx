@@ -7,12 +7,12 @@
  * SourceChip so the two sources read the same everywhere in the app.
  */
 import type { ReactNode } from 'react';
-import { Bar, BarChart, CartesianGrid, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, LabelList, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { CARE_CATEGORIES, CATEGORY_META, type CareCategory } from '@shared/care';
 import type { MonthPoint } from '@shared/types';
 import { Card, EmptyState } from '@/components/ui';
 import { IconChart } from '@/components/icons';
-import { num, pct } from '@/lib/format';
+import { num, pct, plural } from '@/lib/format';
 
 const SESSION_COLOR = 'var(--accent)';
 const SELF_COLOR = 'var(--gold)';
@@ -38,6 +38,8 @@ interface Row {
   relationships: number | null;
   energy: number | null;
   current: boolean;
+  /** Dreamers in this group who joined the program this month (not counted in the first month). */
+  joined: number;
 }
 
 function monthDate(key: string): Date {
@@ -53,7 +55,7 @@ function currentMonthKey(): string {
 export function monthRows(months: MonthPoint[]): Row[] {
   const years = new Set(months.map((m) => m.month.slice(0, 4)));
   const now = currentMonthKey();
-  return months.map((m) => {
+  return months.map((m, i) => {
     const d = monthDate(m.month);
     return {
       key: m.month,
@@ -70,6 +72,7 @@ export function monthRows(months: MonthPoint[]): Row[] {
       relationships: m.care.relationships ?? null,
       energy: m.care.energy ?? null,
       current: m.month === now,
+      joined: i > 0 ? Math.max(0, m.activeDreamers - months[i - 1]!.activeDreamers) : 0,
     };
   });
 }
@@ -121,6 +124,28 @@ export function TrendCard({ title, definition, rows, children, testId, legend }:
   );
 }
 
+/** Month title for a tooltip, noting a month that is still under way. */
+const tipTitle = (r: Row, what?: string) => [r.full, r.current ? 'in progress' : null, what].filter(Boolean).join(' · ');
+
+/* The CARE and dream-progress lines average whoever had a session that month, so a dreamer joining
+   with low starting values can pull a month down although nobody went backwards. Those months are
+   marked with a dashed line and explained in the tooltip. */
+function joinLines(rows: Row[]) {
+  return rows.filter((r) => r.joined > 0).map((r) => (
+    <ReferenceLine key={r.key} x={r.label} stroke="var(--axis)" strokeDasharray="3 3" label={{ value: `+${r.joined} joined`, position: 'insideTopLeft', fontSize: 10.5, fill: 'var(--muted)' }} />
+  ));
+}
+
+function JoinTip({ r }: { r: Row }) {
+  if (!r.joined) return null;
+  return <div className="dir-tip-foot">{plural(r.joined, 'dreamer')} joined this month; new starting points can lower the average.</div>;
+}
+
+function JoinNote({ rows }: { rows: Row[] }) {
+  if (!rows.some((r) => r.joined > 0)) return null;
+  return <p className="dir-chart-note">A dashed line marks a month when dreamers joined: their starting points can lower the average without anyone going backwards.</p>;
+}
+
 function NoMonths() {
   return (
     <EmptyState icon={<IconChart />} title="No months to show yet">
@@ -135,6 +160,9 @@ const CHART_H = 200;
 
 export function SessionsChart({ rows }: { rows: Row[] }) {
   if (!rows.length) return <NoMonths />;
+  if (!rows.some((r) => r.sessions > 0 || r.selfCheckIns > 0)) {
+    return <EmptyState icon={<IconChart />} title="No sessions or check-ins yet">Bars appear once coaching sessions are completed or self check-ins come in.</EmptyState>;
+  }
   return (
     <>
       <div className="dir-chart" style={{ height: CHART_H }}>
@@ -149,7 +177,7 @@ export function SessionsChart({ rows }: { rows: Row[] }) {
                 if (!active || !payload?.length) return null;
                 const r = payload[0]!.payload as Row;
                 return (
-                  <TipBox title={`${r.full}${r.current ? ' · in progress' : ''}`}>
+                  <TipBox title={tipTitle(r)}>
                     <TipRow color={SESSION_COLOR} label="Coaching sessions" value={r.sessions} />
                     <TipRow color={SELF_COLOR} label="Self check-ins" value={r.selfCheckIns} />
                   </TipBox>
@@ -186,15 +214,17 @@ export function CareLinesChart({ rows, height = CHART_H + 20 }: { rows: Row[]; h
                 if (!active || !payload?.length) return null;
                 const r = payload[0]!.payload as Row;
                 return (
-                  <TipBox title={`${r.full} · session ratings`}>
+                  <TipBox title={tipTitle(r, 'session ratings')}>
                     {CARE_CATEGORIES.map((c) => (
                       <TipRow key={c} color={CATEGORY_META[c].color} label={CATEGORY_META[c].label} value={r[c] == null ? '—' : num(r[c])} />
                     ))}
                     <div className="dir-tip-foot">CARE average {r.careAverage == null ? '—' : num(r.careAverage)}</div>
+                    <JoinTip r={r} />
                   </TipBox>
                 );
               }}
             />
+            {joinLines(rows)}
             {CARE_CATEGORIES.map((c: CareCategory) => (
               <Line key={c} type="monotone" dataKey={c} name={CATEGORY_META[c].label} stroke={CATEGORY_META[c].color} strokeWidth={2} dot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)', fill: CATEGORY_META[c].color }} activeDot={{ r: 6, strokeWidth: 2, stroke: 'var(--surface)' }} connectNulls isAnimationActive={false} />
             ))}
@@ -202,6 +232,7 @@ export function CareLinesChart({ rows, height = CHART_H + 20 }: { rows: Row[]; h
         </ResponsiveContainer>
       </div>
       <Legend items={CARE_CATEGORIES.map((c) => ({ color: CATEGORY_META[c].color, label: CATEGORY_META[c].label }))} />
+      <JoinNote rows={rows} />
     </>
   );
 }
@@ -222,30 +253,35 @@ export function DreamProgressChart({ rows }: { rows: Row[] }) {
   if (!rows.some((r) => r.dreamProgress != null)) return <EmptyState icon={<IconChart />} title="No dream progress recorded yet">This line appears once coaching sessions record dream progress.</EmptyState>;
   const lastIndex = rows.reduce((last, r, i) => (r.dreamProgress != null ? i : last), -1);
   return (
-    <div className="dir-chart" style={{ height: CHART_H }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 16, right: 20, bottom: 0, left: -12 }}>
-          <CartesianGrid stroke="var(--grid)" vertical={false} />
-          <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={10} />
-          <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(v: number) => `${v}%`} tick={TICK} axisLine={false} tickLine={false} width={44} />
-          <Tooltip
-            cursor={{ stroke: 'var(--axis)' }}
-            content={({ active, payload }) => {
-              if (!active || !payload?.length) return null;
-              const r = payload[0]!.payload as Row;
-              return (
-                <TipBox title={`${r.full} · session entries`}>
-                  <TipRow color={DREAM_COLOR} label="Average dream progress" value={r.dreamProgress == null ? '—' : pct(r.dreamProgress)} />
-                </TipBox>
-              );
-            }}
-          />
-          <Line type="monotone" dataKey="dreamProgress" name="Average dream progress" stroke={DREAM_COLOR} strokeWidth={2} dot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)', fill: DREAM_COLOR }} activeDot={{ r: 6, strokeWidth: 2, stroke: 'var(--surface)' }} connectNulls isAnimationActive={false}>
-            <LabelList dataKey="dreamProgress" content={(p) => <EndLabel {...(p as { x?: number | string; y?: number | string; value?: unknown; index?: number })} lastIndex={lastIndex} />} />
-          </Line>
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+    <>
+      <div className="dir-chart" style={{ height: CHART_H }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={rows} margin={{ top: 16, right: 20, bottom: 0, left: -12 }}>
+            <CartesianGrid stroke="var(--grid)" vertical={false} />
+            <XAxis dataKey="label" tick={TICK} axisLine={AXIS_LINE} tickLine={false} interval="preserveStartEnd" minTickGap={10} />
+            <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(v: number) => `${v}%`} tick={TICK} axisLine={false} tickLine={false} width={44} />
+            <Tooltip
+              cursor={{ stroke: 'var(--axis)' }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const r = payload[0]!.payload as Row;
+                return (
+                  <TipBox title={tipTitle(r, 'session entries')}>
+                    <TipRow color={DREAM_COLOR} label="Average dream progress" value={r.dreamProgress == null ? '—' : pct(r.dreamProgress)} />
+                    <JoinTip r={r} />
+                  </TipBox>
+                );
+              }}
+            />
+            {joinLines(rows)}
+            <Line type="monotone" dataKey="dreamProgress" name="Average dream progress" stroke={DREAM_COLOR} strokeWidth={2} dot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)', fill: DREAM_COLOR }} activeDot={{ r: 6, strokeWidth: 2, stroke: 'var(--surface)' }} connectNulls isAnimationActive={false}>
+              <LabelList dataKey="dreamProgress" content={(p) => <EndLabel {...(p as { x?: number | string; y?: number | string; value?: unknown; index?: number })} lastIndex={lastIndex} />} />
+            </Line>
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <JoinNote rows={rows} />
+    </>
   );
 }
 
@@ -253,6 +289,9 @@ export function DreamProgressChart({ rows }: { rows: Row[] }) {
 
 export function ActionsChart({ rows }: { rows: Row[] }) {
   if (!rows.length) return <NoMonths />;
+  if (!rows.some((r) => r.actionsCreated > 0 || r.actionsCompleted > 0)) {
+    return <EmptyState icon={<IconChart />} title="No actions yet">Bars appear as actions are created and completed.</EmptyState>;
+  }
   return (
     <>
       <div className="dir-chart" style={{ height: CHART_H }}>
@@ -267,7 +306,7 @@ export function ActionsChart({ rows }: { rows: Row[] }) {
                 if (!active || !payload?.length) return null;
                 const r = payload[0]!.payload as Row;
                 return (
-                  <TipBox title={`${r.full}${r.current ? ' · in progress' : ''}`}>
+                  <TipBox title={tipTitle(r)}>
                     <TipRow color={CREATED_COLOR} label="Actions created" value={r.actionsCreated} />
                     <TipRow color={COMPLETED_COLOR} label="Actions completed" value={r.actionsCompleted} />
                   </TipBox>
@@ -303,7 +342,7 @@ export function DirectorTrendGrid({ months, scope, sessionsBy, testPrefix }: { m
       <TrendCard title="Dream progress by month" definition="Average dream progress recorded in coaching sessions each month." rows={rows} testId={`${testPrefix}-chart-dreams`}>
         <DreamProgressChart rows={rows} />
       </TrendCard>
-      <TrendCard title="Actions created vs completed" definition="Shared actions created and completed each month." rows={rows} testId={`${testPrefix}-chart-actions`}>
+      <TrendCard title="Actions created vs completed" definition="Actions created and completed each month." rows={rows} testId={`${testPrefix}-chart-actions`}>
         <ActionsChart rows={rows} />
       </TrendCard>
     </div>

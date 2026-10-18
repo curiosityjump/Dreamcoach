@@ -17,11 +17,12 @@ import { useActions, useCheckIns, useDeleteSession, useDreams, useGrid, useJourn
 import { errorMessage } from '@/api/client';
 import { presentPath, staffDreamerPath } from '@/app/routes';
 import { useToast } from '@/components/toast';
-import { Avatar, Bar, Button, Card, CardHead, CategoryChip, Chip, ConfirmDialog, EmptyState, Field, LoadingPage, SourceChip, TextArea, TextInput } from '@/components/ui';
+import { Avatar, Bar, Button, Card, CardHead, CategoryChip, Chip, ConfirmDialog, EmptyState, Field, LoadingPage, Modal, SourceChip, TextArea, TextInput } from '@/components/ui';
 import { IconArrowLeft, IconCalendar, IconCheck, IconClock, IconEdit, IconInfo, IconPresent, IconRotate, IconTrash } from '@/components/icons';
 import { fmtDate, fmtDateTime, fmtTime, fromLocalInputValue, relativeTime, toLocalInputValue } from '@/lib/format';
 import { ActionComposer, ActionList } from '@/features/shared/ActionItems';
 import { SessionGridView } from './SessionGridView';
+import { textShade } from '@/lib/color';
 
 /* ---------- Autosave (700 ms debounce) ---------- */
 
@@ -33,6 +34,7 @@ function useAutosave(serverValue: string, save: (value: string) => Promise<unkno
   const [text, setText] = useState(serverValue);
   const [status, setStatus] = useState<SaveStatus>('idle');
   const dirty = useRef(false);
+  const saving = useRef(false);
   const latest = useRef(serverValue);
   const timer = useRef<number | null>(null);
   const saveRef = useRef(save);
@@ -44,8 +46,10 @@ function useAutosave(serverValue: string, save: (value: string) => Promise<unkno
 
   const flush = useCallback(async () => {
     if (timer.current) { window.clearTimeout(timer.current); timer.current = null; }
-    if (!dirty.current) return;
+    // While a save is on its way, newer text is picked up when it lands.
+    if (!dirty.current || saving.current) return;
     const v = latest.current;
+    saving.current = true;
     setStatus('saving');
     try {
       await saveRef.current(v);
@@ -53,6 +57,8 @@ function useAutosave(serverValue: string, save: (value: string) => Promise<unkno
       else { setStatus('pending'); timer.current = window.setTimeout(() => void flush(), delay); }
     } catch {
       setStatus('error');
+    } finally {
+      saving.current = false;
     }
   }, [delay]);
 
@@ -67,6 +73,19 @@ function useAutosave(serverValue: string, save: (value: string) => Promise<unkno
 
   // Never lose a half-typed note when the page unmounts (e.g. Complete → navigate).
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); if (dirty.current) void saveRef.current(latest.current); }, []);
+
+  // Closing or reloading the tab unmounts nothing: save as soon as the tab is hidden or about to
+  // go, and let the browser ask before leaving while the text isn't saved yet.
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') void flush(); };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { if (dirty.current) { void flush(); e.preventDefault(); } };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, [flush]);
 
   return { text, onChange, status, flush, isDirty: () => dirty.current };
 }
@@ -84,7 +103,11 @@ function SaveIndicator({ status, testId }: { status: SaveStatus; testId?: string
 
 /* ---------- Session date (datetime-local, inline) ---------- */
 
+// Like the server, allow a few minutes' clock drift but no future dates (usually a mistyped year).
+const FUTURE_SLACK_MS = 5 * 60_000;
+
 function SessionDateEditor({ value, onChange, busy }: { value: string; onChange: (iso: string) => void; busy: boolean }) {
+  const { toast } = useToast();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(toLocalInputValue(value));
   useEffect(() => { if (!editing) setDraft(toLocalInputValue(value)); }, [value, editing]);
@@ -92,14 +115,15 @@ function SessionDateEditor({ value, onChange, busy }: { value: string; onChange:
   const commit = () => {
     if (draft && !Number.isNaN(new Date(draft).getTime())) {
       const iso = fromLocalInputValue(draft);
-      if (iso !== value) onChange(iso);
+      if (Date.parse(iso) > Date.now() + FUTURE_SLACK_MS) toast('A session can’t be dated in the future. Pick today or an earlier date.', 'error');
+      else if (iso !== value) onChange(iso);
     }
     setEditing(false);
   };
 
   if (!editing) {
     return (
-      <button type="button" className="cs-date-btn" onClick={() => setEditing(true)} title="Change the session date and time" aria-label={`Session date ${fmtDateTime(value)}. Change`} data-testid="session-date" disabled={busy}>
+      <button type="button" className="cs-date-btn" onClick={() => setEditing(true)} title="Change the session date and time. Sessions are numbered by date." aria-label={`Session date ${fmtDateTime(value)}. Change`} data-testid="session-date" disabled={busy}>
         <IconCalendar />
         <span>{fmtDate(value, { weekday: 'short', month: 'short', day: 'numeric' })} · {fmtTime(value)}</span>
       </button>
@@ -110,6 +134,7 @@ function SessionDateEditor({ value, onChange, busy }: { value: string; onChange:
       type="datetime-local"
       className="cs-date-input"
       value={draft}
+      max={toLocalInputValue(new Date().toISOString())}
       autoFocus
       aria-label="Session date and time"
       data-testid="session-date-input"
@@ -151,8 +176,8 @@ export function SessionWorkspacePage() {
   const deleteSession = useDeleteSession(id);
 
   const [editValues, setEditValues] = useState(false);
-  const [reviewed, setReviewed] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmEmpty, setConfirmEmpty] = useState(false);
   const [gridStatus, setGridStatus] = useState<SaveStatus>('idle');
   const [dateBusy, setDateBusy] = useState(false);
 
@@ -175,6 +200,25 @@ export function SessionWorkspacePage() {
   const focus = useAutosave(s?.focus ?? '', saveFocus);
   const notesStatus = combineStatus(notes.status, focus.status);
 
+  // Grid values, actions and the session itself save as they change; warn before leaving while any
+  // of that is still on its way to the server.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { if (qc.isMutating() > 0) e.preventDefault(); };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [qc]);
+
+  // "Review previous actions" is the one step nothing can be inferred from, so its tick is saved
+  // with the session. It shows at once and comes back from the server if the save fails.
+  const reviewed = s?.actionsReviewed ?? false;
+  const setReviewed = (value: boolean) => {
+    if (!s) return;
+    applySession({ ...s, actionsReviewed: value });
+    // The hook's input type predates `actionsReviewed`; the body is passed to the PATCH as is.
+    const body: Parameters<typeof patchSession>[0] & { actionsReviewed: boolean } = { sessionId: sid, actionsReviewed: value };
+    patchSession(body).then(applySession, (e) => { toast(errorMessage(e), 'error'); void session.refetch(); });
+  };
+
   const onRating = (category: RatingCategory, value: number | null) => {
     setGridStatus('saving');
     setRating.mutate({ sessionId: sid, category, value }, {
@@ -191,16 +235,27 @@ export function SessionWorkspacePage() {
   };
 
   const onDate = (iso: string) => {
+    const before = s?.number;
     setDateBusy(true);
     updateSession.mutate({ sessionId: sid, occurredAt: iso }, {
-      onSuccess: (data) => { applySession(data); toast('Session date updated.'); },
+      onSuccess: (data) => {
+        applySession(data);
+        toast(data.number !== before ? `Session date updated. Sessions are numbered by date, so this one is now Session ${data.number}.` : 'Session date updated.');
+      },
       onError: (e) => toast(errorMessage(e), 'error'),
       onSettled: () => setDateBusy(false),
     });
   };
 
-  const complete = () => {
+  // Typed-but-unsaved notes count too, so the delete button goes away while typing rather than
+  // when the autosave lands (which would shift "Complete session" under the pointer).
+  const isEmpty = !!s && Object.keys(s.ratings).length === 0 && Object.keys(s.progress).length === 0 && !notes.text.trim() && !focus.text.trim() && s.actionsCreated === 0;
+
+  const complete = (anyway = false) => {
     if (!s) return;
+    // An empty session would still count as a session run (and the dreamer as seen), so ask first.
+    if (isEmpty && !anyway) { setConfirmEmpty(true); return; }
+    setConfirmEmpty(false);
     updateSession.mutate(
       { sessionId: sid, status: 'completed', ...(notes.isDirty() ? { notes: notes.text } : {}), ...(focus.isDirty() ? { focus: focus.text } : {}) },
       {
@@ -217,8 +272,8 @@ export function SessionWorkspacePage() {
   };
   const remove = () => {
     deleteSession.mutate(sid, {
-      onSuccess: () => { setConfirmDelete(false); toast('Session deleted.', 'info'); nav(staffDreamerPath(id)); },
-      onError: (e) => { setConfirmDelete(false); toast(errorMessage(e), 'error'); },
+      onSuccess: () => { setConfirmDelete(false); setConfirmEmpty(false); toast('Session deleted.', 'info'); nav(staffDreamerPath(id)); },
+      onError: (e) => { setConfirmDelete(false); setConfirmEmpty(false); toast(errorMessage(e), 'error'); },
     });
   };
 
@@ -226,7 +281,6 @@ export function SessionWorkspacePage() {
   const dreamList = useMemo(() => [...(grid.data?.dreams ?? dreams.data ?? [])].sort((a, b) => a.slot - b.slot), [grid.data?.dreams, dreams.data]);
   const dreamRefs = useMemo(() => (dreams.data ?? dreamList).map((d) => ({ id: d.id, title: d.title, slot: d.slot })), [dreams.data, dreamList]);
   const allActions = actions.data ?? [];
-  const previousActions = useMemo(() => allActions.filter((a) => a.sessionId !== sid), [allActions, sid]);
   const sessionActions = useMemo(() => allActions.filter((a) => a.sessionId === sid), [allActions, sid]);
 
   // Sessions arrive oldest → newest; the previous session is the last completed one before this column.
@@ -237,25 +291,43 @@ export function SessionWorkspacePage() {
     return before[before.length - 1] ?? null;
   }, [grid.data, s]);
 
-  // Actions to review: everything still open, plus whatever was completed or set aside since the
-  // previous session — by the dreamer in between, or just now in this conversation — so there is
-  // something to celebrate and a ticked-off action stays on the list instead of vanishing.
-  const reviewActions = useMemo(() => {
-    const from = previousSession ? Date.parse(previousSession.occurredAt) : -Infinity;
-    const since = (iso: string | null) => iso != null && Date.parse(iso) > from;
-    return previousActions.filter((a) => a.status === 'active' || since(a.status === 'completed' ? a.completedAt : a.archivedAt));
-  }, [previousActions, previousSession]);
+  // The stretch of time this session looks back on: from the end of the previous session (what was
+  // done during that one belongs to it) to the end of this one — now, while it is in progress.
+  const span = useMemo(() => ({
+    from: previousSession ? Date.parse(previousSession.completedAt ?? previousSession.occurredAt) : -Infinity,
+    to: s?.status === 'completed' ? Date.parse(s.completedAt ?? s.occurredAt) : Infinity,
+  }), [previousSession, s]);
+
+  // Actions to review: what was open during this session, plus whatever was completed or set aside
+  // in its span — by the dreamer in between, or in this conversation — so there is something to
+  // celebrate and a ticked-off action stays on the list instead of vanishing. A past session opened
+  // again never shows actions chosen later or completions from later months.
+  const reviewActions = useMemo(() => allActions.filter((a) => {
+    if (a.sessionId === sid || Date.parse(a.createdAt) > span.to) return false;
+    const closedAt = a.status === 'completed' ? a.completedAt : a.status === 'archived' ? a.archivedAt : null;
+    if (closedAt == null) return true;
+    const t = Date.parse(closedAt);
+    return t > span.from && t <= span.to;
+  }), [allActions, sid, span]);
 
   const since = useMemo(() => {
-    if (!s) return { checkIns: [] as CheckIn[], reflections: [] as JournalEntry[] };
-    const from = previousSession ? new Date(previousSession.occurredAt).getTime() : -Infinity;
-    const to = s.status === 'completed' ? new Date(s.completedAt ?? s.occurredAt).getTime() : Infinity;
-    const inRange = (iso: string) => { const t = new Date(iso).getTime(); return t > from && t <= to; };
+    const inRange = (iso: string) => { const t = Date.parse(iso); return t > span.from && t <= span.to; };
     return {
       checkIns: (checkIns.data ?? []).filter((c) => inRange(c.occurredAt)),
       reflections: (journal.data ?? []).filter((j) => j.checkInId == null && j.sessionId == null && inRange(j.occurredAt)),
     };
-  }, [s, previousSession, checkIns.data, journal.data]);
+  }, [span, checkIns.data, journal.data]);
+
+  // A new conversation starts with the CARE ratings, so the cursor waits in the first empty one —
+  // on a laptop only: on a phone or tablet it would pop up the keyboard before anyone asked.
+  const autoFocused = useRef(false);
+  useEffect(() => {
+    if (autoFocused.current || !s || !grid.data || !overview.data) return;
+    autoFocused.current = true;
+    if (s.status !== 'in_progress' || !window.matchMedia('(pointer: fine)').matches) return;
+    const first = CARE_CATEGORIES.find((c) => s.ratings[c] == null);
+    if (first) gridRef.current?.querySelector<HTMLInputElement>(`input[data-cs-cell="rating-${first}"]`)?.focus({ preventScroll: true });
+  }, [s, grid.data, overview.data]);
 
   const careDone = !!s && CARE_CATEGORIES.every((c) => s.ratings[c] != null);
   const progressDone = !!s && dreamList.length > 0 && dreamList.every((d) => s.progress[d.id] != null);
@@ -264,9 +336,6 @@ export function SessionWorkspacePage() {
   const focusDone = (focus.text.trim().length > 0) || sessionActions.length > 0;
   const isCompleted = s?.status === 'completed';
   const editable = !!s && (!isCompleted || editValues);
-  // Typed-but-unsaved notes count too, so the delete button goes away while typing rather than
-  // when the autosave lands (which would shift "Complete session" under the pointer).
-  const isEmpty = !!s && Object.keys(s.ratings).length === 0 && Object.keys(s.progress).length === 0 && !notes.text.trim() && !focus.text.trim() && s.actionsCreated === 0;
 
   const scrollTo = (el: HTMLElement | null) => el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const focusCell = (cell: string) => {
@@ -336,7 +405,7 @@ export function SessionWorkspacePage() {
             {isCompleted ? (
               <Button variant="secondary" onClick={reopen} loading={updateSession.isPending} data-testid="session-reopen"><IconRotate /> Reopen</Button>
             ) : (
-              <Button variant="primary" onClick={complete} loading={updateSession.isPending} data-testid="session-complete"><IconCheck /> Complete session</Button>
+              <Button variant="primary" onClick={() => complete()} loading={updateSession.isPending} data-testid="session-complete"><IconCheck /> Complete session</Button>
             )}
             {!isCompleted && isEmpty && (
               <Button variant="ghost" icon onClick={() => setConfirmDelete(true)} aria-label="Delete this empty session" title="Delete this empty session" data-testid="session-delete"><IconTrash /></Button>
@@ -346,6 +415,66 @@ export function SessionWorkspacePage() {
       </header>
 
       <div className="cs-layout">
+        {/* ---------- sidebar (first in the DOM so the session flow leads the tab order; CSS puts it on the right) ---------- */}
+        <aside className="cs-side">
+          <Card className="cs-card cs-steps-card" pad="sm" data-testid="session-steps">
+            <div className="cs-steps-head">
+              <h3>Session flow</h3>
+              <span className="cs-steps-count tnum" data-testid="steps-count">{doneCount} of {steps.length}</span>
+            </div>
+            <ol className="cs-steps">
+              {steps.map((st) => (
+                <li key={st.n} className={`cs-step${st.done ? ' is-done' : ''}`}>
+                  <button type="button" className="cs-step-btn" onClick={st.go} data-testid={st.testId} data-done={st.done}>
+                    <span className="cs-step-mark" aria-hidden>{st.done ? <IconCheck /> : st.n}</span>
+                    <span className="cs-step-text">
+                      <span className="cs-step-label">{st.label}</span>
+                      <span className="cs-step-hint">{st.hint}</span>
+                    </span>
+                  </button>
+                  {st.manual && (
+                    <button type="button" className="cs-step-toggle" role="checkbox" aria-checked={st.done} aria-label={st.done ? 'Mark previous actions as not yet reviewed' : 'Mark previous actions as reviewed'} onClick={() => setReviewed(!reviewed)} data-testid="step-review-toggle">
+                      {st.done ? 'Undo' : 'Done'}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </Card>
+
+          <Card className="cs-card" pad="sm" data-testid="since-last-session">
+            <div className="cs-side-head">
+              <h3>Since last session</h3>
+              <span className="muted tiny">{previousSession ? `after Session ${previousSession.number} · ${fmtDate(previousSession.occurredAt)}` : 'before the first session'}</span>
+            </div>
+            <SinceList checkIns={since.checkIns} reflections={since.reflections} dreams={dreamList} loading={checkIns.isLoading || journal.isLoading} />
+          </Card>
+
+          <Card className="cs-card" pad="sm" data-testid="dreams-glance">
+            <div className="cs-side-head">
+              <h3>Dreams at a glance</h3>
+              <span className="muted tiny">{previousSession ? `S${previousSession.number} → today` : 'today'}</span>
+            </div>
+            <ul className="cs-glance">
+              {dreamList.map((d) => {
+                const now = s.progress[d.id] ?? null;
+                const prev = previousSession?.progress[d.id] ?? null;
+                return (
+                  <li key={d.id} className="cs-glance-item">
+                    <div className="cs-glance-top">
+                      <span className="cs-glance-title" title={d.title}>{d.title}</span>
+                      <span className="cs-glance-vals tnum">
+                        {prev != null && <span className="muted">{prev}% →</span>} <b>{now == null ? '–' : `${now}%`}</b>
+                      </span>
+                    </div>
+                    <Bar value={now} color="var(--gold)" label={`${d.title} progress today`} />
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+        </aside>
+
         {/* ---------- main column ---------- */}
         <div className="cs-main">
           <div ref={gridRef} className="cs-anchor" data-testid="section-grid">
@@ -366,7 +495,13 @@ export function SessionWorkspacePage() {
             />
             <SessionGridView grid={grid.data} currentSessionId={sid} editable={editable} showDeltas onRating={onRating} onProgress={onProgress} />
             <p className="cs-hint muted small" data-testid="grid-hint">
-              {editable ? <>Type a number and press <span className="kbd">Tab</span> to move down. Changes save instantly.</> : 'Reopen the session or choose “Edit values” to change a number.'}
+              {editable ? (
+                <>
+                  <span className="cs-hint-keys">Type a number, then <span className="kbd">Enter</span> or <span className="kbd">↓</span> moves down. </span>
+                  <span className="cs-hint-touch">Tap a cell to enter a number. </span>
+                  Changes save instantly.
+                </>
+              ) : 'Reopen the session or choose “Edit values” to change a number.'}
             </p>
           </Card>
           </div>
@@ -375,9 +510,11 @@ export function SessionWorkspacePage() {
           <Card className="cs-card">
             <CardHead
               title="Review previous actions"
-              sub={previousSession ? `Still open, plus anything completed or set aside since Session ${previousSession.number}.` : 'Actions already on the list — complete, set aside, or edit inline.'}
+              sub={!previousSession ? 'Actions already on the list — complete, set aside, or edit inline.'
+                : isCompleted ? `Open at the time, plus anything completed or set aside between Session ${previousSession.number} and this one.`
+                : `Still open, plus anything completed or set aside since Session ${previousSession.number}.`}
               actions={
-                <Button variant={reviewed ? 'secondary' : 'ghost'} size="sm" onClick={() => setReviewed((v) => !v)} aria-pressed={reviewed} data-testid="review-toggle">
+                <Button variant={reviewed ? 'secondary' : 'ghost'} size="sm" onClick={() => setReviewed(!reviewed)} aria-pressed={reviewed} data-testid="review-toggle">
                   <IconCheck /> {reviewed ? 'Reviewed' : 'Mark reviewed'}
                 </Button>
               }
@@ -417,68 +554,14 @@ export function SessionWorkspacePage() {
                 <TextArea id="cs-notes" className="cs-notes" value={notes.text} onChange={(e) => notes.onChange(e.target.value)} onBlur={() => void notes.flush()} rows={6} placeholder="What came up, what moved, what you noticed…" maxLength={20000} data-testid="session-notes" />
               </Field>
             </div>
+            {/* The conversation ends here, far below the header's button. */}
+            {!isCompleted && (
+              <div className="cs-notes-foot">
+                <Button variant="primary" onClick={() => complete()} loading={updateSession.isPending} data-testid="session-complete-end"><IconCheck /> Complete session</Button>
+              </div>
+            )}
           </Card>
         </div>
-
-        {/* ---------- sidebar ---------- */}
-        <aside className="cs-side">
-          <Card className="cs-card cs-steps-card" pad="sm" data-testid="session-steps">
-            <div className="cs-steps-head">
-              <h3>Session flow</h3>
-              <span className="cs-steps-count tnum" data-testid="steps-count">{doneCount} of {steps.length}</span>
-            </div>
-            <ol className="cs-steps">
-              {steps.map((st) => (
-                <li key={st.n} className={`cs-step${st.done ? ' is-done' : ''}`}>
-                  <button type="button" className="cs-step-btn" onClick={st.go} data-testid={st.testId} data-done={st.done}>
-                    <span className="cs-step-mark" aria-hidden>{st.done ? <IconCheck /> : st.n}</span>
-                    <span className="cs-step-text">
-                      <span className="cs-step-label">{st.label}</span>
-                      <span className="cs-step-hint">{st.hint}</span>
-                    </span>
-                  </button>
-                  {st.manual && (
-                    <button type="button" className="cs-step-toggle" role="checkbox" aria-checked={st.done} aria-label={st.done ? 'Mark previous actions as not yet reviewed' : 'Mark previous actions as reviewed'} onClick={() => setReviewed((v) => !v)} data-testid="step-review-toggle">
-                      {st.done ? 'Undo' : 'Done'}
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ol>
-          </Card>
-
-          <Card className="cs-card" pad="sm" data-testid="since-last-session">
-            <div className="cs-side-head">
-              <h3>Since last session</h3>
-              <span className="muted tiny">{previousSession ? `after Session ${previousSession.number} · ${fmtDate(previousSession.occurredAt)}` : 'before the first session'}</span>
-            </div>
-            <SinceList checkIns={since.checkIns} reflections={since.reflections} dreams={dreamList} loading={checkIns.isLoading || journal.isLoading} />
-          </Card>
-
-          <Card className="cs-card" pad="sm" data-testid="dreams-glance">
-            <div className="cs-side-head">
-              <h3>Dreams at a glance</h3>
-              <span className="muted tiny">{previousSession ? `S${previousSession.number} → today` : 'today'}</span>
-            </div>
-            <ul className="cs-glance">
-              {dreamList.map((d) => {
-                const now = s.progress[d.id] ?? null;
-                const prev = previousSession?.progress[d.id] ?? null;
-                return (
-                  <li key={d.id} className="cs-glance-item">
-                    <div className="cs-glance-top">
-                      <span className="cs-glance-title" title={d.title}>{d.title}</span>
-                      <span className="cs-glance-vals tnum">
-                        {prev != null && <span className="muted">{prev}% →</span>} <b>{now == null ? '–' : `${now}%`}</b>
-                      </span>
-                    </div>
-                    <Bar value={now ?? prev ?? 0} color="var(--gold)" label={`${d.title} progress`} />
-                  </li>
-                );
-              })}
-            </ul>
-          </Card>
-        </aside>
       </div>
 
       <ConfirmDialog
@@ -491,6 +574,21 @@ export function SessionWorkspacePage() {
         danger
         loading={deleteSession.isPending}
       />
+
+      <Modal
+        open={confirmEmpty}
+        onClose={() => setConfirmEmpty(false)}
+        title="Complete an empty session?"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmEmpty(false)} data-testid="complete-empty-cancel">Keep working</Button>
+            <Button variant="danger" onClick={remove} loading={deleteSession.isPending} disabled={busy} data-testid="complete-empty-delete"><IconTrash /> Delete instead</Button>
+            <Button variant="primary" onClick={() => complete(true)} loading={updateSession.isPending} disabled={busy} data-testid="complete-empty-confirm">Complete anyway</Button>
+          </>
+        }
+      >
+        <p style={{ color: 'var(--ink-2)' }}>Nothing has been recorded in this session yet. Complete it anyway? It will count as a session held. If it didn’t happen, delete it instead.</p>
+      </Modal>
     </div>
   );
 }
@@ -553,7 +651,7 @@ function SinceList({ checkIns, reflections, dreams, loading }: { checkIns: Check
         {shown.map((it) => (
           <li key={`${it.kind}-${it.item.id}`} className="cs-since-item" data-testid="since-item" data-kind={it.kind}>
             <div className="cs-since-head">
-              <SourceChip source="self" />
+              <SourceChip source="self" reflection={it.kind !== 'checkin'} />
               <time className="muted tiny tnum" dateTime={it.at} title={fmtDateTime(it.at)}>{relativeTime(it.at)}</time>
             </div>
             {it.kind === 'checkin' ? <CheckInBody c={it.item} dreamTitle={dreamTitle} /> : <div className="cs-since-body">{it.item.body}</div>}
@@ -571,7 +669,7 @@ function SinceList({ checkIns, reflections, dreams, loading }: { checkIns: Check
 
 function CheckInBody({ c, dreamTitle }: { c: CheckIn; dreamTitle: (id: number) => string }) {
   const notes: ReactNode[] = [];
-  for (const r of c.ratings) if (r.note?.body) notes.push(<div key={`rn-${r.id}`} className="cs-since-note"><span className="cs-since-note-tag" style={{ color: CATEGORY_META[r.category].color }}>{CATEGORY_META[r.category].label}</span>{r.note.body}</div>);
+  for (const r of c.ratings) if (r.note?.body) notes.push(<div key={`rn-${r.id}`} className="cs-since-note"><span className="cs-since-note-tag" style={{ color: textShade(CATEGORY_META[r.category].color) }}>{CATEGORY_META[r.category].label}</span>{r.note.body}</div>);
   for (const p of c.progress) if (p.note?.body) notes.push(<div key={`pn-${p.id}`} className="cs-since-note"><span className="cs-since-note-tag">{dreamTitle(p.dreamId)}</span>{p.note.body}</div>);
   return (
     <>

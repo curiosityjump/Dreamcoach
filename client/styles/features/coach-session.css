@@ -43,6 +43,7 @@
 .cs-delta { font-size: 11px; font-weight: 600; letter-spacing: 0; }
 .cs-delta-up { color: var(--success); }
 .cs-delta-down { color: var(--ink-2); opacity: 0.8; }
+.cs-delta-unit { font-weight: 500; }
 .cs-private { display: inline-flex; align-self: center; }
 .cs-private .chip { padding: 1px 5px; line-height: 1.4; }
 .cs-private .chip svg { width: 11px; height: 11px; }
@@ -107,14 +108,23 @@
 .cs-date-btn:hover { border-color: var(--border); background: var(--surface); color: var(--ink); }
 .cs-date-input { width: auto; min-height: 32px; padding: 3px 8px; font-size: 14px; }
 
-.cs-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
-.cs-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-.cs-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; position: sticky; top: calc(var(--nav-h) + 16px); }
+.cs-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-areas: 'main side'; gap: 20px; align-items: start; }
+.cs-main { grid-area: main; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+/* The sidebar comes first in the DOM (the session flow leads the tab order) and sits on the right.
+   It stays in view while the main column scrolls, and scrolls on its own when taller than the window. */
+.cs-side { grid-area: side; display: flex; flex-direction: column; gap: 16px; min-width: 0; position: sticky; top: calc(var(--nav-h) + 16px); max-height: calc(100vh - var(--nav-h) - 32px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 2px; margin: -2px; }
 .cs-anchor { scroll-margin-top: calc(var(--nav-h) + 14px); min-width: 0; }
 .cs-card { min-width: 0; }
 .cs-card .card-head .row { flex-wrap: wrap; justify-content: flex-end; }
 .cs-hint { margin-top: 10px; }
 .cs-hint .kbd { margin: 0 1px; }
+/* Phones and tablets have no Enter-to-move-down habit (or arrow keys): a touch hint instead. */
+.cs-hint-touch { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .cs-hint-keys { display: none; }
+  .cs-hint-touch { display: inline; }
+}
+.cs-notes-foot { display: flex; justify-content: flex-end; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .cs-composer { margin-bottom: 4px; }
 .cs-session-actions { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--border); }
 .cs-notes { line-height: 1.55; white-space: pre-wrap; }
@@ -185,11 +195,12 @@
 .cs-glance-vals b { font-weight: 600; color: var(--ink); }
 
 @media (max-width: 1040px) {
-  .cs-layout { grid-template-columns: 1fr; }
-  /* Single column: the session flow leads (above the grid) instead of trailing after the notes;
-     "Since last session" and "Dreams at a glance" follow the main column as before. */
+  .cs-layout { grid-template-columns: 1fr; grid-template-areas: none; }
+  .cs-main { grid-area: auto; }
+  /* Single column: the session flow leads (above the grid, as in the DOM); "Since last session" and
+     "Dreams at a glance" follow the main column. */
   .cs-side { position: static; display: contents; }
-  .cs-steps-card { order: -1; }
+  .cs-side > .cs-card:not(.cs-steps-card) { order: 1; }
   .cs-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 14px; }
   .cs-step:nth-child(-n + 3) { border-top: 0; }
 }
@@ -201,6 +212,12 @@
   .cs-step-label { font-size: 13px; line-height: 1.25; }
   .cs-step-hint { display: none; }
   .cs-step-toggle { padding: 0 8px; }
+}
+@media (max-width: 560px) {
+  /* Card heads stack on phones, so a title and its sub-line keep the full width. */
+  .cs-card .card-head { flex-direction: column; align-items: stretch; gap: 8px; }
+  .cs-card .card-head .row { justify-content: flex-start; }
+  .cs-notes-foot .btn { flex: 1; }
 }
 @media (max-width: 640px) {
   .cs-title { font-size: 24px; }
@@ -244,6 +261,7 @@
 .csp-dream-num { display: flex; flex-direction: column; align-items: flex-end; flex: none; }
 .csp-dream-pct { font-family: var(--font-display); font-size: 34px; font-weight: 500; line-height: 1; color: var(--ink); }
 .csp-dream-num .delta { font-size: 13px; margin-top: 2px; }
+.csp-dream-was { font-size: 13px; margin-top: 4px; color: var(--muted); white-space: nowrap; }
 .csp-dreams .bar-lg { height: 14px; }
 
 .csp-trend-empty { padding: 48px 16px; text-align: center; }

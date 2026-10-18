@@ -2,12 +2,12 @@
  * Dreamer-only control in the top bar: "Private: hidden / shown".
  * Hide = instant. Show = re-enter the account password (verified server-side).
  */
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useAuth } from '@/auth/AuthContext';
 import { Button, Field, Modal, TextInput } from '@/components/ui';
 import { IconEye, IconEyeOff, IconLock } from '@/components/icons';
 import { useToast } from '@/components/toast';
-import { errorMessage } from '@/api/client';
+import { ApiRequestError, errorMessage } from '@/api/client';
 
 export function PrivacyControl({ compact }: { compact?: boolean }) {
   const { auth, unlockPrivate, lockPrivate } = useAuth();
@@ -24,7 +24,9 @@ export function PrivacyControl({ compact }: { compact?: boolean }) {
         await lockPrivate();
         toast('Private entries hidden.', 'private');
       } catch (e) {
-        toast(errorMessage(e), 'error');
+        // They are hidden on screen whatever happened; the lock keeps retrying in the background.
+        // (A 401 means the session ended, and the sign-in page says so.)
+        if (!(e instanceof ApiRequestError && e.status === 401)) toast('Couldn’t reach the server, so private entries stay hidden on this screen. We’ll keep trying.', 'private');
       } finally {
         setBusy(false);
       }
@@ -48,8 +50,11 @@ export function UnlockDialog({ open, onClose, onUnlock }: { open: boolean; onClo
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const { auth } = useAuth();
   // Cancel, Escape and the close button all start the next attempt clean.
   const close = () => { setPassword(''); setError(null); onClose(); };
+  // Private entries came into view some other way (another tab): nothing left to ask.
+  useEffect(() => { if (open && !busy && auth?.privateUnlocked) close(); }, [open, busy, auth?.privateUnlocked]);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);

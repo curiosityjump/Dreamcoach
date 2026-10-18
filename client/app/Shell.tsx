@@ -1,20 +1,22 @@
 import { NavLink, Navigate, Outlet, useLocation } from 'react-router';
 import { useAuth } from '@/auth/AuthContext';
 import { Avatar, Dropdown, LoadingPage } from '@/components/ui';
-import { IconBrand, IconHome, IconList, IconLogout, IconPen, IconStar, IconUsers, IconWheel, IconChart, IconGrid } from '@/components/icons';
+import { IconBrand, IconHome, IconList, IconLogout, IconMessage, IconPen, IconStar, IconUsers, IconWheel, IconChart, IconGrid } from '@/components/icons';
 import { useToast } from '@/components/toast';
 import { PrivacyControl } from '@/features/shared/PrivacyControl';
 import type { Role } from '@shared/types';
 import type { ReactNode } from 'react';
 
-interface NavItem { to: string; label: string; icon: ReactNode; end?: boolean }
+/** `also`: other pages that belong under this item, so the nav still shows where you are. */
+interface NavItem { to: string; label: string; icon: ReactNode; end?: boolean; also?: string[] }
 
 const DREAMER_NAV: NavItem[] = [
-  { to: '/home', label: 'Home', icon: <IconHome /> },
+  { to: '/home', label: 'Home', icon: <IconHome />, also: ['/check-in'] },
   { to: '/dreams', label: 'Dreams', icon: <IconStar /> },
   { to: '/actions', label: 'Actions', icon: <IconList /> },
   { to: '/care', label: 'CARE', icon: <IconWheel /> },
   { to: '/journal', label: 'Journal', icon: <IconPen /> },
+  { to: '/sessions', label: 'Sessions', icon: <IconMessage /> },
 ];
 
 export function RequireAuth({ roles, children }: { roles?: Role[]; children: ReactNode }) {
@@ -36,7 +38,7 @@ function UserMenu() {
       trigger={() => (
         <button type="button" className="user-menu-btn" aria-label="Account menu" data-testid="user-menu">
           <Avatar initials={auth.user.initials} tone={auth.user.role === 'director' ? 'plum' : auth.user.role === 'coach' ? 'gold' : undefined} />
-          <span className="hide-mobile" style={{ fontWeight: 500, fontSize: 14 }}>{auth.user.name.split(' ')[0]}</span>
+          <span className="hide-mobile user-menu-name" style={{ fontWeight: 500, fontSize: 14 }}>{auth.user.name.split(' ')[0]}</span>
         </button>
       )}
     >
@@ -52,15 +54,17 @@ function UserMenu() {
 }
 
 export function DreamerShell() {
+  const { pathname } = useLocation();
+  const navClass = (n: NavItem) => ({ isActive }: { isActive: boolean }) => (isActive || n.also?.some((p) => pathname.startsWith(p)) ? 'active' : '');
   return (
     <RequireAuth roles={['dreamer']}>
       <div className="shell">
-        <header className="topbar">
+        <header className="topbar topbar-dreamer">
           <div className="topbar-inner">
-            <NavLink to="/home" className="brand"><span className="brand-mark"><IconBrand /></span><span className="hide-mobile">Dream Coach</span></NavLink>
+            <NavLink to="/home" className="brand" aria-label="Dream Coach home"><span className="brand-mark"><IconBrand /></span><span className="hide-mobile brand-name">Dream Coach</span></NavLink>
             <nav className="nav" aria-label="Main">
               {DREAMER_NAV.map((n) => (
-                <NavLink key={n.to} to={n.to} className={({ isActive }) => (isActive ? 'active' : '')}>{n.label}</NavLink>
+                <NavLink key={n.to} to={n.to} className={navClass(n)}>{n.label}</NavLink>
               ))}
             </nav>
             <div className="topbar-right">
@@ -72,7 +76,7 @@ export function DreamerShell() {
         <main className="grow"><Outlet /></main>
         <nav className="mobile-nav" aria-label="Main">
           {DREAMER_NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} className={({ isActive }) => (isActive ? 'active' : '')}>{n.icon}<span>{n.label}</span></NavLink>
+            <NavLink key={n.to} to={n.to} className={navClass(n)}>{n.icon}<span>{n.label}</span></NavLink>
           ))}
         </nav>
       </div>
@@ -95,7 +99,7 @@ export function StaffShell() {
       <div className="shell">
         <header className="topbar wide">
           <div className="topbar-inner">
-            <NavLink to={isDirector ? '/director' : '/coach'} className="brand"><span className="brand-mark"><IconBrand /></span><span className="hide-mobile">Dream Coach</span></NavLink>
+            <NavLink to={isDirector ? '/director' : '/coach'} className="brand" aria-label="Dream Coach home"><span className="brand-mark"><IconBrand /></span><span className="hide-mobile">Dream Coach</span></NavLink>
             <nav className="nav" aria-label="Main">
               {nav.map((n) => (
                 <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => (isActive ? 'active' : '')}>{n.label}</NavLink>

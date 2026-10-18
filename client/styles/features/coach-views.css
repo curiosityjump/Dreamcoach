@@ -37,6 +37,10 @@
 .cv-table th { white-space: nowrap; }
 .cv-table th.cv-th-wrap { white-space: normal; max-width: 72px; line-height: 1.25; }
 .cv-th { display: inline-flex; align-items: center; gap: 4px; }
+/* Sortable headers are buttons, so the keyboard reaches them; they keep the header's look. */
+.cv-sort-btn { width: 100%; min-height: 28px; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; }
+.cv-sort-btn:hover { color: var(--ink); }
+.cv-sort-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cv-sort-icon { width: 14px; height: 14px; transition: transform 0.15s; }
 .cv-sort-icon.is-asc { transform: rotate(180deg); }
 .cv-table th, .cv-table td { padding-left: 8px; padding-right: 8px; }
@@ -212,6 +216,13 @@
 /* ==========================================================================
    Actions
    ========================================================================== */
+/* Phones: the filter gets its own full-width row under the title instead of squeezing it. */
+@media (max-width: 560px) {
+  .cv-actions-card .card-head { flex-direction: column; align-items: stretch; }
+  .cv-actions-card .card-head .row > * { flex: 1; }
+  .cv-actions-card .segmented { width: 100%; }
+  .cv-actions-card .segmented button { flex: 1; padding: 6px 4px; white-space: nowrap; }
+}
 .cv-seg-count { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--surface-3); color: var(--muted); font-size: 11.5px; font-weight: 600; text-align: center; margin-left: 2px; }
 .segmented button[aria-pressed='true'] .cv-seg-count { background: var(--accent-soft); color: var(--accent); }
 

@@ -50,7 +50,8 @@ export interface ActionComposerProps {
   /** Preselect a dream or category (e.g. from a dream detail page). */
   defaultDreamId?: number | null;
   defaultCategory?: ActionItem['category'];
-  onDone?: (action: ActionItem) => void;
+  /** Called once the action is saved (the reply is null for a private action while private entries are hidden). */
+  onDone?: (action: ActionItem | null) => void;
   onCancel?: () => void;
   autoFocus?: boolean;
 }
@@ -155,40 +156,53 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
   const [category, setCategory] = useState<CareCategory | null>(defaultCategory ?? null);
   const [isPrivate, setIsPrivate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Saves still on their way: several can be, since the next action can be typed straight away.
+  const [saving, setSaving] = useState(0);
 
   const trimmed = title.trim();
-  const canSubmit = trimmed.length > 0 && !create.isPending;
+  const canSubmit = trimmed.length > 0;
+
+  const fill = (d: { title: string; details: string; showDetails: boolean; dreamId: number | null; category: CareCategory | null; isPrivate: boolean }) => {
+    setTitle(d.title);
+    setDetails(d.details);
+    setShowDetails(d.showDetails);
+    setDreamId(d.dreamId);
+    setCategory(d.category);
+    setIsPrivate(d.isPrivate);
+  };
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
     if (!canSubmit) return;
+    // The form clears at once, so whatever is typed next starts the next action instead of being lost
+    // while this one saves. If the save fails, the text comes back unless something new is there by then.
+    const draft = { title, details, showDetails, dreamId, category, isPrivate };
     setError(null);
-    create.mutate(
-      {
+    fill({ title: '', details: '', showDetails: false, dreamId: defaultDreamId ?? null, category: defaultCategory ?? null, isPrivate: false });
+    setSaving((n) => n + 1);
+    create
+      .mutateAsync({
         title: trimmed,
         details: details.trim() || undefined,
         dreamId,
         category,
         sessionId: sessionId ?? undefined,
         ...(mode === 'dreamer' ? { isPrivate } : {}),
-      },
-      {
-        onSuccess: (action) => {
-          setTitle('');
-          setDetails('');
-          setShowDetails(false);
-          setDreamId(defaultDreamId ?? null);
-          setCategory(defaultCategory ?? null);
-          setIsPrivate(false);
-          if (mode === 'dreamer' && action.isPrivate) toast(auth?.privateUnlocked ? 'Added as a private action — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
+      })
+      .then(
+        (action) => {
+          if (mode === 'dreamer' && isPrivate) toast(auth?.privateUnlocked ? 'Added as a private action — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
           else toast('Action added.');
           onDone?.(action);
-          // Ready for the next one. (The title is read-only, not disabled, while saving: a disabled field loses focus.)
-          titleRef.current?.focus();
         },
-        onError: (err) => setError(errorMessage(err)),
-      },
-    );
+        (err) => {
+          setError(errorMessage(err));
+          if (!titleRef.current?.value) fill(draft);
+        },
+      )
+      .finally(() => setSaving((n) => n - 1));
+    // Ready for the next one (after a click on Add, too).
+    titleRef.current?.focus();
   };
 
   const onDetailsKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -197,7 +211,7 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
   };
 
   return (
-    <form className={`da-composer da-composer-${mode}`} onSubmit={submit} data-testid="action-composer" aria-busy={create.isPending || undefined}>
+    <form className={`da-composer da-composer-${mode}`} onSubmit={submit} data-testid="action-composer" aria-busy={saving > 0 || undefined}>
       <div className="da-composer-main">
         <input
           ref={titleRef}
@@ -210,11 +224,11 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
           aria-label="Action title"
           maxLength={300}
           autoFocus={autoFocus}
-          readOnly={create.isPending}
           autoComplete="off"
           data-testid="action-title-input"
         />
-        <Button type="submit" variant="primary" disabled={!canSubmit} loading={create.isPending} data-testid="add-action">
+        {/* Only an empty form shows the spinner: with the next title typed, Add (and Enter) must still work. */}
+        <Button type="submit" variant="primary" disabled={!canSubmit} loading={saving > 0 && !canSubmit} data-testid="add-action">
           <IconPlus /> Add
         </Button>
       </div>
@@ -228,22 +242,21 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
           rows={2}
           maxLength={4000}
           autoFocus
-          disabled={create.isPending}
           data-testid="action-details-input"
         />
       )}
       <div className="da-composer-options">
         {!showDetails && (
-          <button type="button" className="da-text-btn" onClick={() => setShowDetails(true)} disabled={create.isPending} data-testid="action-details-toggle">
+          <button type="button" className="da-text-btn" onClick={() => setShowDetails(true)} data-testid="action-details-toggle">
             <IconPlus /> Add details
           </button>
         )}
-        <LinkSelects dreams={sorted} labels={labels} dreamId={dreamId} category={category} onDreamId={setDreamId} onCategory={setCategory} disabled={create.isPending} compact idPrefix={`${id}-link`} />
+        <LinkSelects dreams={sorted} labels={labels} dreamId={dreamId} category={category} onDreamId={setDreamId} onCategory={setCategory} compact idPrefix={`${id}-link`} />
         {mode === 'dreamer' && (
           <span data-testid="action-privacy-toggle"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>
         )}
         {onCancel && (
-          <Button type="button" variant="ghost" size="sm" className="da-composer-cancel" onClick={onCancel} disabled={create.isPending} data-testid="action-cancel">
+          <Button type="button" variant="ghost" size="sm" className="da-composer-cancel" onClick={onCancel} disabled={saving > 0} data-testid="action-cancel">
             Cancel
           </Button>
         )}

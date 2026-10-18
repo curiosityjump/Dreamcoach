@@ -83,11 +83,13 @@
 .dd-entry-body { display: flex; flex-direction: column; gap: 4px; }
 .dd-entry-meta { gap: 8px; row-gap: 4px; }
 .dd-entry .note-block { margin-top: 6px; }
-.dd-note-lock { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; font-size: 11.5px; color: var(--private); vertical-align: middle; white-space: nowrap; }
+.dd-note-lock { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; font-size: 11.5px; font-weight: 600; color: var(--private); vertical-align: middle; white-space: nowrap; }
 .dd-note-lock svg { width: 11px; height: 11px; }
 .dd-menu-danger { color: var(--danger); }
 .dd-menu-danger svg { color: var(--danger); }
 .dd-entry .user-menu .menu { min-width: 240px; }
+.dd-hidden-note-body { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.dd-hidden-note-body .btn svg { width: 16px; height: 16px; margin-top: 0; }
 
 /* Actions + reflections */
 .dd-composer-wrap { padding: 12px; border: 1px dashed var(--border-strong); border-radius: var(--r-md); background: var(--surface-2); }

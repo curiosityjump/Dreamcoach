@@ -77,6 +77,8 @@ interface JournalRow {
   a_role: Role;
   created_at: string;
   updated_at: string;
+  /** 1 when attached to a private rating / progress update. */
+  parent_private: number;
 }
 
 interface ActionRow {
@@ -150,7 +152,7 @@ function mapProgress(r: ProgressRow): ProgressEntry {
   };
 }
 
-export function mapJournal(r: JournalRow): JournalEntry {
+export function mapJournal(r: JournalRow, scope: Scope): JournalEntry {
   return {
     id: r.id,
     dreamerId: r.dreamer_id,
@@ -167,6 +169,7 @@ export function mapJournal(r: JournalRow): JournalEntry {
     author: { id: r.author_id, name: r.a_name, role: r.a_role },
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    ...(scope.includePrivate ? { parentPrivate: !!r.parent_private } : {}),
   };
 }
 
@@ -212,7 +215,8 @@ const PROGRESS_SELECT = `
   ${NOTE_JOIN('progress_id')}`;
 
 const JOURNAL_SELECT = `
-  SELECT j.*, a.name AS a_name, a.role AS a_role
+  SELECT j.*, a.name AS a_name, a.role AS a_role,
+         COALESCE((SELECT r.is_private FROM ratings r WHERE r.id = j.rating_id), (SELECT p.is_private FROM dream_progress p WHERE p.id = j.progress_id), 0) AS parent_private
   FROM journal_entries j
   JOIN users a ON a.id = j.author_id`;
 
@@ -226,6 +230,12 @@ export const JOURNAL_VISIBLE = (alias = 'j') => `(
   AND (${alias}.rating_id IS NULL OR EXISTS (SELECT 1 FROM ratings r WHERE r.id = ${alias}.rating_id AND (r.is_private = 0 OR ? = 1)))
   AND (${alias}.progress_id IS NULL OR EXISTS (SELECT 1 FROM dream_progress p WHERE p.id = ${alias}.progress_id AND (p.is_private = 0 OR ? = 1)))
 )`;
+
+/** A journal row the dreamer wrote themselves (not a coach's session reflection). Takes no params. */
+export const WRITTEN_BY_DREAMER = (alias = 'j') => `${alias}.author_id = (SELECT dd.user_id FROM dreamers dd WHERE dd.id = ${alias}.dreamer_id)`;
+
+/** Same-moment ratings (one check-in) keep CARE order, since ids carry no order. */
+const CATEGORY_ORDER = `CASE x.category ${RATING_CATEGORIES.map((c, i) => `WHEN '${c}' THEN ${i}`).join(' ')} END`;
 
 const ACTION_SELECT = `
   SELECT x.*, u.name AS cb_name, u.role AS cb_role
@@ -292,7 +302,7 @@ export function listDreams(db: DB, scope: Scope): Dream[] {
   const progress = db
     .prepare(
       `SELECT dream_id, value, occurred_at, is_private FROM dream_progress
-       WHERE dreamer_id = ? AND (is_private = 0 OR ? = 1) ORDER BY occurred_at DESC, id DESC`,
+       WHERE dreamer_id = ? AND (is_private = 0 OR ? = 1) ORDER BY occurred_at DESC, created_at DESC, id DESC`,
     )
     .all(scope.dreamerId, INC(scope)) as { dream_id: number; value: number; occurred_at: string; is_private: number }[];
   const actions = db
@@ -336,7 +346,7 @@ export function listRatings(db: DB, scope: Scope, opts: { category?: RatingCateg
   if (opts.to) { where.push('x.occurred_at <= ?'); params.push(opts.to); }
   if (opts.sessionId != null) { where.push('x.session_id = ?'); params.push(opts.sessionId); }
   if (opts.checkInId != null) { where.push('x.check_in_id = ?'); params.push(opts.checkInId); }
-  const rows = db.prepare(`${RATING_SELECT} WHERE ${where.join(' AND ')} ORDER BY x.occurred_at ASC, x.id ASC`).all(...params) as RatingRow[];
+  const rows = db.prepare(`${RATING_SELECT} WHERE ${where.join(' AND ')} ORDER BY x.occurred_at ASC, ${CATEGORY_ORDER}, x.created_at ASC, x.id ASC`).all(...params) as RatingRow[];
   return rows.map(mapRating);
 }
 
@@ -349,7 +359,7 @@ export function latestRatings(db: DB, scope: Scope): Partial<Record<RatingCatego
   const rows = db
     .prepare(
       `SELECT category, value, occurred_at, source, is_private FROM ratings
-       WHERE dreamer_id = ? AND (is_private = 0 OR ? = 1) ORDER BY occurred_at DESC, id DESC`,
+       WHERE dreamer_id = ? AND (is_private = 0 OR ? = 1) ORDER BY occurred_at DESC, created_at DESC, id DESC`,
     )
     .all(scope.dreamerId, INC(scope)) as { category: RatingCategory; value: number; occurred_at: string; source: 'session' | 'self'; is_private: number }[];
   const out: Partial<Record<RatingCategory, LatestRating>> = {};
@@ -368,7 +378,7 @@ export function listProgress(db: DB, scope: Scope, opts: { dreamId?: number; ses
   if (opts.dreamId != null) { where.push('x.dream_id = ?'); params.push(opts.dreamId); }
   if (opts.sessionId != null) { where.push('x.session_id = ?'); params.push(opts.sessionId); }
   if (opts.checkInId != null) { where.push('x.check_in_id = ?'); params.push(opts.checkInId); }
-  const rows = db.prepare(`${PROGRESS_SELECT} WHERE ${where.join(' AND ')} ORDER BY x.occurred_at ASC, x.id ASC`).all(...params) as ProgressRow[];
+  const rows = db.prepare(`${PROGRESS_SELECT} WHERE ${where.join(' AND ')} ORDER BY x.occurred_at ASC, x.created_at ASC, x.id ASC`).all(...params) as ProgressRow[];
   return rows.map(mapProgress);
 }
 
@@ -395,7 +405,7 @@ export function listJournal(
   if (opts.checkInId != null) { where.push('j.check_in_id = ?'); params.push(opts.checkInId); }
   if (opts.sessionId != null) { where.push('j.session_id = ?'); params.push(opts.sessionId); }
   const rows = db.prepare(`${JOURNAL_SELECT} WHERE ${where.join(' AND ')} ORDER BY j.occurred_at DESC, j.id DESC`).all(...params) as JournalRow[];
-  return rows.map(mapJournal);
+  return rows.map((r) => mapJournal(r, scope));
 }
 
 export function getJournalEntry(db: DB, scope: Scope, id: number): JournalEntry | null {
@@ -440,20 +450,15 @@ function mapSession(db: DB, scope: Scope, s: SessionRow, number: number): Coachi
        FROM actions WHERE session_id = ? AND dreamer_id = ? AND (is_private = 0 OR ? = 1)`,
     )
     .get(s.id, s.dreamer_id, INC(scope)) as { created: number | null; completed: number | null };
+  // The last row per cell wins (the query lists private rows first), and with it whether the value shown is private.
   const r: Partial<Record<RatingCategory, number>> = {};
-  const privateRatings: RatingCategory[] = [];
-  for (const row of ratings) {
-    r[row.category] = row.value;
-    if (row.is_private) privateRatings.push(row.category);
-    else { const i = privateRatings.indexOf(row.category); if (i >= 0) privateRatings.splice(i, 1); }
-  }
+  const ratingPrivate = new Map<RatingCategory, boolean>();
+  for (const row of ratings) { r[row.category] = row.value; ratingPrivate.set(row.category, !!row.is_private); }
+  const privateRatings = [...ratingPrivate].filter(([, priv]) => priv).map(([cat]) => cat);
   const p: Record<number, number> = {};
-  const privateProgress: number[] = [];
-  for (const row of progress) {
-    p[row.dream_id] = row.value;
-    if (row.is_private) privateProgress.push(row.dream_id);
-    else { const i = privateProgress.indexOf(row.dream_id); if (i >= 0) privateProgress.splice(i, 1); }
-  }
+  const progressPrivate = new Map<number, boolean>();
+  for (const row of progress) { p[row.dream_id] = row.value; progressPrivate.set(row.dream_id, !!row.is_private); }
+  const privateProgress = [...progressPrivate].filter(([, priv]) => priv).map(([dreamId]) => dreamId);
   return {
     id: s.id,
     dreamerId: s.dreamer_id,
@@ -461,7 +466,8 @@ function mapSession(db: DB, scope: Scope, s: SessionRow, number: number): Coachi
     number,
     status: s.status,
     occurredAt: s.occurred_at,
-    completedAt: s.completed_at,
+    // A reopened session keeps its original completion time for when it is completed again.
+    completedAt: s.status === 'completed' ? s.completed_at : null,
     notes: s.notes,
     focus: s.focus,
     actionsReviewed: !!s.actions_reviewed,
@@ -535,21 +541,22 @@ export function getSnapshot(db: DB, scope: Scope): Snapshot {
   const last = completed[completed.length - 1] ?? null;
   const open = sessions.find((s) => s.status === 'in_progress') ?? null;
   // Self activity: only visible entries count. A check-in counts when any of its entries is visible
-  // (the same rule as listCheckIns); a reflection is a standalone self journal entry outside a check-in.
+  // (the same rule as listCheckIns); a reflection is a standalone entry the dreamer wrote outside a check-in.
   const lastCheckIn = listCheckIns(db, scope, { limit: 1 })[0]?.occurredAt ?? null;
   const lastReflection = (
     db
       .prepare(
         `SELECT MAX(j.occurred_at) AS t FROM journal_entries j
-         WHERE j.dreamer_id = ? AND j.source = 'self' AND j.check_in_id IS NULL AND j.rating_id IS NULL AND j.progress_id IS NULL AND ${JOURNAL_VISIBLE('j')}`,
+         WHERE j.dreamer_id = ? AND ${WRITTEN_BY_DREAMER('j')} AND j.check_in_id IS NULL AND j.rating_id IS NULL AND j.progress_id IS NULL AND ${JOURNAL_VISIBLE('j')}`,
       )
       .get(scope.dreamerId, inc, inc, inc) as { t: string | null }
   ).t;
   const lastSelfActivity: Snapshot['lastSelfActivity'] =
     lastReflection && (!lastCheckIn || lastReflection > lastCheckIn) ? { at: lastReflection, kind: 'reflection' } : lastCheckIn ? { at: lastCheckIn, kind: 'check-in' } : null;
   const checkIns30 = listCheckIns(db, scope, { from: d30 }).length;
+  // The dreamer's own words in the last 30 days: reflections and notes, on self and session entries alike.
   const journal30 = db
-    .prepare(`SELECT COUNT(*) AS n FROM journal_entries j WHERE j.dreamer_id = ? AND j.source = 'self' AND j.occurred_at >= ? AND ${JOURNAL_VISIBLE('j')}`)
+    .prepare(`SELECT COUNT(*) AS n FROM journal_entries j WHERE j.dreamer_id = ? AND ${WRITTEN_BY_DREAMER('j')} AND j.occurred_at >= ? AND ${JOURNAL_VISIBLE('j')}`)
     .get(scope.dreamerId, d30, inc, inc, inc) as { n: number };
   return {
     latest: latestRatings(db, scope),

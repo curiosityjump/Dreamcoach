@@ -127,7 +127,7 @@ function OverviewTab({ id, overview }: { id: number; overview: DreamerOverview }
                 {d.progress != null && d.progressAt != null && (
                   <BaselineDelta
                     value={d.progress}
-                    suffix="%"
+                    suffix=" pts"
                     base={sessionBaseline(allSessions, d.progressAt, allSessions.some((s) => s.occurredAt === d.progressAt && s.progress[d.id] === d.progress), (s) => s.progress[d.id])}
                   />
                 )}
@@ -203,7 +203,7 @@ function OverviewTab({ id, overview }: { id: number; overview: DreamerOverview }
             <div><dt>Last session</dt><dd>{snapshot.lastSession ? <>Session {snapshot.lastSession.number} <span className="muted">· {fmtDate(snapshot.lastSession.occurredAt)}</span></> : <span className="muted">None yet</span>}</dd></div>
             <div><dt>Last self check-in</dt><dd>{snapshot.lastSelfCheckIn ? relativeTime(snapshot.lastSelfCheckIn) : <span className="muted">None yet</span>}</dd></div>
             <div><dt>Self check-ins <span className="muted">· 30 days</span></dt><dd className="tnum">{snapshot.selfCheckIns30d}</dd></div>
-            <div><dt>Reflections <span className="muted">· 30 days</span></dt><dd className="tnum">{snapshot.journalEntries30d}</dd></div>
+            <div><dt>Notes &amp; reflections <span className="muted">· 30 days</span></dt><dd className="tnum">{snapshot.journalEntries30d}</dd></div>
             <div><dt>Actions completed <span className="muted">· 30 days</span></dt><dd className="tnum">{snapshot.completedActions30d}</dd></div>
             <div><dt>Active actions</dt><dd className="tnum">{snapshot.activeActions}</dd></div>
           </dl>
@@ -278,7 +278,7 @@ function SessionDetail({ id, session: s, prev, dreams, actions }: { id: number; 
                 <li key={d.id}>
                   <span className="cv-progress-label"><span className="cv-eyebrow">{d.slotLabel}</span><span className="truncate" title={d.title}>{d.title}</span></span>
                   <Bar value={v ?? null} label={`${d.title}: ${v ?? 0}%`} />
-                  <span className="cv-progress-val tnum">{v == null ? '–' : `${v}%`}{v != null && pv != null && <Delta value={v - pv} digits={0} suffix="%" />}</span>
+                  <span className="cv-progress-val tnum">{v == null ? '–' : `${v}%`}{v != null && pv != null && <Delta value={v - pv} digits={0} suffix=" pts" />}</span>
                 </li>
               );
             })}
@@ -394,7 +394,7 @@ function ActionsTab({ id, dreams }: { id: number; dreams: Dream[] }) {
   const seg = (s: ActionFilter, label: string) => ({ value: s, label: <>{label} <span className="cv-seg-count tnum">{count(s)}</span></> });
   const [emptyTitle, emptyBody] = ACTION_EMPTY[filter];
   return (
-    <Card>
+    <Card className="cv-actions-card">
       <CardHead
         title="Actions"
         sub="Steps chosen together in sessions or by the dreamer between them. Setting one aside is a neutral act."
@@ -677,7 +677,7 @@ export function StaffDreamerPage() {
             <h1 className="cv-head-name">{dreamer.name} <StatusChip status={dreamer.status} /></h1>
             {dreamer.about && <p className="cv-head-about">{dreamer.about}</p>}
             <div className="cv-head-meta">
-              <span><IconUsers /> {dreamer.coach ? `Coached by ${dreamer.coach.name}` : 'No coach assigned yet'}</span>
+              <span><IconUsers /> {dreamer.coach ? `Coached by ${dreamer.coach.name}` : 'No coach assigned'}</span>
               <span>{dreamer.program.name}</span>
               <span>Joined {fmtDay(dreamer.joinedOn)}</span>
             </div>

@@ -14,7 +14,7 @@ import { IconCalendar, IconInfo, IconStar, IconX } from '@/components/icons';
 import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, isRatingCategory, type RatingCategory } from '@shared/care';
 import type { CheckInInput, Dream, LatestRating } from '@shared/types';
 import { fmtDate, fromLocalInputValue, toLocalInputValue } from '@/lib/format';
-import { catVars, savedToast } from './CareShared';
+import { NotePrivateWith, catVars, savedToast } from './CareShared';
 
 interface RatingDraft { value: number | null; note: string; isPrivate: boolean; notePrivate: boolean }
 interface ProgressDraft { value: number; note: string; isPrivate: boolean; notePrivate: boolean }
@@ -106,14 +106,15 @@ function CheckInForm({ latest, dreams }: { latest: Partial<Record<RatingCategory
       input.ratings = completeRatings.map((c) => {
         const r = ratings[c]!;
         const note = r.note.trim();
-        return { category: c, value: r.value!, isPrivate: r.isPrivate, ...(note ? { note, notePrivate: r.notePrivate } : {}) };
+        // A note on a private rating or progress update is private too.
+        return { category: c, value: r.value!, isPrivate: r.isPrivate, ...(note ? { note, notePrivate: r.notePrivate || r.isPrivate } : {}) };
       });
     }
     if (chosenDreams.length) {
       input.progress = chosenDreams.map((d) => {
         const p = progress[d.id]!;
         const note = p.note.trim();
-        return { dreamId: d.id, value: p.value, isPrivate: p.isPrivate, ...(note ? { note, notePrivate: p.notePrivate } : {}) };
+        return { dreamId: d.id, value: p.value, isPrivate: p.isPrivate, ...(note ? { note, notePrivate: p.notePrivate || p.isPrivate } : {}) };
       });
     }
     if (reflectionText) input.reflection = { body: reflectionText, isPrivate: reflectionPrivate };
@@ -284,7 +285,7 @@ function RatingCard({ category, draft, last, onChange, onRemove, disabled }: {
       <TextArea value={draft.note} onChange={(e) => onChange({ note: e.target.value })} placeholder="Add a note (optional)" aria-label={`${m.label} note`} rows={2} maxLength={4000} disabled={disabled} data-testid={`checkin-note-${category}`} />
       <div className="row-wrap dc-privacy-row">
         <span data-testid={`checkin-privacy-${category}`}><PrivacyToggle size="sm" value={draft.isPrivate} onChange={(v) => onChange({ isPrivate: v })} labels={['Rating shared with coach', 'Rating private']} /></span>
-        {hasNote && <span data-testid={`checkin-note-privacy-${category}`}><PrivacyToggle size="sm" value={draft.notePrivate} onChange={(v) => onChange({ notePrivate: v })} labels={['Note shared with coach', 'Note private']} /></span>}
+        {hasNote && <span data-testid={`checkin-note-privacy-${category}`}>{draft.isPrivate ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={draft.notePrivate} onChange={(v) => onChange({ notePrivate: v })} labels={['Note shared with coach', 'Note private']} />}</span>}
       </div>
     </Card>
   );
@@ -315,12 +316,12 @@ function ProgressCard({ dream, draft, onChange, onRemove, disabled }: {
       <Bar value={draft.value} large label={`${dream.title} progress`} />
       <PercentInput value={draft.value} onChange={(v) => onChange({ value: v })} label={`${dream.title} progress`} disabled={disabled} />
       <div className="row-wrap dci-under">
-        <span className="small tnum"><b>{draft.value}%</b>{diff != null && <span className="muted"> · {diff === 0 ? 'same as before' : `${diff > 0 ? '+' : '−'}${Math.abs(diff)} points`}</span>}</span>
+        <span className="small tnum"><b>{draft.value}%</b>{diff != null && <span className="muted"> · {diff === 0 ? 'same as before' : `${diff > 0 ? '+' : '−'}${Math.abs(diff)} pts`}</span>}</span>
       </div>
       <TextArea value={draft.note} onChange={(e) => onChange({ note: e.target.value })} placeholder="What moved, or what got in the way? (optional)" aria-label={`${dream.title} note`} rows={2} maxLength={4000} disabled={disabled} data-testid={`checkin-dream-note-${dream.id}`} />
       <div className="row-wrap dc-privacy-row">
         <span data-testid={`checkin-dream-privacy-${dream.id}`}><PrivacyToggle size="sm" value={draft.isPrivate} onChange={(v) => onChange({ isPrivate: v })} labels={['Progress shared with coach', 'Progress private']} /></span>
-        {hasNote && <span data-testid={`checkin-dream-note-privacy-${dream.id}`}><PrivacyToggle size="sm" value={draft.notePrivate} onChange={(v) => onChange({ notePrivate: v })} labels={['Note shared with coach', 'Note private']} /></span>}
+        {hasNote && <span data-testid={`checkin-dream-note-privacy-${dream.id}`}>{draft.isPrivate ? <NotePrivateWith parent="update" /> : <PrivacyToggle size="sm" value={draft.notePrivate} onChange={(v) => onChange({ notePrivate: v })} labels={['Note shared with coach', 'Note private']} />}</span>}
       </div>
     </Card>
   );

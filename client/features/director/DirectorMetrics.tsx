@@ -89,7 +89,7 @@ export function summaryStatGroups(s: CoachSummary): { label: string; items: Stat
     {
       label: 'Caseload & participation',
       items: [
-        { key: 'dreamers', label: 'Dreamers', value: s.activeDreamers, sub: s.dreamers === s.activeDreamers ? 'all active' : `active of ${s.dreamers} in total` },
+        { key: 'dreamers', label: 'Dreamers', value: s.activeDreamers, sub: s.dreamers === 0 ? 'no dreamers assigned' : s.dreamers === s.activeDreamers ? 'all active' : `active of ${s.dreamers} in total` },
         { key: 'sessions', label: 'Sessions run (30d)', value: s.sessionsLast30d, sub: `${s.sessionsTotal} in the program · counted for the coach who ran them` },
         { key: 'participation', label: 'Participation (45d)', value: pct(s.participation45d), sub: 'of active dreamers had a session in the last 45 days' },
         { key: 'engaged', label: 'Engaged between sessions (30d)', value: plural(s.engagedBetweenSessions30d, 'dreamer'), sub: `of ${s.activeDreamers} active, with a self check-in or reflection in the last 30 days` },
@@ -102,7 +102,7 @@ export function summaryStatGroups(s: CoachSummary): { label: string; items: Stat
         { key: 'dream-progress', label: 'Avg dream progress', value: pct(s.avgDreamProgress), sub: 'latest progress across all dreams' },
         { key: 'commitment', label: 'Avg commitment / satisfaction', value: <>{num(s.avgCommitment)} <span className="dir-slash">/</span> {num(s.avgSatisfaction)}</>, sub: 'latest ratings, 0–10' },
         { key: 'care-change', label: 'CARE change since first session', value: <CareChangeValue change={s.careChange} size="lg" />, sub: s.careChange ? `n = ${plural(s.careChange.n, 'dreamer')} with 2+ sessions` : 'needs dreamers with 2+ sessions' },
-        { key: 'follow-through', label: 'Follow-through', value: s.followThrough ? pct(s.followThrough.rate) : '—', sub: s.followThrough ? `of ${plural(s.followThrough.n, 'shared action')} older than 30 days completed` : 'no actions older than 30 days yet' },
+        { key: 'follow-through', label: 'Follow-through', value: s.followThrough ? pct(s.followThrough.rate) : '—', sub: s.followThrough ? `of ${plural(s.followThrough.n, 'action')} older than 30 days completed` : 'no actions older than 30 days yet' },
       ],
     },
   ];
@@ -127,8 +127,8 @@ const DEFINITIONS: { term: string; def: string }[] = [
   { term: 'CARE change', def: 'For each dreamer with two or more completed sessions that rated all four CARE areas: the latest session’s CARE average minus the first session’s. Shown as the mean, with n = dreamers counted.' },
   { term: 'Avg commitment / satisfaction', def: 'Mean of each dreamer’s most recent Commitment and Satisfaction ratings (0–10).' },
   { term: 'Avg dream progress', def: 'Mean of the latest recorded progress of every dream (0–100%). Dreams achieved counts dreams marked as achieved.' },
-  { term: 'Follow-through', def: 'Among shared actions created more than 30 days ago, the share completed. Actions that were set aside are reconsidered priorities, not failures — they simply are not counted as completed.' },
-  { term: 'Month trends', def: 'Entries are counted in the month they were recorded. The CARE and dream-progress trends use coaching-session entries only, so self check-ins never move those lines.' },
+  { term: 'Follow-through', def: 'Among actions created more than 30 days ago, the share completed. Actions that were set aside are reconsidered priorities, not failures — they simply are not counted as completed.' },
+  { term: 'Month trends', def: 'Entries are counted in the month they were recorded. The CARE and dream-progress lines average the coaching-session entries recorded that month, whoever had a session, so self check-ins never move them. A dashed line marks a month when dreamers joined: their starting values can lower that month’s average although nobody went backwards. The Avg dream progress figure uses each dream’s latest value, so it can differ from the line’s last point.' },
 ];
 
 export function HowCalculated() {

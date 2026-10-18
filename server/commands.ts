@@ -1,9 +1,12 @@
 /**
  * Write-side operations. Each takes a Scope so ownership and visibility rules are
- * enforced consistently: a viewer may only modify rows they can see.
+ * enforced consistently: a viewer may only modify rows they can see. What a write returns
+ * is read back through the same Scope, so it is exactly what a GET would show (null when
+ * the written row is not visible, e.g. a private entry saved while private entries are hidden).
  */
 import type { DB } from './db.ts';
 import { nowIso } from './db.ts';
+import { randomId } from './ids.ts';
 import type { Scope } from './privacy.ts';
 import { INC } from './privacy.ts';
 import * as q from './queries.ts';
@@ -19,8 +22,23 @@ export class HttpError extends Error {
 const clampRating = (v: number) => Math.max(0, Math.min(10, Math.round(v)));
 const clampProgress = (v: number) => Math.max(0, Math.min(100, Math.round(v)));
 
+/** Entries and sessions record what already happened; a few minutes of clock difference are tolerated. */
+const FUTURE_SLACK_MS = 5 * 60 * 1000;
+function pastDate(input: string): string {
+  const t = new Date(input).getTime();
+  if (Number.isNaN(t)) throw new HttpError(400, 'Invalid date.', 'invalid');
+  if (t > Date.now() + FUTURE_SLACK_MS) throw new HttpError(400, 'That date is still to come. Choose a date and time up to now.', 'invalid');
+  return new Date(t).toISOString();
+}
+
 function assertOwner(scope: Scope, what = 'this') {
   if (!scope.isOwner) throw new HttpError(403, `Only the dreamer can change ${what}.`, 'forbidden');
+}
+
+/** A dream tag must be one of this dreamer's dreams. */
+function assertOwnDream(db: DB, scope: Scope, dreamId: number | null | undefined) {
+  if (dreamId == null) return;
+  if (!db.prepare('SELECT 1 FROM dreams WHERE id = ? AND dreamer_id = ?').get(dreamId, scope.dreamerId)) throw new HttpError(400, 'Unknown dream.', 'invalid');
 }
 
 function markAchieved(db: DB, dreamId: number, value: number, at: string) {
@@ -37,10 +55,11 @@ function markAchieved(db: DB, dreamId: number, value: number, at: string) {
 function recomputeAchieved(db: DB, dreamId: number) {
   const at = nowIso();
   const latest = db
-    .prepare('SELECT value, occurred_at FROM dream_progress WHERE dream_id = ? AND is_private = 0 ORDER BY occurred_at DESC, id DESC LIMIT 1')
+    .prepare('SELECT value, occurred_at FROM dream_progress WHERE dream_id = ? AND is_private = 0 ORDER BY occurred_at DESC, created_at DESC, id DESC LIMIT 1')
     .get(dreamId) as { value: number; occurred_at: string } | undefined;
   if (latest) markAchieved(db, dreamId, latest.value, latest.occurred_at);
-  else db.prepare('UPDATE dreams SET achieved_at = NULL, updated_at = ? WHERE id = ?').run(at, dreamId);
+  // Touch the dream only when the badge actually changes, so a private-only write leaves no trace.
+  else db.prepare('UPDATE dreams SET achieved_at = NULL, updated_at = ? WHERE id = ? AND achieved_at IS NOT NULL').run(at, dreamId);
 }
 
 /* ---------- Dreams ---------- */
@@ -97,9 +116,10 @@ function upsertAttachedNote(
     );
   } else {
     db.prepare(
-      `INSERT INTO journal_entries (dreamer_id, body, occurred_at, is_private, source, session_id, check_in_id, ${col}, dream_id, category, author_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO journal_entries (id, dreamer_id, body, occurred_at, is_private, source, session_id, check_in_id, ${col}, dream_id, category, author_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
+      randomId(),
       scope.dreamerId,
       text,
       parent.occurredAt,
@@ -117,54 +137,62 @@ function upsertAttachedNote(
   }
 }
 
+/**
+ * Keeps the note of a rating/progress row about to be deleted, as a standalone journal entry with the
+ * same words, privacy, tags, date and author. Used for staff deletes (staff writes never destroy a
+ * dreamer's note) and, with `onlyPrivate`, for the dreamer's deletes in hidden mode (a private note they
+ * can't see is never removed blindly).
+ */
+function detachNote(db: DB, parent: { ratingId: number; category: RatingCategory } | { progressId: number; dreamId: number }, onlyPrivate = false) {
+  const p = 'ratingId' in parent ? { col: 'rating_id', id: parent.ratingId, category: parent.category, dreamId: null } : { col: 'progress_id', id: parent.progressId, category: null, dreamId: parent.dreamId };
+  db.prepare(
+    // The dreamer's own words now stand alone, so they read as one of their reflections.
+    `UPDATE journal_entries SET ${p.col} = NULL, check_in_id = NULL, category = COALESCE(category, ?), dream_id = COALESCE(dream_id, ?),
+       source = CASE WHEN author_id = (SELECT user_id FROM dreamers WHERE id = journal_entries.dreamer_id) THEN 'self' ELSE source END
+     WHERE ${p.col} = ?${onlyPrivate ? ' AND is_private = 1' : ''}`,
+  ).run(p.category, p.dreamId, p.id);
+}
+
 /* ---------- Self check-ins ---------- */
 
-export function createCheckIn(db: DB, scope: Scope, input: CheckInInput): CheckIn {
+export function createCheckIn(db: DB, scope: Scope, input: CheckInInput): CheckIn | null {
   assertOwner(scope, 'their own check-ins');
   const ratings = input.ratings ?? [];
   const progress = input.progress ?? [];
   const reflection = input.reflection?.body?.trim() ? input.reflection : null;
   if (!ratings.length && !progress.length && !reflection) throw new HttpError(400, 'Add at least one rating, progress update, or reflection.', 'invalid');
-  const occurredAt = input.occurredAt ? new Date(input.occurredAt).toISOString() : nowIso();
-  if (Number.isNaN(new Date(occurredAt).getTime())) throw new HttpError(400, 'Invalid date.', 'invalid');
+  const occurredAt = input.occurredAt ? pastDate(input.occurredAt) : nowIso();
   const now = nowIso();
   const run = db.transaction(() => {
-    const ci = db
-      .prepare('INSERT INTO check_ins (dreamer_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?)')
-      .run(scope.dreamerId, occurredAt, scope.viewer.user.id, now);
-    const checkInId = Number(ci.lastInsertRowid);
+    const checkInId = randomId();
+    db.prepare('INSERT INTO check_ins (id, dreamer_id, occurred_at, created_by, created_at) VALUES (?, ?, ?, ?, ?)').run(checkInId, scope.dreamerId, occurredAt, scope.viewer.user.id, now);
     for (const r of ratings) {
-      const res = db
-        .prepare(
-          `INSERT INTO ratings (dreamer_id, category, value, occurred_at, source, session_id, check_in_id, recorded_by, is_private, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'self', NULL, ?, ?, ?, ?, ?)`,
-        )
-        .run(scope.dreamerId, r.category, clampRating(r.value), occurredAt, checkInId, scope.viewer.user.id, r.isPrivate ? 1 : 0, now, now);
-      upsertAttachedNote(db, scope, { ratingId: Number(res.lastInsertRowid), category: r.category, checkInId, sessionId: null, occurredAt, source: 'self' }, r.note, r.notePrivate);
+      const ratingId = randomId();
+      db.prepare(
+        `INSERT INTO ratings (id, dreamer_id, category, value, occurred_at, source, session_id, check_in_id, recorded_by, is_private, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'self', NULL, ?, ?, ?, ?, ?)`,
+      ).run(ratingId, scope.dreamerId, r.category, clampRating(r.value), occurredAt, checkInId, scope.viewer.user.id, r.isPrivate ? 1 : 0, now, now);
+      upsertAttachedNote(db, scope, { ratingId, category: r.category, checkInId, sessionId: null, occurredAt, source: 'self' }, r.note, r.notePrivate);
     }
     for (const p of progress) {
-      const dream = db.prepare('SELECT id FROM dreams WHERE id = ? AND dreamer_id = ?').get(p.dreamId, scope.dreamerId);
-      if (!dream) throw new HttpError(400, 'Unknown dream.', 'invalid');
-      const res = db
-        .prepare(
-          `INSERT INTO dream_progress (dreamer_id, dream_id, value, occurred_at, source, session_id, check_in_id, recorded_by, is_private, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'self', NULL, ?, ?, ?, ?, ?)`,
-        )
-        .run(scope.dreamerId, p.dreamId, clampProgress(p.value), occurredAt, checkInId, scope.viewer.user.id, p.isPrivate ? 1 : 0, now, now);
-      upsertAttachedNote(db, scope, { progressId: Number(res.lastInsertRowid), dreamId: p.dreamId, checkInId, sessionId: null, occurredAt, source: 'self' }, p.note, p.notePrivate);
+      assertOwnDream(db, scope, p.dreamId);
+      const progressId = randomId();
+      db.prepare(
+        `INSERT INTO dream_progress (id, dreamer_id, dream_id, value, occurred_at, source, session_id, check_in_id, recorded_by, is_private, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'self', NULL, ?, ?, ?, ?, ?)`,
+      ).run(progressId, scope.dreamerId, p.dreamId, clampProgress(p.value), occurredAt, checkInId, scope.viewer.user.id, p.isPrivate ? 1 : 0, now, now);
+      upsertAttachedNote(db, scope, { progressId, dreamId: p.dreamId, checkInId, sessionId: null, occurredAt, source: 'self' }, p.note, p.notePrivate);
       recomputeAchieved(db, p.dreamId);
     }
     if (reflection) {
       db.prepare(
-        `INSERT INTO journal_entries (dreamer_id, body, occurred_at, is_private, source, session_id, check_in_id, author_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'self', NULL, ?, ?, ?, ?)`,
-      ).run(scope.dreamerId, reflection.body.trim(), occurredAt, reflection.isPrivate ? 1 : 0, checkInId, scope.viewer.user.id, now, now);
+        `INSERT INTO journal_entries (id, dreamer_id, body, occurred_at, is_private, source, session_id, check_in_id, author_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'self', NULL, ?, ?, ?, ?)`,
+      ).run(randomId(), scope.dreamerId, reflection.body.trim(), occurredAt, reflection.isPrivate ? 1 : 0, checkInId, scope.viewer.user.id, now, now);
     }
     return checkInId;
   });
-  const id = run();
-  // Return with full visibility for the owner (they just wrote it), regardless of hidden mode.
-  return q.getCheckIn(db, { ...scope, includePrivate: true }, id)!;
+  return q.getCheckIn(db, scope, run());
 }
 
 /* ---------- Ratings ---------- */
@@ -183,25 +211,45 @@ function assertEntryEdit(scope: Scope, existing: { source: 'session' | 'self' },
   }
 }
 
+/**
+ * A private session value can be shared again only while its cell is free: each session cell holds one
+ * shared value, and the coach may have recorded a new one after the dreamer hid this one. A value whose
+ * session was deleted belongs to no cell any more, so it stays private.
+ */
+function assertCanShareBack(existing: { source: 'session' | 'self'; sessionId: number | null; isPrivate: boolean }, patch: { isPrivate?: boolean }, cellTaken: () => boolean) {
+  if (patch.isPrivate !== false || !existing.isPrivate || existing.source !== 'session') return;
+  if (existing.sessionId == null) throw new HttpError(409, 'This value came from a coaching session that was later removed, so it stays private. You can keep it or delete it.', 'conflict');
+  if (cellTaken()) throw new HttpError(409, 'Your coach recorded a new value for this session after you hid this one, so it can’t be shared back. You can keep it private or delete it.', 'conflict');
+}
+
+/**
+ * Who may delete a rating/progress entry: the dreamer their own self entries, the coach session values.
+ * The dreamer may also remove a session value while it is private (staff can't see it, so nothing they
+ * see changes) or once its session no longer exists.
+ */
+function assertEntryDelete(scope: Scope, existing: { source: 'session' | 'self'; sessionId: number | null; isPrivate: boolean }) {
+  if (existing.source === 'self') return assertOwner(scope, 'their own entries');
+  if (scope.isCoachFor || (scope.isOwner && (existing.isPrivate || existing.sessionId == null))) return;
+  throw new HttpError(403, 'Session values are recorded by your coach. You can make this one private, then delete it.', 'forbidden');
+}
+
 export function updateRating(
   db: DB,
   scope: Scope,
   id: number,
   patch: { value?: number; isPrivate?: boolean; note?: string | null; notePrivate?: boolean; occurredAt?: string },
-): RatingEntry {
+): RatingEntry | null {
   const existing = q.getRating(db, scope, id);
   if (!existing) throw new HttpError(404, 'Entry not found.', 'not_found');
   assertEntryEdit(scope, existing, patch);
+  const occurredAt = patch.occurredAt ? pastDate(patch.occurredAt) : null;
+  assertCanShareBack(existing, patch, () => !!db.prepare('SELECT 1 FROM ratings WHERE session_id = ? AND category = ? AND is_private = 0 AND id <> ?').get(existing.sessionId, existing.category, id));
   const now = nowIso();
-  if (patch.isPrivate !== undefined && existing.sessionId != null && patch.isPrivate !== existing.isPrivate) {
-    const clash = db.prepare('SELECT 1 FROM ratings WHERE session_id = ? AND category = ? AND is_private = ? AND id <> ?').get(existing.sessionId, existing.category, patch.isPrivate ? 1 : 0, id);
-    if (clash) throw new HttpError(409, 'That session already has another entry for this area with that privacy setting.', 'conflict');
-  }
   db.transaction(() => {
     db.prepare('UPDATE ratings SET value = COALESCE(?, value), is_private = COALESCE(?, is_private), occurred_at = COALESCE(?, occurred_at), updated_at = ? WHERE id = ?').run(
       patch.value !== undefined ? clampRating(patch.value) : null,
       patch.isPrivate === undefined ? null : patch.isPrivate ? 1 : 0,
-      patch.occurredAt && scope.isOwner && existing.source === 'self' ? new Date(patch.occurredAt).toISOString() : null,
+      scope.isOwner && existing.source === 'self' ? occurredAt : null,
       now,
       id,
     );
@@ -213,17 +261,19 @@ export function updateRating(
       patch.notePrivate,
     );
   })();
-  return q.getRating(db, { ...scope, includePrivate: scope.isOwner ? true : scope.includePrivate }, id)!;
+  return q.getRating(db, scope, id);
 }
 
 export function deleteRating(db: DB, scope: Scope, id: number): void {
   const existing = q.getRating(db, scope, id);
   if (!existing) throw new HttpError(404, 'Entry not found.', 'not_found');
-  if (existing.source === 'session') {
-    if (!scope.isCoachFor) throw new HttpError(403, 'Session ratings are removed from the coaching workspace.', 'forbidden');
-  } else assertOwner(scope, 'their own entries');
-  db.prepare('DELETE FROM ratings WHERE id = ?').run(id);
-  if (existing.checkInId != null) cleanupCheckIn(db, existing.checkInId);
+  assertEntryDelete(scope, existing);
+  db.transaction(() => {
+    // A note goes with its entry only when the dreamer deletes it while able to see it.
+    if (!scope.includePrivate) detachNote(db, { ratingId: id, category: existing.category }, scope.isOwner);
+    db.prepare('DELETE FROM ratings WHERE id = ?').run(id);
+    if (existing.checkInId != null) cleanupCheckIn(db, existing.checkInId);
+  })();
 }
 
 function cleanupCheckIn(db: DB, checkInId: number) {
@@ -242,20 +292,18 @@ export function updateProgress(
   scope: Scope,
   id: number,
   patch: { value?: number; isPrivate?: boolean; note?: string | null; notePrivate?: boolean; occurredAt?: string },
-): ProgressEntry {
+): ProgressEntry | null {
   const existing = q.getProgressEntry(db, scope, id);
   if (!existing) throw new HttpError(404, 'Entry not found.', 'not_found');
   assertEntryEdit(scope, existing, patch);
+  const occurredAt = patch.occurredAt ? pastDate(patch.occurredAt) : null;
+  assertCanShareBack(existing, patch, () => !!db.prepare('SELECT 1 FROM dream_progress WHERE session_id = ? AND dream_id = ? AND is_private = 0 AND id <> ?').get(existing.sessionId, existing.dreamId, id));
   const now = nowIso();
-  if (patch.isPrivate !== undefined && existing.sessionId != null && patch.isPrivate !== existing.isPrivate) {
-    const clash = db.prepare('SELECT 1 FROM dream_progress WHERE session_id = ? AND dream_id = ? AND is_private = ? AND id <> ?').get(existing.sessionId, existing.dreamId, patch.isPrivate ? 1 : 0, id);
-    if (clash) throw new HttpError(409, 'That session already has another progress entry for this dream with that privacy setting.', 'conflict');
-  }
   db.transaction(() => {
     db.prepare('UPDATE dream_progress SET value = COALESCE(?, value), is_private = COALESCE(?, is_private), occurred_at = COALESCE(?, occurred_at), updated_at = ? WHERE id = ?').run(
       patch.value !== undefined ? clampProgress(patch.value) : null,
       patch.isPrivate === undefined ? null : patch.isPrivate ? 1 : 0,
-      patch.occurredAt && scope.isOwner && existing.source === 'self' ? new Date(patch.occurredAt).toISOString() : null,
+      scope.isOwner && existing.source === 'self' ? occurredAt : null,
       now,
       id,
     );
@@ -268,18 +316,20 @@ export function updateProgress(
     );
     recomputeAchieved(db, existing.dreamId);
   })();
-  return q.getProgressEntry(db, { ...scope, includePrivate: scope.isOwner ? true : scope.includePrivate }, id)!;
+  return q.getProgressEntry(db, scope, id);
 }
 
 export function deleteProgress(db: DB, scope: Scope, id: number): void {
   const existing = q.getProgressEntry(db, scope, id);
   if (!existing) throw new HttpError(404, 'Entry not found.', 'not_found');
-  if (existing.source === 'session') {
-    if (!scope.isCoachFor) throw new HttpError(403, 'Session entries are removed from the coaching workspace.', 'forbidden');
-  } else assertOwner(scope, 'their own entries');
-  db.prepare('DELETE FROM dream_progress WHERE id = ?').run(id);
-  recomputeAchieved(db, existing.dreamId);
-  if (existing.checkInId != null) cleanupCheckIn(db, existing.checkInId);
+  assertEntryDelete(scope, existing);
+  db.transaction(() => {
+    // A note goes with its entry only when the dreamer deletes it while able to see it.
+    if (!scope.includePrivate) detachNote(db, { progressId: id, dreamId: existing.dreamId }, scope.isOwner);
+    db.prepare('DELETE FROM dream_progress WHERE id = ?').run(id);
+    recomputeAchieved(db, existing.dreamId);
+    if (existing.checkInId != null) cleanupCheckIn(db, existing.checkInId);
+  })();
 }
 
 /* ---------- Journal ---------- */
@@ -288,7 +338,7 @@ export function createJournal(
   db: DB,
   scope: Scope,
   input: { body: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null; occurredAt?: string; sessionId?: number | null },
-): JournalEntry {
+): JournalEntry | null {
   const body = input.body?.trim();
   if (!body) throw new HttpError(400, 'Write something first.', 'invalid');
   // Coaches may add shared reflections only inside a session they run; dreamers write their own.
@@ -296,23 +346,19 @@ export function createJournal(
     if (!scope.isCoachFor || input.sessionId == null) throw new HttpError(403, 'Only the dreamer can write journal entries.', 'forbidden');
     if (input.isPrivate) throw new HttpError(403, 'Only the dreamer can mark entries private.', 'forbidden');
   }
-  if (input.dreamId != null) {
-    const d = db.prepare('SELECT 1 FROM dreams WHERE id = ? AND dreamer_id = ?').get(input.dreamId, scope.dreamerId);
-    if (!d) throw new HttpError(400, 'Unknown dream.', 'invalid');
-  }
+  assertOwnDream(db, scope, input.dreamId);
   if (input.sessionId != null) {
     const sess = db.prepare('SELECT 1 FROM coaching_sessions WHERE id = ? AND dreamer_id = ?').get(input.sessionId, scope.dreamerId);
     if (!sess) throw new HttpError(400, 'Unknown session.', 'invalid');
   }
   const now = nowIso();
-  const occurredAt = input.occurredAt ? new Date(input.occurredAt).toISOString() : now;
-  const res = db
-    .prepare(
-      `INSERT INTO journal_entries (dreamer_id, body, occurred_at, is_private, source, session_id, dream_id, category, author_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(scope.dreamerId, body, occurredAt, input.isPrivate ? 1 : 0, input.sessionId != null ? 'session' : 'self', input.sessionId ?? null, input.dreamId ?? null, input.category ?? null, scope.viewer.user.id, now, now);
-  return q.getJournalEntry(db, { ...scope, includePrivate: true }, Number(res.lastInsertRowid))!;
+  const occurredAt = input.occurredAt ? pastDate(input.occurredAt) : now;
+  const id = randomId();
+  db.prepare(
+    `INSERT INTO journal_entries (id, dreamer_id, body, occurred_at, is_private, source, session_id, dream_id, category, author_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, scope.dreamerId, body, occurredAt, input.isPrivate ? 1 : 0, input.sessionId != null ? 'session' : 'self', input.sessionId ?? null, input.dreamId ?? null, input.category ?? null, scope.viewer.user.id, now, now);
+  return q.getJournalEntry(db, scope, id);
 }
 
 export function updateJournal(
@@ -320,7 +366,7 @@ export function updateJournal(
   scope: Scope,
   id: number,
   patch: { body?: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null; occurredAt?: string },
-): JournalEntry {
+): JournalEntry | null {
   const existing = q.getJournalEntry(db, scope, id);
   if (!existing) throw new HttpError(404, 'Entry not found.', 'not_found');
   const isAuthor = existing.author.id === scope.viewer.user.id;
@@ -328,6 +374,8 @@ export function updateJournal(
   if (patch.isPrivate !== undefined) assertOwner(scope, 'privacy');
   const body = patch.body?.trim();
   if (patch.body !== undefined && !body) throw new HttpError(400, 'An entry cannot be empty.', 'invalid');
+  assertOwnDream(db, scope, patch.dreamId);
+  const occurredAt = patch.occurredAt ? pastDate(patch.occurredAt) : null;
   db.prepare(
     `UPDATE journal_entries SET body = COALESCE(?, body), is_private = COALESCE(?, is_private),
        dream_id = CASE WHEN ? = 1 THEN ? ELSE dream_id END, category = CASE WHEN ? = 1 THEN ? ELSE category END,
@@ -339,11 +387,11 @@ export function updateJournal(
     patch.dreamId ?? null,
     patch.category !== undefined ? 1 : 0,
     patch.category ?? null,
-    patch.occurredAt && scope.isOwner ? new Date(patch.occurredAt).toISOString() : null,
+    scope.isOwner ? occurredAt : null,
     nowIso(),
     id,
   );
-  return q.getJournalEntry(db, { ...scope, includePrivate: true }, id)!;
+  return q.getJournalEntry(db, scope, id);
 }
 
 export function deleteJournal(db: DB, scope: Scope, id: number): void {
@@ -361,27 +409,23 @@ export function createAction(
   db: DB,
   scope: Scope,
   input: { title: string; details?: string; dreamId?: number | null; category?: ActionItem['category']; isPrivate?: boolean; sessionId?: number | null },
-): ActionItem {
+): ActionItem | null {
   const title = input.title?.trim();
   if (!title) throw new HttpError(400, 'Give the action a short title.', 'invalid');
   if (!scope.isOwner && !scope.isCoachFor) throw new HttpError(403, 'Not allowed.', 'forbidden');
   if (input.isPrivate && !scope.isOwner) throw new HttpError(403, 'Only the dreamer can mark actions private.', 'forbidden');
-  if (input.dreamId != null) {
-    const d = db.prepare('SELECT 1 FROM dreams WHERE id = ? AND dreamer_id = ?').get(input.dreamId, scope.dreamerId);
-    if (!d) throw new HttpError(400, 'Unknown dream.', 'invalid');
-  }
+  assertOwnDream(db, scope, input.dreamId);
   if (input.sessionId != null) {
     const s = db.prepare('SELECT 1 FROM coaching_sessions WHERE id = ? AND dreamer_id = ?').get(input.sessionId, scope.dreamerId);
     if (!s) throw new HttpError(400, 'Unknown session.', 'invalid');
   }
   const now = nowIso();
-  const res = db
-    .prepare(
-      `INSERT INTO actions (dreamer_id, title, details, status, dream_id, category, is_private, created_by, session_id, created_at, updated_at)
-       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(scope.dreamerId, title, input.details?.trim() ?? '', input.dreamId ?? null, input.category ?? null, input.isPrivate ? 1 : 0, scope.viewer.user.id, input.sessionId ?? null, now, now);
-  return q.getAction(db, { ...scope, includePrivate: true }, Number(res.lastInsertRowid))!;
+  const id = randomId();
+  db.prepare(
+    `INSERT INTO actions (id, dreamer_id, title, details, status, dream_id, category, is_private, created_by, session_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, scope.dreamerId, title, input.details?.trim() ?? '', input.dreamId ?? null, input.category ?? null, input.isPrivate ? 1 : 0, scope.viewer.user.id, input.sessionId ?? null, now, now);
+  return q.getAction(db, scope, id);
 }
 
 export function updateAction(
@@ -389,17 +433,14 @@ export function updateAction(
   scope: Scope,
   id: number,
   patch: { title?: string; details?: string; dreamId?: number | null; category?: ActionItem['category'] | null; isPrivate?: boolean; status?: ActionItem['status'] },
-): ActionItem {
+): ActionItem | null {
   const existing = q.getAction(db, scope, id);
   if (!existing) throw new HttpError(404, 'Action not found.', 'not_found');
   if (!scope.isOwner && !scope.isCoachFor) throw new HttpError(403, 'Not allowed.', 'forbidden');
   if (patch.isPrivate !== undefined) assertOwner(scope, 'privacy');
   const title = patch.title?.trim();
   if (patch.title !== undefined && !title) throw new HttpError(400, 'Give the action a short title.', 'invalid');
-  if (patch.dreamId != null) {
-    const d = db.prepare('SELECT 1 FROM dreams WHERE id = ? AND dreamer_id = ?').get(patch.dreamId, scope.dreamerId);
-    if (!d) throw new HttpError(400, 'Unknown dream.', 'invalid');
-  }
+  assertOwnDream(db, scope, patch.dreamId);
   const now = nowIso();
   const status = patch.status ?? existing.status;
   const completedAt = status === 'completed' ? (existing.status === 'completed' ? existing.completedAt : now) : null;
@@ -422,7 +463,7 @@ export function updateAction(
     now,
     id,
   );
-  return q.getAction(db, { ...scope, includePrivate: true }, id)!;
+  return q.getAction(db, scope, id);
 }
 
 export function deleteAction(db: DB, scope: Scope, id: number): void {
@@ -440,7 +481,7 @@ export function startSession(db: DB, scope: Scope, occurredAt?: string): Coachin
   const open = db.prepare(`SELECT id FROM coaching_sessions WHERE dreamer_id = ? AND status = 'in_progress'`).get(scope.dreamerId) as { id: number } | undefined;
   if (open) return q.getSession(db, scope, open.id)!;
   const now = nowIso();
-  const at = occurredAt ? new Date(occurredAt).toISOString() : now;
+  const at = occurredAt ? pastDate(occurredAt) : now;
   const res = db
     .prepare(`INSERT INTO coaching_sessions (dreamer_id, coach_user_id, status, occurred_at, notes, focus, created_at, updated_at) VALUES (?, ?, 'in_progress', ?, '', '', ?, ?)`)
     .run(scope.dreamerId, scope.viewer.user.id, at, now, now);
@@ -458,16 +499,31 @@ export function updateSession(
   if (!scope.isCoachFor) throw new HttpError(403, 'Only the coach can edit a session.', 'forbidden');
   const now = nowIso();
   const status = patch.status ?? s.status;
-  const completedAt = status === 'completed' ? (s.completedAt ?? now) : null;
-  const occurredAt = patch.occurredAt ? new Date(patch.occurredAt).toISOString() : null;
+  if (status === 'in_progress' && s.status === 'completed') {
+    // One open session per dreamer: reopening waits until the current one is finished or deleted.
+    const open = db.prepare(`SELECT 1 FROM coaching_sessions WHERE dreamer_id = ? AND status = 'in_progress' AND id <> ?`).get(scope.dreamerId, sessionId);
+    if (open) throw new HttpError(409, 'Finish or delete the open session first.', 'conflict');
+  }
+  const occurredAt = patch.occurredAt ? pastDate(patch.occurredAt) : null;
   db.transaction(() => {
-    db.prepare('UPDATE coaching_sessions SET notes = COALESCE(?, notes), focus = COALESCE(?, focus), occurred_at = COALESCE(?, occurred_at), actions_reviewed = COALESCE(?, actions_reviewed), status = ?, completed_at = ?, updated_at = ? WHERE id = ?').run(
+    // Reopening keeps completed_at (it is only shown while completed), so completing again restores when the
+    // session really ended. The first completion credits the session to whoever completes it, which may
+    // differ from whoever started it (a reassignment, or the Director starting for another coach).
+    db.prepare(
+      `UPDATE coaching_sessions SET notes = COALESCE(?, notes), focus = COALESCE(?, focus), occurred_at = COALESCE(?, occurred_at), actions_reviewed = COALESCE(?, actions_reviewed),
+         coach_user_id = CASE WHEN ? = 'completed' AND completed_at IS NULL THEN ? ELSE coach_user_id END,
+         completed_at = CASE WHEN ? = 'completed' THEN COALESCE(completed_at, ?) ELSE completed_at END,
+         status = ?, updated_at = ? WHERE id = ?`,
+    ).run(
       patch.notes ?? null,
       patch.focus ?? null,
       occurredAt,
       patch.actionsReviewed === undefined ? null : patch.actionsReviewed ? 1 : 0,
       status,
-      completedAt,
+      scope.viewer.user.id,
+      status,
+      now,
+      status,
       now,
       sessionId,
     );
@@ -514,15 +570,22 @@ export function setSessionRating(db: DB, scope: Scope, sessionId: number, catego
   // Staff writes only ever touch SHARED rows. If the dreamer has made this cell's value private,
   // that row is invisible to the coach and must be neither updated nor deleted: the coach's value
   // becomes a separate shared row, so an empty cell behaves exactly like a never-recorded one.
-  if (value === null) {
-    db.prepare('DELETE FROM ratings WHERE session_id = ? AND category = ? AND is_private = 0').run(sessionId, category);
-  } else {
-    db.prepare(
-      `INSERT INTO ratings (dreamer_id, category, value, occurred_at, source, session_id, check_in_id, recorded_by, is_private, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'session', ?, NULL, ?, 0, ?, ?)
-       ON CONFLICT(session_id, category, is_private) WHERE session_id IS NOT NULL DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    ).run(scope.dreamerId, category, clampRating(value), s.occurredAt, sessionId, scope.viewer.user.id, now, now);
-  }
+  // Clearing a cell keeps the dreamer's note on that value as a standalone entry.
+  db.transaction(() => {
+    if (value === null) {
+      const row = db.prepare('SELECT id FROM ratings WHERE session_id = ? AND category = ? AND is_private = 0').get(sessionId, category) as { id: number } | undefined;
+      if (row) {
+        detachNote(db, { ratingId: row.id, category });
+        db.prepare('DELETE FROM ratings WHERE id = ?').run(row.id);
+      }
+    } else {
+      db.prepare(
+        `INSERT INTO ratings (id, dreamer_id, category, value, occurred_at, source, session_id, check_in_id, recorded_by, is_private, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'session', ?, NULL, ?, 0, ?, ?)
+         ON CONFLICT(session_id, category) WHERE session_id IS NOT NULL AND is_private = 0 DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ).run(randomId(), scope.dreamerId, category, clampRating(value), s.occurredAt, sessionId, scope.viewer.user.id, now, now);
+    }
+  })();
   return q.getSession(db, scope, sessionId)!;
 }
 
@@ -533,16 +596,22 @@ export function setSessionProgress(db: DB, scope: Scope, sessionId: number, drea
   const dream = db.prepare('SELECT 1 FROM dreams WHERE id = ? AND dreamer_id = ?').get(dreamId, scope.dreamerId);
   if (!dream) throw new HttpError(400, 'Unknown dream.', 'invalid');
   const now = nowIso();
-  if (value === null) {
-    db.prepare('DELETE FROM dream_progress WHERE session_id = ? AND dream_id = ? AND is_private = 0').run(sessionId, dreamId);
-  } else {
-    db.prepare(
-      `INSERT INTO dream_progress (dreamer_id, dream_id, value, occurred_at, source, session_id, check_in_id, recorded_by, is_private, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'session', ?, NULL, ?, 0, ?, ?)
-       ON CONFLICT(session_id, dream_id, is_private) WHERE session_id IS NOT NULL DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    ).run(scope.dreamerId, dreamId, clampProgress(value), s.occurredAt, sessionId, scope.viewer.user.id, now, now);
-  }
-  recomputeAchieved(db, dreamId);
+  db.transaction(() => {
+    if (value === null) {
+      const row = db.prepare('SELECT id FROM dream_progress WHERE session_id = ? AND dream_id = ? AND is_private = 0').get(sessionId, dreamId) as { id: number } | undefined;
+      if (row) {
+        detachNote(db, { progressId: row.id, dreamId });
+        db.prepare('DELETE FROM dream_progress WHERE id = ?').run(row.id);
+      }
+    } else {
+      db.prepare(
+        `INSERT INTO dream_progress (id, dreamer_id, dream_id, value, occurred_at, source, session_id, check_in_id, recorded_by, is_private, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'session', ?, NULL, ?, 0, ?, ?)
+         ON CONFLICT(session_id, dream_id) WHERE session_id IS NOT NULL AND is_private = 0 DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ).run(randomId(), scope.dreamerId, dreamId, clampProgress(value), s.occurredAt, sessionId, scope.viewer.user.id, now, now);
+    }
+    recomputeAchieved(db, dreamId);
+  })();
   return q.getSession(db, scope, sessionId)!;
 }
 

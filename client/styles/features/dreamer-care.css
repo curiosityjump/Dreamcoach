@@ -99,6 +99,9 @@
 .dc-quick-draft { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--dc-color); animation: fade-in 0.2s ease-out; }
 
 .dc-chart-note { margin-top: 10px; max-width: 70ch; }
+/* "Over time": on narrow cards the range control moves under the title rather than squeezing it. */
+.dc-over-time .card-head { flex-wrap: wrap; }
+.dc-over-time .segmented button { white-space: nowrap; }
 
 /* ---------- Category page ---------- */
 .dc-tabs { margin-bottom: 18px; }
@@ -141,9 +144,12 @@
 .dc-entry-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .dc-entry-label svg { width: 13px; height: 13px; }
 .dc-editor { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--border); }
+.dc-callout-body { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+/* Phones: the menu sits in the top-right corner, so the meta line wraps beside it and notes keep the full width. */
 @media (max-width: 480px) {
-  .dc-entry { grid-template-columns: 40px minmax(0, 1fr); padding: 12px 12px; }
-  .dc-entry-menu { grid-column: 2; justify-content: flex-end; margin-top: -4px; }
+  .dc-entry { position: relative; grid-template-columns: 40px minmax(0, 1fr); padding: 12px 12px; }
+  .dc-entry-menu { position: absolute; top: 8px; right: 8px; }
+  .dc-entry-meta { padding-right: 32px; }
   .dc-entry-reflection { grid-template-columns: 1fr; }
 }
 

@@ -32,13 +32,16 @@ export function fmtDateTime(iso: string): string {
 }
 
 const ago = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 
 export function relativeTime(iso: string | null | undefined): string {
   if (!iso) return 'never';
-  const diff = Date.now() - new Date(iso).getTime();
-  const days = Math.floor(diff / DAY);
+  const at = new Date(iso);
+  const diff = Date.now() - at.getTime();
   if (diff < 60000) return 'just now';
   if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
+  // Days are calendar days, as in dayHeading: on Sunday, Friday evening was "2 days ago", not "yesterday".
+  const days = Math.round((startOfDay(new Date()) - startOfDay(at)) / DAY);
   if (days < 1) return ago(Math.floor(diff / 3600000), 'hour');
   if (days === 1) return 'yesterday';
   if (days < 7) return `${days} days ago`;

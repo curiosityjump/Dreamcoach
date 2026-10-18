@@ -2,7 +2,7 @@
  * Editing a dream's title and description. `DreamsEditForm` is the bare form (used
  * inline on the detail page); `DreamsEditDialog` wraps it in a modal for the list.
  */
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useUpdateDream } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
 import { Button, Field, Modal, TextArea, TextInput } from '@/components/ui';
@@ -32,8 +32,13 @@ export function DreamsEditForm({ dream, guidance, onDone, onCancel, autoFocus = 
     }
   };
 
+  // Escape cancels, like the other inline editors (inside the dialog it closes the dialog).
+  const onKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
+    if (e.key === 'Escape' && !update.isPending) { e.preventDefault(); onCancel(); }
+  };
+
   return (
-    <form className="stack dd-edit-form" onSubmit={(e) => void submit(e)} data-testid="dream-edit-form">
+    <form className="stack dd-edit-form" onSubmit={(e) => void submit(e)} onKeyDown={onKeyDown} data-testid="dream-edit-form">
       <Field label="Title" htmlFor={`dd-title-${dream.id}`} error={error} hint={guidance}>
         <TextInput id={`dd-title-${dream.id}`} value={title} onChange={(e) => { setTitle(e.target.value); if (error) setError(null); }} maxLength={200} autoFocus={autoFocus} placeholder="Name your dream" data-testid="dream-title-input" />
       </Field>

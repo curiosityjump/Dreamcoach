@@ -48,16 +48,20 @@ export function PresentPage() {
   const todayWheel = useMemo<WheelValues>(() => (s ? Object.fromEntries(CARE_CATEGORIES.map((c) => [c, s.ratings[c] ?? null])) : {}), [s]);
   const lastWheel = useMemo<WheelValues | null>(() => (previous ? Object.fromEntries(CARE_CATEGORIES.map((c) => [c, previous.ratings[c] ?? null])) : null), [previous]);
 
-  // Trend across every completed session, plus today's column as it fills in.
+  // Trend across the completed sessions up to this one, plus this one's column as it fills in.
+  // Presenting an older session stops the lines there: nothing from later sessions.
   const series = useMemo(
-    () =>
-      CARE_CATEGORIES.map((category) => ({
+    () => {
+      const idx = sessions.findIndex((x) => x.id === sid);
+      const upTo = idx >= 0 ? sessions.slice(0, idx + 1) : sessions;
+      return CARE_CATEGORIES.map((category) => ({
         category,
-        points: sessions
+        points: upTo
           .filter((x) => x.status === 'completed' || x.id === sid)
           .filter((x) => x.ratings[category] != null)
           .map((x): TrendPoint => ({ at: x.occurredAt, value: x.ratings[category]!, source: 'session', label: `Session ${x.number}` })),
-      })),
+      }));
+    },
     [sessions, sid],
   );
   const hasTrend = series.some((x) => x.points.length > 1);
@@ -130,10 +134,13 @@ export function PresentPage() {
                     </div>
                     <div className="csp-dream-num">
                       <span className="csp-dream-pct tnum">{now == null ? '–' : `${now}%`}</span>
-                      <Delta value={delta(now, prev)} digits={0} suffix="%" />
+                      {/* Until today's value is in, the bar stays empty and last session's value is named as such. */}
+                      {now == null && prev != null && previous
+                        ? <span className="csp-dream-was tnum" data-testid="present-dream-was">S{previous.number}: {prev}%</span>
+                        : <Delta value={delta(now, prev)} digits={0} suffix=" pts" />}
                     </div>
                   </div>
-                  <Bar value={now ?? prev ?? 0} color="var(--gold)" large label={`${d.title} progress`} />
+                  <Bar value={now} color="var(--gold)" large label={`${d.title} progress today`} />
                 </li>
               );
             })}

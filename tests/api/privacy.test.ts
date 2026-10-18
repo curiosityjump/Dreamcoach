@@ -347,3 +347,217 @@ test('a private note the dreamer cannot see right now is never overwritten, clea
   assert.equal(after.note.isPrivate, true);
   await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: null });
 });
+
+/* ---------- Session cells, notes and write responses ---------- */
+
+const sessionRow = async (dreamer: Client, category: string, sessionId: number) =>
+  (await dreamer.get(`/dreamers/me/ratings?category=${category}`)).body.filter((r: any) => r.sessionId === sessionId);
+
+test('staff clearing a cell or deleting a session value never destroys the dreamer’s note on it', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const session = (await coach.get(`/dreamers/${dreamerId}/sessions`)).body.filter((x: any) => x.status === 'completed').slice(-2)[0];
+  const [rel] = await sessionRow(dreamer, 'relationships', session.id);
+  const [energy] = await sessionRow(dreamer, 'energy', session.id);
+  const secret = `Private words ${uniqueMarker()}`;
+  const shared = `Shared words ${uniqueMarker()}`;
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${rel.id}`, { note: secret, notePrivate: true })).status, 200);
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${energy.id}`, { note: shared, notePrivate: false })).status, 200);
+
+  // The coach empties the Relationships cell and types the value again; the private note is kept, still private.
+  assert.equal((await coach.put(`/dreamers/${dreamerId}/sessions/${session.id}/ratings`, { category: 'relationships', value: null })).status, 200);
+  await coach.put(`/dreamers/${dreamerId}/sessions/${session.id}/ratings`, { category: 'relationships', value: rel.value });
+  const kept = (await dreamer.get('/dreamers/me/journal')).body.find((j: any) => j.body === secret);
+  assert.ok(kept, 'the private note survives the coach clearing the cell');
+  assert.equal(kept.isPrivate, true);
+  assert.equal(kept.ratingId, null);
+  assert.equal(kept.category, 'relationships');
+  assert.equal(kept.author.id, (await dreamer.get('/auth/me')).body.user.id);
+  assert.ok(!allStrings((await coach.get(`/dreamers/${dreamerId}/journal`)).body).includes(secret), 'and stays invisible to staff');
+
+  // The coach deletes the Energy value outright; the shared note becomes a standalone entry.
+  assert.equal((await coach.del(`/dreamers/${dreamerId}/ratings/${energy.id}`)).status, 200);
+  const standalone = (await coach.get(`/dreamers/${dreamerId}/journal`)).body.find((j: any) => j.body === shared);
+  assert.ok(standalone && standalone.ratingId === null && standalone.category === 'energy');
+  await coach.put(`/dreamers/${dreamerId}/sessions/${session.id}/ratings`, { category: 'energy', value: energy.value });
+
+  // Dream progress works the same way.
+  const progress = (await dreamer.get('/dreamers/me/progress')).body.find((p: any) => p.sessionId === session.id);
+  await dreamer.patch(`/dreamers/me/progress/${progress.id}`, { note: `${secret} (progress)`, notePrivate: true });
+  await coach.put(`/dreamers/${dreamerId}/sessions/${session.id}/progress`, { dreamId: progress.dreamId, value: null });
+  const keptProgress = (await dreamer.get('/dreamers/me/journal')).body.find((j: any) => j.body === `${secret} (progress)`);
+  assert.ok(keptProgress && keptProgress.isPrivate && keptProgress.progressId === null && keptProgress.dreamId === progress.dreamId);
+  await coach.put(`/dreamers/${dreamerId}/sessions/${session.id}/progress`, { dreamId: progress.dreamId, value: progress.value });
+  for (const j of [kept, standalone, keptProgress]) await dreamer.del(`/dreamers/me/journal/${j.id}`);
+});
+
+test('deleting an entry while private entries are hidden keeps its hidden private note', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const secret = `Hidden note ${uniqueMarker()}`;
+  const dream = (await dreamer.get('/dreamers/me/dreams')).body[0];
+  const ci = await dreamer.post('/dreamers/me/check-ins', {
+    ratings: [{ category: 'alignment', value: 4, note: secret, notePrivate: true }],
+    progress: [{ dreamId: dream.id, value: 40, note: `${secret} (progress)`, notePrivate: true }],
+  });
+  const ratingId = ci.body.ratings[0].id;
+  await dreamer.post('/auth/privacy/lock');
+  assert.equal((await dreamer.del(`/dreamers/me/ratings/${ratingId}`)).status, 200);
+  assert.equal((await dreamer.del(`/dreamers/me/progress/${ci.body.progress[0].id}`)).status, 200);
+  assert.ok(!allStrings((await dreamer.get('/dreamers/me/journal')).body).includes(secret), 'still hidden after the delete');
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const kept = (await dreamer.get('/dreamers/me/journal')).body.find((j: any) => j.body === secret);
+  assert.ok(kept, 'the private note was kept as a standalone private entry');
+  assert.equal(kept.isPrivate, true);
+  assert.equal(kept.ratingId, null);
+  assert.equal(kept.checkInId, null);
+  assert.equal(kept.category, 'alignment');
+  assert.equal(kept.occurredAt, ci.body.occurredAt);
+  const keptProgress = (await dreamer.get('/dreamers/me/journal')).body.find((j: any) => j.body === `${secret} (progress)`);
+  assert.ok(keptProgress && keptProgress.isPrivate && keptProgress.progressId === null && keptProgress.dreamId === dream.id);
+  assert.ok(!(await coach.get(`/dreamers/${dreamerId}/check-ins`)).body.some((c: any) => c.id === ci.body.id), 'the emptied check-in is gone');
+  // With private entries shown, deleting an entry takes its note with it (the dialog says so).
+  const visible = await dreamer.post('/dreamers/me/check-ins', { ratings: [{ category: 'alignment', value: 4, note: secret + ' again', notePrivate: true }] });
+  assert.equal((await dreamer.del(`/dreamers/me/ratings/${visible.body.ratings[0].id}`)).status, 200);
+  assert.ok(!(await dreamer.get('/dreamers/me/journal')).body.some((j: any) => j.body === secret + ' again'));
+  await dreamer.del(`/dreamers/me/journal/${kept.id}`);
+  await dreamer.del(`/dreamers/me/journal/${keptProgress.id}`);
+});
+
+test('the dreamer can always hide a session value; sharing one back is refused only when the coach re-entered the cell', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const session = (await coach.get(`/dreamers/${dreamerId}/sessions`)).body.filter((x: any) => x.status === 'completed').slice(-3)[0];
+  const [first] = await sessionRow(dreamer, 'satisfaction', session.id);
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${first.id}`, { isPrivate: true })).status, 200);
+  await coach.put(`/dreamers/${dreamerId}/sessions/${session.id}/ratings`, { category: 'satisfaction', value: 3 });
+  const second = (await sessionRow(dreamer, 'satisfaction', session.id)).find((r: any) => !r.isPrivate);
+
+  // Sharing the first back would put two values in one cell.
+  const refused = await dreamer.patch(`/dreamers/me/ratings/${first.id}`, { isPrivate: false });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /recorded a new value for this session after you hid this one/);
+  // Hiding the coach's new value works, in hidden mode too; then the first can be shared again.
+  await dreamer.post('/auth/privacy/lock');
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${second.id}`, { isPrivate: true })).status, 200);
+  assert.equal((await coach.get(`/dreamers/${dreamerId}/sessions/${session.id}`)).body.ratings.satisfaction, undefined);
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const mine = (await dreamer.get(`/dreamers/me/sessions/${session.id}`)).body;
+  assert.deepEqual(mine.privateRatings.filter((c: string) => c === 'satisfaction'), ['satisfaction'], 'listed once, though two private values share the cell');
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${first.id}`, { isPrivate: false })).status, 200);
+  assert.equal((await coach.get(`/dreamers/${dreamerId}/sessions/${session.id}`)).body.ratings.satisfaction, first.value);
+
+  // A private session value is the dreamer's to delete (staff can't see it); a shared one stays the coach's.
+  assert.equal((await dreamer.del(`/dreamers/me/ratings/${first.id}`)).status, 403);
+  assert.equal((await dreamer.del(`/dreamers/me/ratings/${second.id}`)).status, 200);
+  assert.equal((await sessionRow(dreamer, 'satisfaction', session.id)).length, 1);
+});
+
+test('a private value left behind by deleting a session can be removed but not shared again', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const sid = (await coach.post(`/dreamers/${dreamerId}/sessions`, {})).body.id;
+  await coach.put(`/dreamers/${dreamerId}/sessions/${sid}/ratings`, { category: 'contribution', value: 3 });
+  await coach.put(`/dreamers/${dreamerId}/sessions/${sid}/ratings`, { category: 'energy', value: 3 });
+  const [contribution] = await sessionRow(dreamer, 'contribution', sid);
+  const [energy] = await sessionRow(dreamer, 'energy', sid);
+  await dreamer.patch(`/dreamers/me/ratings/${contribution.id}`, { isPrivate: true });
+  await dreamer.patch(`/dreamers/me/ratings/${energy.id}`, { isPrivate: true });
+  assert.equal((await coach.del(`/dreamers/${dreamerId}/sessions/${sid}`)).status, 200);
+
+  const orphan = (await dreamer.get('/dreamers/me/ratings?category=contribution')).body.find((r: any) => r.id === contribution.id);
+  assert.deepEqual([orphan.source, orphan.sessionId, orphan.isPrivate], ['session', null, true]);
+  const share = await dreamer.patch(`/dreamers/me/ratings/${orphan.id}`, { isPrivate: false });
+  assert.equal(share.status, 409, 'staff never see a session value without its session');
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${orphan.id}`, { value: 5 })).status, 403, 'the value stays the coach’s');
+  assert.equal((await dreamer.del(`/dreamers/me/ratings/${orphan.id}`)).status, 200);
+  await dreamer.post('/auth/privacy/lock');
+  assert.equal((await dreamer.del(`/dreamers/me/ratings/${energy.id}`)).status, 404, 'hidden while private entries are hidden');
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  assert.equal((await dreamer.del(`/dreamers/me/ratings/${energy.id}`)).status, 200);
+});
+
+test('write responses in hidden mode show only what a GET would: no hidden note, no private row', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const secret = `Hidden ${uniqueMarker()}`;
+  const ci = await dreamer.post('/dreamers/me/check-ins', { ratings: [{ category: 'relationships', value: 6, note: secret, notePrivate: true }] });
+  const id = ci.body.ratings[0].id;
+  await dreamer.post('/auth/privacy/lock');
+
+  for (const body of [{ value: 7 }, { note: null }, { notePrivate: false }]) {
+    const res = await dreamer.patch(`/dreamers/me/ratings/${id}`, body);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.note, null, `PATCH ${JSON.stringify(body)} does not return the hidden note`);
+    const coachView = (await coach.get(`/dreamers/${dreamerId}/care/relationships`)).body.entries.find((e: any) => e.id === id);
+    assert.deepEqual(res.body, coachView, 'the response is exactly what the coach sees');
+  }
+  // Writes whose result is private come back empty while private entries are hidden.
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${id}`, { isPrivate: true })).body, null);
+  const j = await dreamer.post('/dreamers/me/journal', { body: secret, isPrivate: true });
+  assert.equal(j.status, 201);
+  assert.equal(j.body, null);
+  const a = await dreamer.post('/dreamers/me/actions', { title: secret, isPrivate: true });
+  assert.equal(a.status, 201);
+  assert.equal(a.body, null);
+  const allPrivate = await dreamer.post('/dreamers/me/check-ins', { ratings: [{ category: 'energy', value: 2, isPrivate: true }] });
+  assert.equal(allPrivate.status, 201);
+  assert.equal(allPrivate.body, null);
+  const mixed = await dreamer.post('/dreamers/me/check-ins', { ratings: [{ category: 'energy', value: 2, isPrivate: true }, { category: 'contribution', value: 6, note: secret, notePrivate: true }] });
+  assert.deepEqual(mixed.body.ratings.map((r: any) => [r.category, r.note]), [['contribution', null]]);
+
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const unlocked = await dreamer.patch(`/dreamers/me/ratings/${id}`, { value: 6 });
+  assert.equal(unlocked.body.note.body, secret, 'with private entries shown the owner gets everything back');
+  await dreamer.del(`/dreamers/me/ratings/${id}`);
+});
+
+test('notes on private entries are flagged for the owner only while private entries are shown', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const marker = uniqueMarker();
+  await dreamer.post('/dreamers/me/check-ins', {
+    ratings: [{ category: 'energy', value: 3, isPrivate: true, note: `${marker} under private` }, { category: 'alignment', value: 8, note: `${marker} under shared` }],
+  });
+  const journal = (await dreamer.get('/dreamers/me/journal')).body.filter((j: any) => j.body.startsWith(marker));
+  assert.deepEqual(journal.map((j: any) => [j.body.slice(marker.length + 1), j.isPrivate, j.parentPrivate]).sort(), [['under private', false, true], ['under shared', false, false]]);
+  assert.ok((await dreamer.get('/dreamers/me/journal')).body.every((j: any) => typeof j.parentPrivate === 'boolean'));
+  await dreamer.post('/auth/privacy/lock');
+  for (const r of [await dreamer.get('/dreamers/me/journal'), await coach.get(`/dreamers/${dreamerId}/journal`)]) {
+    assert.ok(r.body.every((j: any) => !('parentPrivate' in j)), 'no trace in hidden mode or for staff');
+  }
+});
+
+test('ids carry no trace of private rows: rows written together do not get sequential ids', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const ci = await dreamer.post('/dreamers/me/check-ins', {
+    ratings: [
+      { category: 'contribution', value: 7, note: 'c' },
+      { category: 'alignment', value: 2, isPrivate: true },
+      { category: 'relationships', value: 6, note: 'r', notePrivate: true },
+      { category: 'energy', value: 5, note: 'e' },
+    ],
+    reflection: { body: 'private reflection', isPrivate: true },
+  });
+  const seen = (await coach.get(`/dreamers/${dreamerId}/check-ins`)).body.find((c: any) => c.id === ci.body.id);
+  assert.deepEqual(seen.ratings.map((r: any) => r.category), ['contribution', 'relationships', 'energy'], 'CARE order is kept');
+  const ids = [ci.body.id, ...ci.body.ratings.flatMap((r: any) => [r.id, r.note?.id]).filter(Boolean), (await dreamer.post('/dreamers/me/actions', { title: 'x' })).body.id];
+  for (const x of ids) assert.ok(Number.isSafeInteger(x) && x > 0);
+  for (const a of ids) for (const b of ids) if (a !== b) assert.ok(Math.abs(a - b) > 1000, 'ids are not handed out in sequence');
+});
+
+test('seeded rows carry random ids too, so the demo data shows no countable gaps', async () => {
+  const { coach, dreamerId } = await dreamerAndCoach();
+  const checkIns = (await coach.get(`/dreamers/${dreamerId}/check-ins`)).body as any[];
+  const ids = [
+    ...checkIns.map((c) => c.id),
+    ...checkIns.flatMap((c) => (c.ratings ?? []).map((r: any) => r.id)),
+    ...((await coach.get(`/dreamers/${dreamerId}/actions`)).body as any[]).map((a) => a.id),
+    ...((await coach.get(`/dreamers/${dreamerId}/journal`)).body as any[]).map((j) => j.id),
+  ];
+  assert.ok(ids.length > 50, `enough rows to judge (${ids.length})`);
+  for (const id of ids) assert.ok(Number.isSafeInteger(id) && id > 2 ** 20, `id ${id} is not sequential-looking`);
+  const sorted = [...ids].sort((a, b) => a - b);
+  for (let i = 1; i < sorted.length; i++) assert.ok(sorted[i]! - sorted[i - 1]! > 1000, 'no two visible ids sit next to each other');
+});

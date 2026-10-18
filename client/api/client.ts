@@ -31,7 +31,8 @@ export async function holdReads<T>(until: Promise<T>): Promise<T> {
 }
 
 export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
-  if (method === 'GET' && readsHeld) await readsHeld;
+  // Wait out the hold, and any newer one that replaced it meanwhile.
+  while (method === 'GET' && readsHeld) await readsHeld;
   const res = await fetch(`/api${path}`, {
     method,
     headers: { 'x-dc-idle': String(Date.now() - lastInteraction), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },

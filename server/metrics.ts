@@ -15,6 +15,8 @@ import type { CaseloadEntry, CoachDashboard, CoachDetail, CoachSummary, Director
 const DAY = 86400000;
 const iso = (ms: number) => new Date(ms).toISOString();
 const avg = (xs: number[]): number | null => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
+/** Start of the current month in UTC, matching the YYYY-MM month keys the trend charts bucket by. */
+const utcMonthStart = (ms: number) => { const d = new Date(ms); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString(); };
 
 function caseloadEntry(db: DB, viewer: Viewer, dreamerId: number): CaseloadEntry {
   const scope = staffScope(viewer, dreamerId);
@@ -47,7 +49,7 @@ export function coachDashboard(db: DB, viewer: Viewer, coachUserId: number): Coa
   const caseload = ids.map((id) => caseloadEntry(db, viewer, id));
   caseload.sort((a, b) => a.dreamer.name.localeCompare(b.dreamer.name));
   const now = Date.now();
-  const monthStart = new Date(new Date(now).getFullYear(), new Date(now).getMonth(), 1).toISOString();
+  const monthStart = utcMonthStart(now);
   const d30 = iso(now - 30 * DAY);
   const d45 = iso(now - 45 * DAY);
   const inList = ids.length ? ids.map(() => '?').join(',') : 'NULL';
@@ -189,8 +191,9 @@ function monthSeries(db: DB, viewer: Viewer, ids: number[], startsOn: string, co
   const progress = db
     .prepare(`SELECT value, substr(occurred_at,1,7) AS m FROM dream_progress WHERE source = 'session' AND is_private = 0 AND dreamer_id IN (${inList})`)
     .all(...ids) as { value: number; m: string }[];
+  // Journal entries the dreamers wrote themselves (reflections and notes, on self or session entries).
   const journal = db
-    .prepare(`SELECT substr(j.occurred_at,1,7) AS m, COUNT(*) AS n FROM journal_entries j WHERE j.source = 'self' AND ${JOURNAL_VISIBLE('j')} AND j.dreamer_id IN (${inList}) GROUP BY m`)
+    .prepare(`SELECT substr(j.occurred_at,1,7) AS m, COUNT(*) AS n FROM journal_entries j WHERE ${q.WRITTEN_BY_DREAMER('j')} AND ${JOURNAL_VISIBLE('j')} AND j.dreamer_id IN (${inList}) GROUP BY m`)
     .all(0, 0, 0, ...ids) as { m: string; n: number }[];
   const actionsCreated = db
     .prepare(`SELECT substr(created_at,1,7) AS m, COUNT(*) AS n FROM actions WHERE is_private = 0 AND dreamer_id IN (${inList}) GROUP BY m`)
@@ -240,9 +243,8 @@ export function directorOverview(db: DB, viewer: Viewer): DirectorOverview {
   const coaches = coachRows.map((c) => groupSummary(db, viewer, toUser(c), dreamerIdsForCoach(db, c.id)));
   const ids = allDreamerIds(db);
   const all = groupSummary(db, viewer, null, ids);
-  const now = Date.now();
-  const monthStart = new Date(new Date(now).getFullYear(), new Date(now).getMonth(), 1).toISOString();
-  const thisMonth = db.prepare(`SELECT COUNT(*) AS n FROM coaching_sessions WHERE status = 'completed' AND occurred_at >= ?`).get(monthStart) as { n: number };
+  const thisMonth = db.prepare(`SELECT COUNT(*) AS n FROM coaching_sessions WHERE status = 'completed' AND occurred_at >= ?`).get(utcMonthStart(Date.now())) as { n: number };
+  const unassigned = db.prepare('SELECT COUNT(*) AS n FROM dreamers WHERE coach_user_id IS NULL').get() as { n: number };
   const careLatest: Partial<Record<RatingCategory, number>> = {};
   const entries = ids.map((id) => q.latestRatings(db, staffScope(viewer, id)));
   for (const cat of RATING_CATEGORIES) {
@@ -254,6 +256,7 @@ export function directorOverview(db: DB, viewer: Viewer): DirectorOverview {
     totals: {
       coaches: coachRows.length,
       dreamers: ids.length,
+      unassignedDreamers: unassigned.n,
       activeDreamers: all.activeDreamers,
       sessionsTotal: all.sessionsTotal,
       sessionsLast30d: all.sessionsLast30d,

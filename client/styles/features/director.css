@@ -47,6 +47,8 @@
 .dir-section-head h2 { font-size: 20px; }
 .dir-section-sub { color: var(--muted); font-size: 13.5px; flex: 1 1 320px; }
 .dir-section-head .dir-link { margin-left: auto; }
+.dir-unassigned { align-items: center; margin-bottom: 12px; }
+.dir-chart-note { color: var(--muted); font-size: 12px; line-height: 1.4; margin: 0; }
 
 /* ---------- CARE across the team ---------- */
 .dir-care-grid { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(0, 1.7fr); gap: 16px; align-items: start; }
@@ -67,6 +69,9 @@
 .dir-chart-def { color: var(--muted); font-size: 12.5px; margin-top: 3px; line-height: 1.4; }
 .dir-chart { width: 100%; min-width: 0; }
 .dir-chart .recharts-surface { overflow: visible; }
+/* Tapping or clicking a chart (to read its tooltip) focuses its surface or one of its layers; only
+   keyboard focus draws a ring. */
+.dir-chart :focus:not(:focus-visible) { outline: none; }
 .dir-legend { margin-top: 2px; font-size: 12.5px; }
 .dir-tip-row { display: flex; align-items: center; gap: 8px; line-height: 1.6; }
 .dir-tip-row b { margin-left: auto; padding-left: 10px; }
@@ -87,6 +92,9 @@
 .dir-table th.num .dir-th { align-items: flex-end; }
 .dir-th-sub { font-size: 10.5px; font-weight: 500; text-transform: none; letter-spacing: 0.01em; color: var(--muted-2); }
 .dir-table th.sortable .dir-th { flex-direction: row; align-items: center; gap: 4px; }
+.dir-sort-btn { width: 100%; min-height: 28px; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; }
+.dir-sort-btn:hover { color: var(--ink); }
+.dir-table th.num .dir-sort-btn { justify-content: flex-end; }
 .dir-sort-icon { width: 14px; height: 14px; transition: transform 0.15s; }
 .dir-sort-icon.is-asc { transform: rotate(180deg); }
 .dir-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -125,6 +133,8 @@
 .dir-details[open] summary::before { transform: rotate(45deg); }
 .dir-details summary:hover { color: var(--accent); }
 .dir-defs { margin: 6px 0 0; display: grid; grid-template-columns: minmax(140px, 220px) minmax(0, 1fr); gap: 8px 16px; font-size: 13.5px; }
+/* Each term and its definition are grouped in a div; the pair sits on one row of the dl's grid. */
+.dir-defs > div { display: contents; }
 .dir-defs dt { font-weight: 600; color: var(--ink); }
 .dir-defs dd { margin: 0; color: var(--ink-2); line-height: 1.45; }
 @media (max-width: 640px) { .dir-defs { grid-template-columns: 1fr; gap: 2px; } .dir-defs dd { margin-bottom: 8px; } }
@@ -155,6 +165,7 @@
 .dir-row-menu-btn[aria-expanded='true'], .dir-row:hover .dir-row-menu-btn { color: var(--ink); }
 .dir-menu { position: fixed; z-index: 950; width: 220px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 6px; animation: fade-in 0.12s ease-out; }
 .dir-menu .menu-item { min-height: 40px; }
+.dir-menu .menu-item:focus-visible { outline-offset: 0; background: var(--surface-3); }
 
 /* ---------- All dreamers: toolbar ---------- */
 .dir-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
@@ -165,11 +176,15 @@
 .dir-filter > span { color: var(--muted); font-size: 13px; }
 .dir-filter select { width: auto; max-width: 220px; min-height: 40px; padding: 6px 30px 6px 10px; font-size: 13.5px; }
 .dir-toolbar-count { color: var(--muted); font-size: 13.5px; margin-left: auto; white-space: nowrap; }
+.dir-filter-sort select { max-width: 280px; }
 @media (max-width: 760px) {
   .dir-toolbar { gap: 8px; }
   .dir-search { flex-basis: 100%; }
   .dir-filter { flex: 1 1 calc(50% - 4px); min-width: 0; }
   .dir-filter > span { display: none; }
+  /* The sort menu has a row of its own on phones, so it keeps its label and never reads like a filter. */
+  .dir-filter-sort { flex-basis: 100%; }
+  .dir-filter-sort > span { display: inline; }
   .dir-filter select { width: 100%; max-width: none; }
   .dir-toolbar-count { margin-left: 0; flex-basis: 100%; }
 }
@@ -212,6 +227,13 @@
 .dir-dreamers-table .dir-dreams, .dir-caseload-table .dir-dreams { min-width: 112px; }
 .dir-dreamers-table .dir-care-avg { font-size: 18px; }
 .dir-sticky-col { width: 48px; }
+/* Just above the cards breakpoint a table can be a little wider than its card. Rather than slide a
+   column under the sticky edge, text cells break between their parts ("Session 9" / "· 4 days ago",
+   "+1.4" / "n = 4") so the table fits. */
+.dir-table .dir-cell-stack span { white-space: nowrap; }
+.dir-table .dir-cell-stack > span:first-child:has(> span) { white-space: normal; }
+.dir-table .dir-signed { flex-wrap: wrap; row-gap: 0; }
+.dir-table td.num .dir-signed { justify-content: flex-end; }
 
 /* When a table is wider than its card, the name column and the last column stay put while the rest
    scrolls, and a soft shadow marks each side that has more columns to see. Separate borders let each

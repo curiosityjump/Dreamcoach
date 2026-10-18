@@ -5,6 +5,7 @@
  * connected experience stays current.
  */
 import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
+import { useAuth } from '@/auth/AuthContext';
 import { del, get, patch, post, put } from './client';
 import type { RatingCategory } from '@shared/care';
 import type {
@@ -84,6 +85,8 @@ export const useCoachDetail = (coachId: number | null) => useQuery<CoachDetail>(
 export const useStaff = () => useQuery<User[]>({ queryKey: ['director', 'staff'], queryFn: () => get('/director/staff') });
 
 /* ---------- Mutations ---------- */
+// A dreamer's write answers with what a read would show right now, so a row that is private while
+// private entries are hidden comes back as null: base toasts and follow-ups on the request, not the reply.
 function useDreamerMutation<TVars, TData>(id: DreamerRef, fn: (vars: TVars) => Promise<TData>, onSuccess?: (data: TData, vars: TVars) => void) {
   const invalidate = useInvalidateDreamer();
   return useMutation<TData, Error, TVars>({
@@ -92,33 +95,33 @@ function useDreamerMutation<TVars, TData>(id: DreamerRef, fn: (vars: TVars) => P
   });
 }
 
-export const useCreateCheckIn = (id: DreamerRef) => useDreamerMutation<CheckInInput, CheckIn>(id, (input) => post(`/dreamers/${id}/check-ins`, input));
+export const useCreateCheckIn = (id: DreamerRef) => useDreamerMutation<CheckInInput, CheckIn | null>(id, (input) => post(`/dreamers/${id}/check-ins`, input));
 
 export const useUpdateRating = (id: DreamerRef) =>
-  useDreamerMutation<{ ratingId: number; value?: number; isPrivate?: boolean; note?: string | null; notePrivate?: boolean; occurredAt?: string }, RatingEntry>(id, ({ ratingId, ...body }) => patch(`/dreamers/${id}/ratings/${ratingId}`, body));
+  useDreamerMutation<{ ratingId: number; value?: number; isPrivate?: boolean; note?: string | null; notePrivate?: boolean; occurredAt?: string }, RatingEntry | null>(id, ({ ratingId, ...body }) => patch(`/dreamers/${id}/ratings/${ratingId}`, body));
 export const useDeleteRating = (id: DreamerRef) => useDreamerMutation<number, { ok: true }>(id, (ratingId) => del(`/dreamers/${id}/ratings/${ratingId}`));
 
 export const useUpdateProgress = (id: DreamerRef) =>
-  useDreamerMutation<{ progressId: number; value?: number; isPrivate?: boolean; note?: string | null; notePrivate?: boolean; occurredAt?: string }, ProgressEntry>(id, ({ progressId, ...body }) => patch(`/dreamers/${id}/progress/${progressId}`, body));
+  useDreamerMutation<{ progressId: number; value?: number; isPrivate?: boolean; note?: string | null; notePrivate?: boolean; occurredAt?: string }, ProgressEntry | null>(id, ({ progressId, ...body }) => patch(`/dreamers/${id}/progress/${progressId}`, body));
 export const useDeleteProgress = (id: DreamerRef) => useDreamerMutation<number, { ok: true }>(id, (progressId) => del(`/dreamers/${id}/progress/${progressId}`));
 
 export const useUpdateDream = (id: DreamerRef) => useDreamerMutation<{ dreamId: number; title?: string; description?: string }, Dream>(id, ({ dreamId, ...body }) => patch(`/dreamers/${id}/dreams/${dreamId}`, body));
 
 export const useCreateJournal = (id: DreamerRef) =>
-  useDreamerMutation<{ body: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null; occurredAt?: string; sessionId?: number | null }, JournalEntry>(id, (input) => post(`/dreamers/${id}/journal`, input));
+  useDreamerMutation<{ body: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null; occurredAt?: string; sessionId?: number | null }, JournalEntry | null>(id, (input) => post(`/dreamers/${id}/journal`, input));
 export const useUpdateJournal = (id: DreamerRef) =>
-  useDreamerMutation<{ journalId: number; body?: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null; occurredAt?: string }, JournalEntry>(id, ({ journalId, ...body }) => patch(`/dreamers/${id}/journal/${journalId}`, body));
+  useDreamerMutation<{ journalId: number; body?: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null; occurredAt?: string }, JournalEntry | null>(id, ({ journalId, ...body }) => patch(`/dreamers/${id}/journal/${journalId}`, body));
 export const useDeleteJournal = (id: DreamerRef) => useDreamerMutation<number, { ok: true }>(id, (journalId) => del(`/dreamers/${id}/journal/${journalId}`));
 
 export const useCreateAction = (id: DreamerRef) =>
-  useDreamerMutation<{ title: string; details?: string; dreamId?: number | null; category?: ActionItem['category']; isPrivate?: boolean; sessionId?: number | null }, ActionItem>(id, (input) => post(`/dreamers/${id}/actions`, input));
+  useDreamerMutation<{ title: string; details?: string; dreamId?: number | null; category?: ActionItem['category']; isPrivate?: boolean; sessionId?: number | null }, ActionItem | null>(id, (input) => post(`/dreamers/${id}/actions`, input));
 export const useUpdateAction = (id: DreamerRef) =>
-  useDreamerMutation<{ actionId: number; title?: string; details?: string; dreamId?: number | null; category?: ActionItem['category'] | null; isPrivate?: boolean; status?: ActionItem['status'] }, ActionItem>(id, ({ actionId, ...body }) => patch(`/dreamers/${id}/actions/${actionId}`, body));
+  useDreamerMutation<{ actionId: number; title?: string; details?: string; dreamId?: number | null; category?: ActionItem['category'] | null; isPrivate?: boolean; status?: ActionItem['status'] }, ActionItem | null>(id, ({ actionId, ...body }) => patch(`/dreamers/${id}/actions/${actionId}`, body));
 export const useDeleteAction = (id: DreamerRef) => useDreamerMutation<number, { ok: true }>(id, (actionId) => del(`/dreamers/${id}/actions/${actionId}`));
 
 export const useStartSession = (id: DreamerRef) => useDreamerMutation<{ occurredAt?: string } | void, CoachingSession>(id, (input) => post(`/dreamers/${id}/sessions`, input ?? {}));
 export const useUpdateSession = (id: DreamerRef) =>
-  useDreamerMutation<{ sessionId: number; notes?: string; focus?: string; occurredAt?: string; status?: 'in_progress' | 'completed' }, CoachingSession>(id, ({ sessionId, ...body }) => patch(`/dreamers/${id}/sessions/${sessionId}`, body));
+  useDreamerMutation<{ sessionId: number; notes?: string; focus?: string; occurredAt?: string; status?: 'in_progress' | 'completed'; actionsReviewed?: boolean }, CoachingSession>(id, ({ sessionId, ...body }) => patch(`/dreamers/${id}/sessions/${sessionId}`, body));
 export const useDeleteSession = (id: DreamerRef) => useDreamerMutation<number, { ok: true }>(id, (sessionId) => del(`/dreamers/${id}/sessions/${sessionId}`));
 export const useSetSessionRating = (id: DreamerRef) =>
   useDreamerMutation<{ sessionId: number; category: RatingCategory; value: number | null }, CoachingSession>(id, ({ sessionId, ...body }) => put(`/dreamers/${id}/sessions/${sessionId}/ratings`, body));
@@ -127,8 +130,10 @@ export const useSetSessionProgress = (id: DreamerRef) =>
 
 export const useReassignDreamer = () => {
   const qc = useQueryClient();
+  // The Director may have just taken on (or handed off) their own dreamers, which decides whether "My coaching" shows.
+  const { refresh } = useAuth();
   return useMutation({
     mutationFn: ({ dreamerId, ...body }: { dreamerId: number; coachUserId?: number | null; status?: 'active' | 'paused' | 'completed' }) => patch(`/director/dreamers/${dreamerId}`, body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['director'] }); qc.invalidateQueries({ queryKey: ['coach'] }); qc.invalidateQueries({ queryKey: ['dreamer'] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['director'] }); qc.invalidateQueries({ queryKey: ['coach'] }); qc.invalidateQueries({ queryKey: ['dreamer'] }); void refresh(); },
   });
 };

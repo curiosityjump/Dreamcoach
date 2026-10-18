@@ -14,6 +14,11 @@
 .dh-more svg { width: 14px; height: 14px; }
 .dh-foot { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
 .dh-open { margin-bottom: 14px; }
+.dh-open-link { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: inherit; white-space: nowrap; }
+.dh-open-link svg { width: 14px; height: 14px; margin: 0; }
+/* a change measured against a coaching session (SessionDelta): "▲ 2 vs S8" */
+.dh-delta { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.dh-delta-ref { font-size: 11.5px; color: var(--muted); font-weight: 400; }
 .dh-private-hint { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font-size: 13px; color: var(--private); }
 .dh-private-hint svg { width: 14px; height: 14px; }
 /* lock beside a value that comes from a private entry (PrivateMark) */
@@ -63,6 +68,8 @@
 .dh-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
 .dh-stats .stat { background: var(--surface-2); }
 .dh-stats .stat-value { font-size: 24px; }
+.dh-stat-sub { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.dh-stat-sub .dh-private { margin-left: 0; }
 @media (max-width: 400px) { .dh-care-delta { min-width: 0; } .dh-stats { grid-template-columns: 1fr; } }
 
 /* ---------- Actions ---------- */

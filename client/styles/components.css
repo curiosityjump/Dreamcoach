@@ -56,18 +56,30 @@
 .inline-edit:focus { border-color: var(--accent); background: var(--surface); }
 
 /* ---------- Rating input (0–10) ---------- */
-.rating-input { display: flex; gap: 4px; flex-wrap: nowrap; }
+/* The chosen number sits on --rating-ink, a darker shade of the category colour that white text reads on. */
+.rating-input { display: flex; gap: 4px; flex-wrap: wrap; container-type: inline-size; }
 .rating-input button {
   flex: 1 1 0; min-width: 0; height: 40px; border-radius: 8px; border: 1px solid var(--border);
   background: var(--surface); color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; font-size: 14px;
   transition: background 0.1s, color 0.1s, border-color 0.1s, transform 0.05s;
 }
 .rating-input button:hover { border-color: var(--rating-color, var(--accent)); color: var(--ink); }
-.rating-input button[aria-checked='true'] { background: var(--rating-color, var(--accent)); border-color: var(--rating-color, var(--accent)); color: #fff; transform: scale(1.04); }
+.rating-input button[aria-checked='true'] { background: var(--rating-ink, var(--accent)); border-color: var(--rating-ink, var(--accent)); color: #fff; transform: scale(1.04); }
 .rating-input button.below { background: var(--rating-tint, var(--accent-soft)); border-color: transparent; }
 .rating-input.compact button { height: 32px; font-size: 13px; border-radius: 6px; }
 .rating-input.compact { gap: 3px; }
-@media (max-width: 420px) { .rating-input button { height: 36px; font-size: 13px; } }
+/* On touch screens, a row too narrow for eleven 40px pills becomes two rows (0–5, 6–10) of pills at least 40px square. */
+@media (pointer: coarse) {
+  @container (max-width: 479px) {
+    .rating-input button { flex: 0 0 calc((100% - 5 * 4px) / 6); }
+    .rating-input.compact button { flex-basis: calc((100% - 5 * 3px) / 6); height: 40px; }
+  }
+}
+
+/* ---------- Wheel of Life (keyboard) ---------- */
+.wheel-key { fill: transparent; stroke: none; }
+.wheel-key:focus { outline: none; }
+.wheel-key:focus-visible { stroke: var(--ink); stroke-width: 2.5px; }
 
 /* ---------- Percent input ---------- */
 .pct-input { display: flex; align-items: center; gap: 12px; }
@@ -114,7 +126,7 @@
 .tab:hover { color: var(--ink); text-decoration: none; }
 .tab[aria-selected='true'], .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
 .segmented { display: inline-flex; background: var(--surface-3); border-radius: var(--r-sm); padding: 3px; gap: 2px; }
-.segmented button { border: 0; background: transparent; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.segmented button { border: 0; background: transparent; padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--muted); white-space: nowrap; }
 .segmented button[aria-pressed='true'] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 
 /* ---------- Empty state ---------- */
@@ -209,12 +221,12 @@ table.table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .topbar { position: sticky; top: 0; z-index: 50; background: rgba(246, 243, 236, 0.9); backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); }
 .topbar-inner { max-width: var(--page-max); margin: 0 auto; padding: 0 var(--gutter); min-height: var(--nav-h); display: flex; align-items: center; gap: 16px; }
 .topbar.wide .topbar-inner { max-width: 1400px; }
-.brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-size: 19px; font-weight: 600; color: var(--ink); text-decoration: none; letter-spacing: -0.01em; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-size: 19px; font-weight: 600; color: var(--ink); text-decoration: none; letter-spacing: -0.01em; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
 .brand-mark { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
 .brand-mark svg { width: 18px; height: 18px; }
 .nav { display: flex; gap: 2px; margin-left: 8px; }
-.nav a { padding: 8px 12px; border-radius: var(--r-sm); color: var(--ink-2); font-weight: 500; font-size: 14px; text-decoration: none; }
+.nav a { padding: 8px 12px; border-radius: var(--r-sm); color: var(--ink-2); font-weight: 500; font-size: 14px; text-decoration: none; white-space: nowrap; }
 .nav a:hover { background: var(--surface-3); color: var(--ink); }
 .nav a.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
@@ -230,6 +242,11 @@ table.table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .mobile-nav a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 2px; font-size: 11px; color: var(--muted); text-decoration: none; border-radius: 8px; font-weight: 500; }
 .mobile-nav a svg { width: 20px; height: 20px; }
 .mobile-nav a.active { color: var(--accent); }
+/* Tablet widths: the dreamer's six nav items leave no room for the brand name or the first name beside the avatar. */
+@media (max-width: 1000px) {
+  .topbar-dreamer .brand-name, .topbar-dreamer .user-menu-name { display: none; }
+  .topbar-dreamer .nav a { padding: 8px 10px; }
+}
 @media (max-width: 760px) {
   .nav { display: none; }
   .mobile-nav { display: flex; }
@@ -239,10 +256,11 @@ table.table { width: 100%; border-collapse: collapse; font-size: 14px; }
 }
 
 /* ---------- Privacy status pill (dreamer top bar) ---------- */
-.privacy-status { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 12px 0 10px; border-radius: var(--r-pill); border: 1px solid var(--border); background: var(--surface); font-size: 13px; font-weight: 500; color: var(--ink-2); }
+.privacy-status { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 12px 0 10px; border-radius: var(--r-pill); border: 1px solid var(--border); background: var(--surface); font-size: 13px; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
 .privacy-status svg { width: 14px; height: 14px; }
 .privacy-status.unlocked { background: var(--private-soft); border-color: #cdbff0; color: var(--private); }
 .privacy-status:hover { border-color: var(--border-strong); }
+@media (max-width: 760px), (pointer: coarse) { .privacy-status { min-height: 40px; } }
 
 /* ---------- Misc ---------- */
 .callout { padding: 12px 14px; border-radius: var(--r-md); background: var(--accent-soft); color: var(--accent-hover); font-size: 14px; display: flex; gap: 10px; align-items: flex-start; }

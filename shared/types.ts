@@ -4,6 +4,11 @@
  * server unless the viewer is the owning dreamer AND their session has private
  * entries unlocked; in that case `isPrivate` is populated. For every other viewer
  * `isPrivate` is always false (private rows simply do not exist in their responses).
+ *
+ * Write responses (POST/PATCH) are read back with the same visibility as a GET, so they never carry a
+ * private row or note the viewer cannot currently see. A write whose result is not visible right now (a
+ * private entry saved while private entries are hidden) responds with `null`; judge what happened from
+ * the request, never from the response.
  */
 import type { RatingCategory, CareCategory } from './care';
 
@@ -224,7 +229,10 @@ export interface Snapshot {
    */
   lastSelfActivity: { at: string; kind: 'check-in' | 'reflection' } | null;
   selfCheckIns30d: number;
-  /** Visible self journal entries (reflections and check-in notes) in the last 30 days; session entries are not counted. */
+  /**
+   * Visible journal entries the dreamer wrote in the last 30 days: reflections plus their notes on
+   * ratings and progress updates (session-recorded ones included). Coach-written entries are not counted.
+   */
   journalEntries30d: number;
   sessionsCompleted: number;
 }
@@ -236,6 +244,12 @@ export interface DreamerOverview {
   recentActivity: TimelineItem[];
 }
 
+/**
+ * Ratings and progress recorded in a coaching session are not listed one by one: their session item
+ * carries them (`item.ratings[category]`, `item.progress[dreamId]`), so a category or dream filter keeps
+ * the session items that have a value for it. Rating/progress items with `source: 'session'` and
+ * `sessionId: null` are values whose session was later deleted.
+ */
 export type TimelineItem =
   | { kind: 'rating'; at: string; item: RatingEntry }
   | { kind: 'progress'; at: string; item: ProgressEntry; dreamTitle: string }
@@ -322,7 +336,7 @@ export interface CoachSummary {
   sessionsTotal: number;
   /** % of active dreamers with a completed session in the last 45 days. */
   participation45d: number | null;
-  /** Active dreamers with a shared self check-in or self journal entry in the last 30 days (out of activeDreamers). */
+  /** Active dreamers with a shared self check-in or journal entry of their own in the last 30 days (out of activeDreamers). */
   engagedBetweenSessions30d: number;
   /** Mean change in CARE average between first and latest session (dreamers with >= 2 sessions). */
   careChange: { value: number; n: number } | null;
@@ -356,6 +370,8 @@ export interface DirectorOverview {
   totals: {
     coaches: number;
     dreamers: number;
+    /** Dreamers (any status) with no coach assigned; they appear in no coach row, so coach rows sum to dreamers − this. */
+    unassignedDreamers: number;
     activeDreamers: number;
     sessionsTotal: number;
     sessionsLast30d: number;

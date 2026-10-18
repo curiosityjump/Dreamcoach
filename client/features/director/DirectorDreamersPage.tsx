@@ -14,7 +14,7 @@ import { staffDreamerPath } from '@/app/routes';
 import { useToast } from '@/components/toast';
 import { Avatar, Button, Card, EmptyState, Field, LoadingPage, Modal, PageHeader, TextInput } from '@/components/ui';
 import { IconArrowRight, IconChevronDown, IconInfo, IconPlay, IconRefresh, IconSearch, IconUsers } from '@/components/icons';
-import { plural } from '@/lib/format';
+import { firstName, plural } from '@/lib/format';
 import { CareCell, CareChangeValue, DreamsCell, LastSelfCell, LastSessionCell, PersonCell, TableScroll, Th, achievedCount } from './DirectorMetrics';
 import { DirectorRowMenu } from './DirectorRowMenu';
 
@@ -24,33 +24,44 @@ type SortDir = 'asc' | 'desc';
 type StatusFilter = 'all' | DreamerStatus;
 const UNASSIGNED = 'none';
 
-const SORT_LABEL: Record<SortKey, string> = {
-  name: 'Name',
-  lastActivity: 'Last self activity',
-  lastSession: 'Last session',
-  careAvg: 'CARE average',
-  careChange: 'CARE change',
-  dreamAvg: 'Dream progress',
-};
+/** Every sort the table headers offer, in both directions, for the Sort by menu (the only sort control on phones). */
+const SORT_OPTIONS: { key: SortKey; dir: SortDir; label: string }[] = [
+  { key: 'name', dir: 'asc', label: 'Name, A–Z' },
+  { key: 'name', dir: 'desc', label: 'Name, Z–A' },
+  { key: 'lastSession', dir: 'desc', label: 'Last session, newest first' },
+  { key: 'lastSession', dir: 'asc', label: 'Last session, oldest first' },
+  { key: 'lastActivity', dir: 'desc', label: 'Self activity, newest first' },
+  { key: 'lastActivity', dir: 'asc', label: 'Self activity, oldest first' },
+  { key: 'careAvg', dir: 'desc', label: 'CARE average, highest first' },
+  { key: 'careAvg', dir: 'asc', label: 'CARE average, lowest first' },
+  { key: 'careChange', dir: 'desc', label: 'CARE change, largest first' },
+  { key: 'careChange', dir: 'asc', label: 'CARE change, smallest first' },
+  { key: 'dreamAvg', dir: 'desc', label: 'Dream progress, highest first' },
+  { key: 'dreamAvg', dir: 'asc', label: 'Dream progress, lowest first' },
+];
+const sortValue = (s: { key: SortKey; dir: SortDir }) => `${s.key}:${s.dir}`;
 const STATUS_FILTER_LABEL: Record<StatusFilter, string> = { all: 'All statuses', active: 'Active', paused: 'Paused', completed: 'Completed program' };
 const STATUS_WORD: Record<DreamerStatus, string> = { active: 'active', paused: 'paused', completed: 'completed' };
 
+/** Never having a session (or self activity) sorts as the longest time ago. */
 const time = (iso: string | null | undefined) => (iso ? Date.parse(iso) : 0);
-const numOrNeg = (n: number | null | undefined) => (n == null ? Number.NEGATIVE_INFINITY : n);
+/** Missing figures sort last in either direction, so "lowest first" starts with real values. */
+const byNumber = (x: number | null | undefined, y: number | null | undefined, sign: number) =>
+  x == null || y == null ? (x == null ? 1 : 0) - (y == null ? 1 : 0) : (x - y) * sign;
 
 function sortRows(rows: DirectorDreamerRow[], key: SortKey, dir: SortDir): DirectorDreamerRow[] {
   const sign = dir === 'asc' ? 1 : -1;
   return [...rows].sort((a, b) => {
     let d = 0;
     switch (key) {
-      case 'name': d = a.dreamer.name.localeCompare(b.dreamer.name); break;
-      case 'lastActivity': d = time(a.snapshot.lastSelfActivity?.at) - time(b.snapshot.lastSelfActivity?.at); break;
-      case 'lastSession': d = time(a.snapshot.lastSession?.occurredAt) - time(b.snapshot.lastSession?.occurredAt); break;
-      case 'careAvg': d = numOrNeg(a.careAverage) - numOrNeg(b.careAverage); break;
-      case 'careChange': d = numOrNeg(a.careChange) - numOrNeg(b.careChange); break;
-      case 'dreamAvg': d = numOrNeg(a.dreamAverage) - numOrNeg(b.dreamAverage); break;
+      case 'name': d = a.dreamer.name.localeCompare(b.dreamer.name) * sign; break;
+      case 'lastActivity': d = (time(a.snapshot.lastSelfActivity?.at) - time(b.snapshot.lastSelfActivity?.at)) * sign; break;
+      case 'lastSession': d = (time(a.snapshot.lastSession?.occurredAt) - time(b.snapshot.lastSession?.occurredAt)) * sign; break;
+      case 'careAvg': d = byNumber(a.careAverage, b.careAverage, sign); break;
+      case 'careChange': d = byNumber(a.careChange, b.careChange, sign); break;
+      case 'dreamAvg': d = byNumber(a.dreamAverage, b.dreamAverage, sign); break;
     }
-    return d * sign || a.dreamer.name.localeCompare(b.dreamer.name);
+    return d || a.dreamer.name.localeCompare(b.dreamer.name);
   });
 }
 
@@ -70,6 +81,13 @@ function CoachCell({ coach, avatar }: { coach: DirectorDreamerRow['dreamer']['co
 
 /* ---------- Row menu + reassign dialog ---------- */
 
+/** Two bars, drawn like the kit icons (24-unit grid, 2px round strokes). */
+const IconPause = () => (
+  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M9 5v14M15 5v14" />
+  </svg>
+);
+
 interface RowActions {
   onOpen: (row: DirectorDreamerRow) => void;
   onReassign: (row: DirectorDreamerRow) => void;
@@ -86,7 +104,7 @@ function RowMenu({ row, actions }: { row: DirectorDreamerRow; actions: RowAction
       items={[
         { key: 'open', label: 'Open dreamer page', icon: <IconArrowRight />, onSelect: () => actions.onOpen(row), testId: 'director-dreamer-open' },
         { key: 'reassign', label: 'Reassign coach…', icon: <IconRefresh />, onSelect: () => actions.onReassign(row), testId: 'director-dreamer-reassign' },
-        { key: 'status', label: paused ? 'Mark active' : 'Mark paused', icon: <IconPlay />, onSelect: () => actions.onToggleStatus(row), disabled: actions.busyId === row.dreamer.id, testId: 'director-dreamer-toggle-status' },
+        { key: 'status', label: paused ? 'Mark active' : 'Mark paused', icon: paused ? <IconPlay /> : <IconPause />, onSelect: () => actions.onToggleStatus(row), disabled: actions.busyId === row.dreamer.id, testId: 'director-dreamer-toggle-status' },
       ]}
     />
   );
@@ -108,6 +126,10 @@ function ReassignDialog({ row, staff, onClose }: { row: DirectorDreamerRow | nul
   const chosen = value === UNASSIGNED ? null : Number(value);
   const unchanged = chosen === current;
   const target = chosen == null ? null : staff.find((s) => s.id === chosen) ?? null;
+  // An open session moves with the dreamer: the new coach continues it, and it counts for whoever completes it.
+  const hint = row.snapshot.openSession && !unchanged
+    ? `${firstName(row.dreamer.name)} has a session in progress. ${target ? firstName(target.name) : 'Their next coach'} can continue it, and it counts for whoever completes it.`
+    : 'The dreamer’s dreams, sessions and history stay exactly as they are — only who coaches them changes.';
 
   const save = () => {
     setError(null);
@@ -140,10 +162,10 @@ function ReassignDialog({ row, staff, onClose }: { row: DirectorDreamerRow | nul
           <Avatar initials={row.dreamer.initials} />
           <span className="dir-person-text">
             <span className="dir-person-name">{row.dreamer.name}</span>
-            <span className="dir-person-about">{row.dreamer.coach ? `Currently coached by ${row.dreamer.coach.name}` : 'No coach assigned yet'}</span>
+            <span className="dir-person-about">{row.dreamer.coach ? `Currently coached by ${row.dreamer.coach.name}` : 'No coach assigned'}</span>
           </span>
         </div>
-        <Field label="New coach" htmlFor="dir-reassign-select" error={error} hint="The dreamer’s dreams, sessions and history stay exactly as they are — only who coaches them changes.">
+        <Field label="New coach" htmlFor="dir-reassign-select" error={error} hint={hint}>
           <select id="dir-reassign-select" value={value} onChange={(e) => setValue(e.target.value)} data-testid="director-reassign-select">
             {staff.map((s) => (
               <option key={s.id} value={String(s.id)}>{staffLabel(s)}{s.id === current ? ' (current)' : ''}</option>
@@ -161,8 +183,10 @@ function ReassignDialog({ row, staff, onClose }: { row: DirectorDreamerRow | nul
 function SortTh({ k, sort, onSort, children, className = '' }: { k: SortKey; sort: { key: SortKey; dir: SortDir }; onSort: (k: SortKey) => void; children: ReactNode; className?: string }) {
   const active = sort.key === k;
   return (
-    <th scope="col" className={`sortable ${className}`} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} onClick={() => onSort(k)} data-testid={`director-dreamers-sort-${k}`}>
-      <span className="dir-th">{children}{active && <IconChevronDown className={`dir-sort-icon${sort.dir === 'asc' ? ' is-asc' : ''}`} />}</span>
+    <th scope="col" className={`sortable ${className}`} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} data-testid={`director-dreamers-sort-${k}`}>
+      <button type="button" className="dir-th dir-sort-btn" onClick={() => onSort(k)}>
+        {children}{active && <IconChevronDown className={`dir-sort-icon${sort.dir === 'asc' ? ' is-asc' : ''}`} />}
+      </button>
     </th>
   );
 }
@@ -282,7 +306,8 @@ export function DirectorDreamersPage() {
 
   const staff = staffQ.data ?? [];
   const all = dreamers.data ?? [];
-  const hasUnassigned = all.some((r) => !r.dreamer.coach);
+  // Offered while someone has no coach, and kept while it is the active filter so the menu never misstates it.
+  const showUnassigned = coachFilter === UNASSIGNED || all.some((r) => !r.dreamer.coach);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -356,7 +381,7 @@ export function DirectorDreamersPage() {
               <select value={coachFilter} onChange={(e) => setCoachFilter(e.target.value)} aria-label="Filter by coach" data-testid="director-dreamers-coach-filter">
                 <option value="all">All coaches</option>
                 {staff.map((s) => <option key={s.id} value={String(s.id)}>{staffLabel(s)}</option>)}
-                {hasUnassigned && <option value={UNASSIGNED}>No coach assigned</option>}
+                {showUnassigned && <option value={UNASSIGNED}>No coach assigned</option>}
               </select>
             </label>
             <label className="dir-filter">
@@ -365,10 +390,10 @@ export function DirectorDreamersPage() {
                 {(Object.keys(STATUS_FILTER_LABEL) as StatusFilter[]).map((k) => <option key={k} value={k}>{STATUS_FILTER_LABEL[k]}</option>)}
               </select>
             </label>
-            <label className="dir-filter">
+            <label className="dir-filter dir-filter-sort">
               <span>Sort by</span>
-              <select value={sort.key} onChange={(e) => { const key = e.target.value as SortKey; setSort({ key, dir: key === 'name' ? 'asc' : 'desc' }); }} aria-label="Sort dreamers" data-testid="director-dreamers-sort">
-                {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => <option key={k} value={k}>{SORT_LABEL[k]}</option>)}
+              <select value={sortValue(sort)} onChange={(e) => { const o = SORT_OPTIONS.find((x) => sortValue(x) === e.target.value); if (o) setSort({ key: o.key, dir: o.dir }); }} aria-label="Sort dreamers" data-testid="director-dreamers-sort">
+                {SORT_OPTIONS.map((o) => <option key={sortValue(o)} value={sortValue(o)}>{o.label}</option>)}
               </select>
             </label>
             <span className="dir-toolbar-count" aria-live="polite" data-testid="director-dreamers-count">{countLabel}</span>

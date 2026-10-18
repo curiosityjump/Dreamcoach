@@ -18,11 +18,20 @@ import { useToast } from '@/components/toast';
 import { Avatar, Bar, Button, Card, CardHead, Chip, EmptyState, LoadingPage, PageHeader, Stat } from '@/components/ui';
 import { IconArrowRight, IconChevronDown, IconInfo, IconPlay, IconUsers } from '@/components/icons';
 import { fmtDate, fmtDateTime, num, pct, plural, relativeTime } from '@/lib/format';
+import { textShade } from '@/lib/color';
 
 type SortKey = 'name' | 'lastSession' | 'lastActivity';
 type SortDir = 'asc' | 'desc';
 
-const SORT_LABEL: Record<SortKey, string> = { name: 'Name', lastSession: 'Last session', lastActivity: 'Last self activity' };
+// The select offers both directions, so phones (cards, no headers) and keyboards can reverse the order too.
+const SORT_OPTIONS: { key: SortKey; dir: SortDir; label: string }[] = [
+  { key: 'name', dir: 'asc', label: 'Name · A–Z' },
+  { key: 'name', dir: 'desc', label: 'Name · Z–A' },
+  { key: 'lastSession', dir: 'desc', label: 'Last session · newest first' },
+  { key: 'lastSession', dir: 'asc', label: 'Last session · oldest first' },
+  { key: 'lastActivity', dir: 'desc', label: 'Last self activity · newest first' },
+  { key: 'lastActivity', dir: 'asc', label: 'Last self activity · oldest first' },
+];
 const STATUS_LABEL: Record<DreamerStatus, string | null> = { active: null, paused: 'Paused', completed: 'Completed program' };
 
 const time = (iso: string | null | undefined) => (iso ? Date.parse(iso) : 0);
@@ -82,7 +91,7 @@ function CareCell({ entry }: { entry: CaseloadEntry }) {
       <span className="cv-care-avg tnum">{num(entry.careAverage)}</span>
       <span className="cv-care-mini" aria-label={CARE_CATEGORIES.map((c) => `${CATEGORY_META[c].label} ${latest[c]?.value ?? 'not rated'}`).join(', ')}>
         {CARE_CATEGORIES.map((c) => (
-          <span key={c} className="tnum" style={{ color: CATEGORY_META[c].color }} aria-hidden>
+          <span key={c} className="tnum" style={{ color: textShade(CATEGORY_META[c].color) }} aria-hidden>
             <span className="cv-care-mini-key">{CATEGORY_META[c].short}</span>{latest[c]?.value ?? '–'}
           </span>
         ))}
@@ -136,8 +145,10 @@ function RowActions({ entry, size = 'sm' }: { entry: CaseloadEntry; size?: 'sm' 
 function SortHeader({ k, sort, onSort, children, className = '' }: { k: SortKey; sort: { key: SortKey; dir: SortDir }; onSort: (k: SortKey) => void; children: ReactNode; className?: string }) {
   const active = sort.key === k;
   return (
-    <th scope="col" className={`sortable ${className}`} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} onClick={() => onSort(k)} data-testid={`caseload-sort-${k}`}>
-      <span className="cv-th">{children}{active && <IconChevronDown className={`cv-sort-icon${sort.dir === 'asc' ? ' is-asc' : ''}`} />}</span>
+    <th scope="col" className={`sortable ${className}`} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} data-testid={`caseload-sort-${k}`}>
+      <button type="button" className="cv-th cv-sort-btn" onClick={() => onSort(k)}>
+        {children}{active && <IconChevronDown className={`cv-sort-icon${sort.dir === 'asc' ? ' is-asc' : ''}`} />}
+      </button>
     </th>
   );
 }
@@ -255,7 +266,7 @@ export function CoachDashboardPage() {
       <PageHeader eyebrow="Dream Coach" title="My dreamers" lead={lead} />
 
       <div className="stat-row cv-stats" data-testid="coach-stats">
-        <Stat label="Dreamers" value={stats.dreamers} sub={caseload.filter((c) => c.dreamer.status === 'active').length === stats.dreamers ? 'all active' : `${caseload.filter((c) => c.dreamer.status === 'active').length} active`} />
+        <Stat label="Dreamers" value={stats.dreamers} sub={stats.dreamers === 0 ? 'no dreamers assigned' : stats.activeDreamers === stats.dreamers ? 'all active' : `${stats.activeDreamers} active`} />
         <Stat label="Sessions this month" value={stats.sessionsThisMonth} sub={`${stats.sessionsLast30d} in the last 30 days`} />
         <Stat label="Seen in the last 45 days" value={`${stats.dreamersSeenLast45d} of ${stats.activeDreamers}`} sub="completed a session" />
         <Stat label="Self check-ins" value={stats.selfCheckInsLast30d} sub="last 30 days, across your dreamers" />
@@ -269,15 +280,22 @@ export function CoachDashboardPage() {
           actions={caseload.length > 1 ? (
             <label className="cv-sort">
               <span className="muted small">Sort by</span>
-              <select value={sort.key} onChange={(e) => setSort({ key: e.target.value as SortKey, dir: e.target.value === 'name' ? 'asc' : 'desc' })} aria-label="Sort caseload" data-testid="caseload-sort-select">
-                {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => <option key={k} value={k}>{SORT_LABEL[k]}</option>)}
+              <select
+                value={`${sort.key}:${sort.dir}`}
+                onChange={(e) => { const [key, dir] = e.target.value.split(':') as [SortKey, SortDir]; setSort({ key, dir }); }}
+                aria-label="Sort caseload"
+                data-testid="caseload-sort-select"
+              >
+                {SORT_OPTIONS.map((o) => <option key={`${o.key}:${o.dir}`} value={`${o.key}:${o.dir}`}>{o.label}</option>)}
               </select>
             </label>
           ) : undefined}
         />
         {caseload.length === 0 ? (
           <EmptyState icon={<IconUsers />} title="No dreamers yet" >
-            When the Director assigns dreamers to you, they will appear here with their dreams, sessions and recent activity.
+            {auth?.user.role === 'director'
+              ? 'Assign yourself a dreamer from All dreamers and they will appear here, ready for a session.'
+              : 'When the Director assigns dreamers to you, they will appear here with their dreams, sessions and recent activity.'}
           </EmptyState>
         ) : (
           <>

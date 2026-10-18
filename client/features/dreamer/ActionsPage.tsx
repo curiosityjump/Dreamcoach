@@ -44,6 +44,7 @@ export function ActionsPage() {
     [all, dreamFilter, categoryFilter],
   );
   const filtering = dreamFilter != null || categoryFilter != null;
+  const inTab = filtered.filter((a) => a.status === tab).length;
   const clearFilters = () => { setDreamFilter(null); setCategoryFilter(null); };
 
   const empty = filtering
@@ -133,9 +134,9 @@ export function ActionsPage() {
           )}
 
           <Card data-testid="actions-list-card">
-            {filtering && filtered.length > 0 && (
+            {filtering && inTab > 0 && (
               <p className="da-filter-summary muted small" data-testid="actions-filter-summary">
-                {plural(filtered.filter((a) => a.status === tab).length, 'action')} {tab === 'archived' ? 'set aside' : tab} {dreamFilter != null ? `for “${dreamList.find((d) => d.id === dreamFilter)?.title ?? 'this dream'}”` : ''}{dreamFilter != null && categoryFilter ? ' and ' : ''}{categoryFilter ? `in ${CATEGORY_META[categoryFilter].label}` : ''}
+                {plural(inTab, 'action')} {tab === 'archived' ? 'set aside' : tab} {dreamFilter != null ? `for “${dreamList.find((d) => d.id === dreamFilter)?.title ?? 'this dream'}”` : ''}{dreamFilter != null && categoryFilter ? ' and ' : ''}{categoryFilter ? `in ${CATEGORY_META[categoryFilter].label}` : ''}
               </p>
             )}
             <ActionList

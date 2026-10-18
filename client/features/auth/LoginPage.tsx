@@ -1,16 +1,16 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '@/auth/AuthContext';
 import { get, errorMessage } from '@/api/client';
 import { Button, Field, TextInput, Avatar } from '@/components/ui';
-import { IconBrand } from '@/components/icons';
+import { IconBrand, IconInfo } from '@/components/icons';
 import type { User } from '@shared/types';
 import { homeFor } from '@/app/routes';
 
 interface DemoAccount extends User { coachName: string | null; caseload: number }
 
 export function LoginPage() {
-  const { auth, login } = useAuth();
+  const { auth, login, sessionEnded } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
   const [email, setEmail] = useState('');
@@ -18,6 +18,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [accounts, setAccounts] = useState<DemoAccount[]>([]);
+  const form = useRef<HTMLFormElement>(null);
 
   useEffect(() => { get<DemoAccount[]>('/auth/demo-accounts').then(setAccounts).catch(() => {}); }, []);
 
@@ -37,6 +38,15 @@ export function LoginPage() {
     }
   };
 
+  // On a phone the accounts sit below the form: bring the filled-in form back into view, ready to sign in.
+  const pick = (a: DemoAccount) => {
+    setEmail(a.email);
+    setPassword('dream2026');
+    setError(null);
+    form.current?.querySelector<HTMLElement>('button[type=submit]')?.focus({ preventScroll: true });
+    form.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+
   const groups: { role: User['role']; title: string; blurb: string }[] = [
     { role: 'dreamer', title: 'Dreamers', blurb: 'A personal space for dreams, actions, reflections, and progress.' },
     { role: 'coach', title: 'Dream Coaches', blurb: 'Caseload at a glance and a live one-on-one workspace.' },
@@ -53,7 +63,12 @@ export function LoginPage() {
             <p className="muted">Dreams belong to the dreamer.</p>
           </div>
         </div>
-        <form onSubmit={submit} className="stack" style={{ marginTop: 24 }}>
+        {sessionEnded && (
+          <div className="callout callout-muted" style={{ marginTop: 24 }} role="status" data-testid="login-session-ended">
+            <IconInfo /><span>You’ve been signed out. Sign in again to pick up where you left off.</span>
+          </div>
+        )}
+        <form ref={form} onSubmit={submit} className="stack" style={{ marginTop: 24 }}>
           <Field label="Email" htmlFor="email">
             <TextInput id="email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="you@dreamcoach.demo" />
           </Field>
@@ -76,7 +91,7 @@ export function LoginPage() {
               <p className="muted small">{g.blurb}</p>
               <div className="login-accounts">
                 {list.map((a) => (
-                  <button key={a.id} type="button" className="login-account" onClick={() => { setEmail(a.email); setPassword('dream2026'); setError(null); }} data-testid={`demo-${a.email}`}>
+                  <button key={a.id} type="button" className="login-account" onClick={() => pick(a)} data-testid={`demo-${a.email}`}>
                     <Avatar initials={a.initials} size="sm" tone={a.role === 'director' ? 'plum' : a.role === 'coach' ? 'gold' : undefined} />
                     <span className="grow">
                       <span className="login-account-name">{a.name}</span>

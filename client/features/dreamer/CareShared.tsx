@@ -5,9 +5,12 @@
  */
 import { useEffect, useState, type CSSProperties } from 'react';
 import { CATEGORY_META, type RatingCategory } from '@shared/care';
-import type { AuthState, LatestRating, RatingEntry } from '@shared/types';
+import type { AuthState, CoachingSession, LatestRating, RatingEntry } from '@shared/types';
 import type { TrendPoint } from '@/components/charts';
+import { Chip, Delta } from '@/components/ui';
+import { IconLock } from '@/components/icons';
 import { fmtDate } from '@/lib/format';
+import { sessionBaseline } from '@/lib/sessionDelta';
 
 export const PRIVATE_HIDDEN_MSG = 'Saved as private — private entries are currently hidden.';
 
@@ -27,9 +30,31 @@ export function toTrendPoint(e: RatingEntry): TrendPoint {
   return { at: e.occurredAt, value: e.value, source: e.source, isPrivate: e.isPrivate, note: e.note?.body ?? null };
 }
 
-/** Who recorded a session entry, for the SourceChip ("Session · Daniel Okafor"). */
+/**
+ * Who recorded a session entry, for the SourceChip ("Session · Daniel Okafor"). A value whose session was
+ * later removed (sessionId null) is just "Coaching session".
+ */
 export function coachNameFor(e: RatingEntry): string | undefined {
-  return e.source === 'session' && e.recordedBy.role !== 'dreamer' ? e.recordedBy.name : undefined;
+  return e.source === 'session' && e.sessionId != null && e.recordedBy.role !== 'dreamer' ? e.recordedBy.name : undefined;
+}
+
+/**
+ * A current value's change, measured against a coaching session and labelled the way the coach's overview
+ * labels it ("▲ 1 vs S8", "▼ 2 since S9"), so both see the same numbers. `sessions` oldest first.
+ */
+export function SessionDelta({ entry, sessions }: { entry: Pick<LatestRating, 'category' | 'value' | 'occurredAt' | 'source'>; sessions: CoachingSession[] }) {
+  const base = sessionBaseline(sessions, entry.occurredAt, entry.source === 'session', (s) => s.ratings[entry.category]);
+  if (!base) return null;
+  return (
+    <span className="dc-cat-delta" data-testid="care-delta">
+      <Delta value={entry.value - base.value} digits={0} /> <span className="muted tiny">{base.label}</span>
+    </span>
+  );
+}
+
+/** Stands in for a note's own switch while its rating or progress update is private: the note is private with it. */
+export function NotePrivateWith({ parent }: { parent: 'rating' | 'update' }) {
+  return <Chip className="chip-private"><IconLock /> Note private with its {parent}</Chip>;
 }
 
 /** "Session · Oct 14" / "Self check-in · Oct 14". */
@@ -63,19 +88,24 @@ export function rangeInsight(category: RatingCategory, entries: RatingEntry[], n
   return `Your ${label} ranged ${lo}–${hi} across ${n} ${window}${mix}.`;
 }
 
-/** True below the given width; re-evaluates on resize. Used to simplify the wheel on phones. */
-export function useNarrow(maxWidth = 640): boolean {
-  const query = `(max-width: ${maxWidth}px)`;
-  const [narrow, setNarrow] = useState(() => (typeof window !== 'undefined' ? window.matchMedia(query).matches : false));
+/** Whether a media query matches; re-evaluates when it changes. */
+function useMedia(query: string): boolean {
+  const [matches, setMatches] = useState(() => (typeof window !== 'undefined' ? window.matchMedia(query).matches : false));
   useEffect(() => {
     const mq = window.matchMedia(query);
-    const h = (e: MediaQueryListEvent) => setNarrow(e.matches);
-    setNarrow(mq.matches);
+    const h = (e: MediaQueryListEvent) => setMatches(e.matches);
+    setMatches(mq.matches);
     mq.addEventListener('change', h);
     return () => mq.removeEventListener('change', h);
   }, [query]);
-  return narrow;
+  return matches;
 }
+
+/** True below the given width. Used to simplify the wheel on phones. */
+export const useNarrow = (maxWidth = 640) => useMedia(`(max-width: ${maxWidth}px)`);
+
+/** True on touch-first devices, so instructions say "tap" rather than "click" or "hover". */
+export const useTouch = () => useMedia('(pointer: coarse)');
 
 /** The value badge used in entry lists: a number on the category's tint. */
 export function ValueBadge({ category, value, large }: { category: RatingCategory; value: number; large?: boolean }) {

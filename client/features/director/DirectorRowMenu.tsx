@@ -1,8 +1,10 @@
 /**
  * A small "⋯" menu for table rows and cards. The menu itself is rendered in a
  * portal with fixed positioning so it is never clipped by a scrolling table.
+ * Opening it moves focus to the first item; the arrow keys, Home and End move
+ * through the items; Escape, Tab or focus leaving the menu closes it.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { IconMore } from '@/components/icons';
 
@@ -27,6 +29,14 @@ export function DirectorRowMenu({ items, label, testId }: { items: RowMenuItem[]
 
   useLayoutEffect(() => { if (open) place(); }, [open, place]);
 
+  const enabledItems = () => [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+  /** Close and hand focus back to the ⋯ button, so a dialog an item opens can return it there. */
+  const closeToButton = () => { btnRef.current?.focus(); setOpen(false); };
+
+  // The menu mounts once it has a position; then its first item takes focus.
+  const placed = pos !== null;
+  useEffect(() => { if (open && placed) enabledItems()[0]?.focus(); }, [open, placed]);
+
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(false);
@@ -50,17 +60,50 @@ export function DirectorRowMenu({ items, label, testId }: { items: RowMenuItem[]
     };
   }, [open, place]);
 
+  const onMenuKeyDown = (e: ReactKeyboardEvent) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeToButton(); return; }
+    // Tab leaves from the ⋯ button, so focus moves on to the control after (or before) it in the page.
+    if (e.key === 'Tab') { closeToButton(); return; }
+    const els = enabledItems();
+    if (!els.length) return;
+    const i = els.indexOf(document.activeElement as HTMLButtonElement);
+    const next = e.key === 'ArrowDown' ? (i + 1) % els.length
+      : e.key === 'ArrowUp' ? (i <= 0 ? els.length - 1 : i - 1)
+      : e.key === 'Home' ? 0
+      : e.key === 'End' ? els.length - 1
+      : null;
+    if (next == null) return;
+    e.preventDefault();
+    els[next]!.focus();
+  };
+
+  // Only a move to another element counts: a click elsewhere (which may focus nothing) is the mousedown handler's.
+  const onMenuBlur = (e: FocusEvent) => {
+    const to = e.relatedTarget;
+    if (to instanceof Node && !menuRef.current?.contains(to) && !btnRef.current?.contains(to)) setOpen(false);
+  };
+
   const stop = (e: MouseEvent) => e.stopPropagation();
 
   return (
     <span className="dir-row-menu" onClick={stop} onKeyDown={(e) => e.stopPropagation()}>
-      <button ref={btnRef} type="button" className="btn btn-ghost btn-icon dir-row-menu-btn" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} data-testid={testId}>
+      <button
+        ref={btnRef}
+        type="button"
+        className="btn btn-ghost btn-icon dir-row-menu-btn"
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        onKeyDown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); setOpen(true); } }}
+        data-testid={testId}
+      >
         <IconMore />
       </button>
       {open && pos && createPortal(
-        <div ref={menuRef} className="dir-menu" role="menu" style={{ top: pos.top, left: pos.left }} onClick={stop} data-testid={testId ? `${testId}-list` : undefined}>
+        <div ref={menuRef} className="dir-menu" role="menu" aria-label={label} style={{ top: pos.top, left: pos.left }} onClick={stop} onKeyDown={onMenuKeyDown} onBlur={onMenuBlur} data-testid={testId ? `${testId}-list` : undefined}>
           {items.map((it) => (
-            <button key={it.key} type="button" role="menuitem" className="menu-item" disabled={it.disabled} onClick={(e) => { e.stopPropagation(); setOpen(false); it.onSelect(); }} data-testid={it.testId}>
+            <button key={it.key} type="button" role="menuitem" tabIndex={-1} className="menu-item" disabled={it.disabled} onClick={(e) => { e.stopPropagation(); closeToButton(); it.onSelect(); }} data-testid={it.testId}>
               {it.icon}{it.label}
             </button>
           ))}

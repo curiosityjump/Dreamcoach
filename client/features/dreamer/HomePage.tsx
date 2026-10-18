@@ -16,6 +16,7 @@ import { TimelineFeed } from '@/features/shared/Timeline';
 import { CARE_CATEGORIES, CATEGORY_META, type CareCategory } from '@shared/care';
 import type { CoachingSession, Dream, DreamerOverview, LatestRating, Snapshot } from '@shared/types';
 import { firstName, fmtDate, fmtDateLong, plural, relativeTime } from '@/lib/format';
+import { sessionBaseline } from '@/lib/sessionDelta';
 
 /* ---------- Small helpers ---------- */
 
@@ -59,6 +60,33 @@ function latestSummary(latest: Snapshot['latest'], coachName: string | null): st
 }
 
 const sourceLabel = (r: LatestRating) => `${r.source === 'session' ? 'Session' : 'Self check-in'} · ${fmtDate(r.occurredAt)}`;
+
+type Baseline = ReturnType<typeof sessionBaseline>;
+
+/** What a rating's current value is compared with: the coaching session the coach's views use too. */
+const ratingBaseline = (sessions: CoachingSession[], r: LatestRating): Baseline => sessionBaseline(sessions, r.occurredAt, r.source === 'session', (s) => s.ratings[r.category]);
+
+/** A dream's current progress compared with a coaching session (the same baseline as the coach's overview). */
+export function dreamBaseline(sessions: CoachingSession[], d: Dream): Baseline {
+  if (d.progress == null || d.progressAt == null) return null;
+  const fromSession = sessions.some((s) => s.occurredAt === d.progressAt && s.progress[d.id] === d.progress);
+  return sessionBaseline(sessions, d.progressAt, fromSession, (s) => s.progress[d.id]);
+}
+
+/**
+ * The change next to a current value, measured against a coaching session and saying which one ("vs S8",
+ * "since S9"), so it agrees with the session pages and the coach's notes. Nothing when there is no session
+ * to compare with yet.
+ */
+export function SessionDelta({ value, base, suffix }: { value: number; base: Baseline; suffix?: string }) {
+  if (!base) return null;
+  return (
+    <span className="dh-delta" data-testid="session-delta">
+      <Delta value={value - base.value} digits={0} suffix={suffix} />
+      <span className="dh-delta-ref">{base.label}</span>
+    </span>
+  );
+}
 
 /* ---------- Page ---------- */
 
@@ -121,12 +149,13 @@ export function HomePage() {
 /* ---------- Your dreams ---------- */
 
 function DreamsCard({ dreams }: { dreams: Dream[] }) {
+  const sessions = useSessions('me').data ?? [];
   return (
     <Card data-testid="home-dreams">
       <CardHead title="Your dreams" sub="Where you're heading, and how far you've come" actions={<Link to="/dreams" className="btn btn-ghost btn-sm" data-testid="home-dreams-all">All dreams</Link>} />
       {dreams.length ? (
         <div className="dh-dreams">
-          {dreams.map((d) => <DreamRow key={d.id} dream={d} />)}
+          {dreams.map((d) => <DreamRow key={d.id} dream={d} base={dreamBaseline(sessions, d)} />)}
         </div>
       ) : (
         <EmptyState icon={<IconStar />} title="Your dreams live here">Once your four dreams are set up, you'll see their progress here.</EmptyState>
@@ -135,9 +164,8 @@ function DreamsCard({ dreams }: { dreams: Dream[] }) {
   );
 }
 
-function DreamRow({ dream }: { dream: Dream }) {
+function DreamRow({ dream, base }: { dream: Dream; base: Baseline }) {
   const achieved = !!dream.achievedAt;
-  const delta = dream.progress != null && dream.previousProgress != null ? dream.progress - dream.previousProgress : null;
   return (
     <Link to={`/dreams/${dream.id}`} className="dh-dream" data-testid="home-dream" data-dream-id={dream.id}>
       <div className="dh-dream-top">
@@ -153,10 +181,10 @@ function DreamRow({ dream }: { dream: Dream }) {
         {dream.progressIsPrivate && <span data-testid="home-dream-private"><PrivateChip /></span>}
         {dream.progress == null ? (
           <span>No progress recorded yet</span>
-        ) : delta != null ? (
-          <span className="row" title="Change since the previous progress update"><Delta value={delta} digits={0} suffix=" pts" /></span>
+        ) : base ? (
+          <SessionDelta value={dream.progress} base={base} suffix=" pts" />
         ) : (
-          <span>First recorded {fmtDate(dream.progressAt)}</span>
+          <span>Updated {fmtDate(dream.progressAt)}</span>
         )}
         <span className="dh-dot" aria-hidden />
         <span>{dream.activeActions ? plural(dream.activeActions, 'active action') : 'No active actions'}</span>
@@ -168,6 +196,7 @@ function DreamRow({ dream }: { dream: Dream }) {
 /* ---------- CARE right now ---------- */
 
 function CareCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: string | null }) {
+  const sessions = useSessions('me').data ?? [];
   const latest = snapshot.latest;
   const wheel = useMemo<WheelValues>(() => Object.fromEntries(CARE_CATEGORIES.map((c) => [c, latest[c]?.value ?? null])) as WheelValues, [latest]);
   const summary = latestSummary(latest, coachName);
@@ -179,14 +208,18 @@ function CareCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: stri
         <WheelOfLife values={wheel} size={260} />
       </div>
       <div className="dh-care-rows">
-        {CARE_CATEGORIES.map((c) => <CareRow key={c} category={c} latest={latest[c]} />)}
+        {CARE_CATEGORIES.map((c) => <CareRow key={c} category={c} latest={latest[c]} base={latest[c] ? ratingBaseline(sessions, latest[c]) : null} />)}
       </div>
       <div className="dh-stats">
         {(['commitment', 'satisfaction'] as const).map((c) => {
           const l = latest[c];
           return (
             <div key={c} data-testid={`home-stat-${c}`}>
-              <Stat label={CATEGORY_META[c].label} value={l ? l.value : '—'} sub={l ? <>{sourceLabel(l)}{l.isPrivate && <PrivateMark testId={`home-stat-private-${c}`} />}</> : 'Not rated yet'} delta={l && l.previous != null ? l.value - l.previous : null} />
+              <Stat
+                label={CATEGORY_META[c].label}
+                value={l ? l.value : '—'}
+                sub={l ? <span className="dh-stat-sub"><SessionDelta value={l.value} base={ratingBaseline(sessions, l)} /><span>{sourceLabel(l)}</span>{l.isPrivate && <PrivateMark testId={`home-stat-private-${c}`} />}</span> : 'Not rated yet'}
+              />
             </div>
           );
         })}
@@ -195,9 +228,8 @@ function CareCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: stri
   );
 }
 
-function CareRow({ category, latest }: { category: CareCategory; latest: LatestRating | undefined }) {
+function CareRow({ category, latest, base }: { category: CareCategory; latest: LatestRating | undefined; base: Baseline }) {
   const m = CATEGORY_META[category];
-  const delta = latest && latest.previous != null ? latest.value - latest.previous : null;
   return (
     <Link to={`/care/${category}`} className="dh-care-row" data-testid={`home-care-${category}`} style={{ '--dh-color': m.color, '--dh-tint': m.tint } as CSSProperties}>
       <span className="dh-care-swatch" aria-hidden />
@@ -206,7 +238,7 @@ function CareRow({ category, latest }: { category: CareCategory; latest: LatestR
         <span className="dh-care-src">{latest ? sourceLabel(latest) : 'Not rated yet'}</span>
       </span>
       {latest?.isPrivate && <PrivateMark testId={`home-care-private-${category}`} />}
-      <span className="dh-care-delta">{latest && <Delta value={delta} digits={0} />}</span>
+      <span className="dh-care-delta">{latest && <SessionDelta value={latest.value} base={base} />}</span>
       <span className="dh-care-val tnum">{latest ? latest.value : '–'}</span>
     </Link>
   );
@@ -299,7 +331,10 @@ function CoachingCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: 
       {snapshot.openSession && (
         <div className="callout dh-open" data-testid="home-open-session">
           <IconMessage />
-          <span>A session with {who} is in progress. Notes and ratings will appear here once it's complete.</span>
+          <span>
+            A session with {who} is in progress — what you record together shows up as it's saved.{' '}
+            <Link to={`/sessions/${snapshot.openSession.id}`} className="dh-open-link" data-testid="home-open-session-link">Follow along <IconArrowRight /></Link>
+          </span>
         </div>
       )}
       {sessions.isLoading ? (

@@ -147,3 +147,75 @@ test('last self check-in is the newest check-in; last self activity says when a 
   assert.equal(mine.lastSelfActivity.kind, 'check-in');
   await dreamer.del(`/dreamers/me/journal/${pj.body.id}`);
 });
+
+test('a dreamer’s own note on a session-recorded entry counts as their journal activity', async () => {
+  const coach = await staff('priya@dreamcoach.demo');
+  const director = await staff('director@dreamcoach.demo');
+  const dreamer = new Client(s.base);
+  const auth = await dreamer.login('theo@dreamcoach.demo');
+  const id = auth.dreamerId;
+  const snap = async () => (await coach.get(`/dreamers/${id}/overview`)).body.snapshot;
+  const monthCount = async () => (await director.get('/director/overview')).body.months.slice(-1)[0].journalEntries;
+  const before = { snap: await snap(), month: await monthCount() };
+  const sid = (await coach.post(`/dreamers/${id}/sessions`, {})).body.id;
+  await coach.put(`/dreamers/${id}/sessions/${sid}/ratings`, { category: 'energy', value: 6 });
+  await coach.patch(`/dreamers/${id}/sessions/${sid}`, { status: 'completed' });
+  const rating = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => r.sessionId === sid);
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: 'Energy is better since I started cycling to work.' })).status, 200);
+  const after = await snap();
+  assert.equal(after.journalEntries30d, before.snap.journalEntries30d + 1);
+  assert.equal(await monthCount(), before.month + 1);
+  const listed = (await coach.get(`/dreamers/${id}/journal`)).body.filter((j: any) => j.author.id === auth.user.id && j.occurredAt >= minutesAgo(30 * 24 * 60));
+  assert.equal(after.journalEntries30d, listed.length, 'the count matches the dreamer’s own entries on the Reflections tab');
+});
+
+test('the team overview counts dreamers with no coach', async () => {
+  const director = await staff('director@dreamcoach.demo');
+  const overview = async () => (await director.get('/director/overview')).body;
+  const before = await overview();
+  const sum = (o: any) => o.coaches.reduce((n: number, c: any) => n + c.dreamers, 0);
+  assert.equal(sum(before) + before.totals.unassignedDreamers, before.totals.dreamers);
+  const victor = (await director.get('/director/dreamers')).body.find((r: any) => r.dreamer.name.startsWith('Victor'));
+  await director.patch(`/director/dreamers/${victor.dreamer.id}`, { coachUserId: null });
+  const after = await overview();
+  assert.equal(after.totals.unassignedDreamers, before.totals.unassignedDreamers + 1);
+  assert.equal(sum(after) + after.totals.unassignedDreamers, after.totals.dreamers);
+  await director.patch(`/director/dreamers/${victor.dreamer.id}`, { coachUserId: victor.dreamer.coach.id });
+});
+
+test('“sessions this month” uses the same UTC months as the trend charts, whatever the server’s time zone', async (t) => {
+  const now = new Date();
+  const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  if (Date.now() - monthStart < 86400000) return t.skip('too close to the start of the month');
+  const tz = process.env.TZ;
+  process.env.TZ = 'America/Los_Angeles';
+  try {
+    const coach = await staff('priya@dreamcoach.demo');
+    const director = await staff('director@dreamcoach.demo');
+    const id = (await coach.get('/coach/dashboard')).body.caseload.find((c: any) => !c.snapshot.openSession).dreamer.id;
+    // Early on the 1st (UTC), which is still the previous month in Los Angeles.
+    const sid = (await coach.post(`/dreamers/${id}/sessions`, { occurredAt: new Date(monthStart + 60000).toISOString() })).body.id;
+    await coach.patch(`/dreamers/${id}/sessions/${sid}`, { status: 'completed' });
+    const o = (await director.get('/director/overview')).body;
+    assert.equal(o.totals.sessionsThisMonth, o.months.slice(-1)[0].sessions);
+    const dash = (await coach.get('/coach/dashboard')).body;
+    const months = (await director.get(`/director/coaches/${dash.coach.id}`)).body.months;
+    assert.equal(dash.stats.sessionsThisMonth, months.slice(-1)[0].sessions);
+  } finally {
+    if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz;
+  }
+});
+
+test('private progress leaves a dream’s timestamps untouched for staff', async () => {
+  const coach = await staff('maya@dreamcoach.demo');
+  const dreamer = new Client(s.base);
+  const auth = await dreamer.login('lena@dreamcoach.demo');
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const dream = (await dreamer.get('/dreamers/me/dreams')).body.find((d: any) => !d.achievedAt);
+  const shared = (await dreamer.get(`/dreamers/me/progress?dreamId=${dream.id}`)).body.filter((p: any) => !p.isPrivate);
+  for (const p of shared) await dreamer.patch(`/dreamers/me/progress/${p.id}`, { isPrivate: true });
+  const before = (await coach.get(`/dreamers/${auth.dreamerId}/dreams`)).body;
+  await dreamer.post('/dreamers/me/check-ins', { progress: [{ dreamId: dream.id, value: 10, isPrivate: true }] });
+  assert.deepEqual((await coach.get(`/dreamers/${auth.dreamerId}/dreams`)).body, before);
+  for (const p of shared) await dreamer.patch(`/dreamers/me/progress/${p.id}`, { isPrivate: false });
+});

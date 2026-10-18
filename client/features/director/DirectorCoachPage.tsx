@@ -39,7 +39,7 @@ function CoachHeader({ summary, isSelf }: { summary: CoachSummary; isSelf: boole
       </div>
       <div className="dir-coach-head-actions">
         <Link to={`/director/dreamers?coach=${coach.id}`} className="btn btn-secondary" data-testid="director-coach-dreamers-link"><IconUsers /> Caseload in All dreamers</Link>
-        {isSelf && <Link to="/coach" className="btn btn-primary" data-testid="director-coach-my-coaching"><IconGrid /> My coaching</Link>}
+        {isSelf && summary.dreamers > 0 && <Link to="/coach" className="btn btn-primary" data-testid="director-coach-my-coaching"><IconGrid /> My coaching</Link>}
       </div>
     </div>
   );
@@ -190,8 +190,12 @@ export function DirectorCoachPage() {
         </div>
         <Card pad={false} className="dir-table-card">
           {caseload.length === 0 ? (
-            <EmptyState icon={<IconUsers />} title={`${first} has no dreamers yet`} action={<Link to="/director/dreamers" className="btn btn-secondary">Open All dreamers</Link>}>
-              Assign a dreamer from the All dreamers page using “Reassign coach”.
+            <EmptyState
+              icon={<IconUsers />}
+              title={isSelf ? 'You have no dreamers assigned' : summary.sessionsTotal > 0 ? `${first} has no dreamers assigned` : `${first} has no dreamers yet`}
+              action={<Link to="/director/dreamers" className="btn btn-secondary">Open All dreamers</Link>}
+            >
+              {isSelf ? 'Assign yourself a dreamer' : 'Assign a dreamer'} from the All dreamers page using “Reassign coach”.
             </EmptyState>
           ) : (
             <>

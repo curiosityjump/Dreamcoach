@@ -1,7 +1,7 @@
 # Verification
 
 How each requirement in the brief was verified. "API test" = `tests/api/*.test.ts`
-(24 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
+(48 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
 journey in `tests/e2e/journey.spec.ts` (6 serial steps, fresh database on :3100).
 "Manual" = exercised in Chromium with screenshots in `docs/screenshots/`.
 
@@ -96,6 +96,6 @@ Run everything: `npm run typecheck && npm run test:api && npm run test:e2e`.
 | CARE and dream-progress changes | Trajectories with noise, dips and recoveries |
 | Active, completed, archived actions | ~200 actions across states |
 | Self check-ins between sessions | ~170 check-ins |
-| Public and private ratings; public ratings with private notes; private actions and journal entries | ~140 private rows incl. guaranteed examples for Alicia, Darnell, Grace |
+| Public and private ratings; public ratings with private notes; private actions and journal entries | ~150–175 private rows incl. personal guaranteed examples for Alicia, Darnell, Grace |
 | Trend charts with enough history | 9 months |
 | Aggregated Director metrics | Yes |

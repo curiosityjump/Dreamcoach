@@ -3,22 +3,24 @@
  * session vs self markers, a quick "Rate now" composer, and every entry with its
  * note, grouped by month and interleaved with the reflections written alongside.
  * The dreamer can edit, re-share or make private their own self entries; session
- * values stay the coach's to change, but privacy and notes are always the dreamer's call.
+ * values stay the coach's to change (the dreamer may delete one while it is private),
+ * but privacy and notes are always the dreamer's call.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { useAuth } from '@/auth/AuthContext';
-import { useCategoryHistory, useCreateCheckIn, useDeleteRating, useDreams, useUpdateRating } from '@/api/hooks';
-import { errorMessage } from '@/api/client';
+import { useCategoryHistory, useCreateCheckIn, useDeleteRating, useDreams, useSessions, useUpdateRating } from '@/api/hooks';
+import { ApiRequestError, errorMessage } from '@/api/client';
 import { useToast } from '@/components/toast';
-import { Button, Card, CardHead, CategoryChip, ConfirmDialog, Delta, Dropdown, EmptyState, LoadingPage, PageHeader, PrivacyToggle, PrivateChip, RatingInput, SourceChip, TextArea } from '@/components/ui';
+import { Button, Card, CardHead, CategoryChip, ConfirmDialog, Dropdown, EmptyState, LoadingPage, PageHeader, PrivacyToggle, PrivateChip, RatingInput, SourceChip, TextArea } from '@/components/ui';
 import { SourceLegend, TrendChart } from '@/components/charts';
 import { IconArrowLeft, IconArrowRight, IconChart, IconCompass, IconEdit, IconInfo, IconLock, IconMore, IconPen, IconSparkle, IconTrash, IconUnlock } from '@/components/icons';
 import { JournalEntryCard } from '@/features/shared/Timeline';
+import { UnlockDialog } from '@/features/shared/PrivacyControl';
 import { CATEGORY_META, RATING_CATEGORIES, isRatingCategory, type RatingCategory } from '@shared/care';
-import type { CategoryHistory, JournalEntry, RatingEntry } from '@shared/types';
+import type { CategoryHistory, CoachingSession, JournalEntry, RatingEntry } from '@shared/types';
 import { fmtDate, fmtDateTime, fmtMonthLong, plural } from '@/lib/format';
-import { PRIVATE_HIDDEN_MSG, ValueBadge, catVars, coachNameFor, rangeInsight, savedToast, toTrendPoint } from './CareShared';
+import { NotePrivateWith, PRIVATE_HIDDEN_MSG, SessionDelta, ValueBadge, byTimeAsc, catVars, coachNameFor, rangeInsight, savedToast, toTrendPoint, useTouch } from './CareShared';
 
 type Item = { kind: 'rating'; at: string; entry: RatingEntry } | { kind: 'reflection'; at: string; entry: JournalEntry };
 
@@ -29,6 +31,18 @@ export function CategoryHistoryPage() {
   const category = isRatingCategory(param) ? param : null;
   const history = useCategoryHistory('me', category);
   const dreams = useDreams('me');
+  const sessions = useSessions('me');
+  const tabs = useRef<HTMLElement>(null);
+
+  // On phones the tabs scroll sideways: bring the current one into view.
+  useEffect(() => {
+    const nav = tabs.current;
+    const tab = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!nav || !tab) return;
+    const n = nav.getBoundingClientRect();
+    const t = tab.getBoundingClientRect();
+    nav.scrollLeft += t.left - n.left - (n.width - t.width) / 2;
+  }, [category]);
 
   if (!category) {
     return (
@@ -45,7 +59,7 @@ export function CategoryHistoryPage() {
   return (
     <div className="page dc-page" data-testid="category-page" data-category={category} style={catVars(category)}>
       <Link to="/care" className="dc-back" data-testid="category-back"><IconArrowLeft /> CARE · Wheel of Life</Link>
-      <nav className="tabs dc-tabs" aria-label="Categories">
+      <nav className="tabs dc-tabs" aria-label="Categories" ref={tabs}>
         {RATING_CATEGORIES.map((c) => (
           <Link key={c} to={`/care/${c}`} className={`tab${c === category ? ' active' : ''}`} aria-current={c === category ? 'page' : undefined} style={catVars(c)} data-testid={`category-tab-${c}`}>
             <span className="dc-tab-dot" aria-hidden />{CATEGORY_META[c].label}
@@ -64,7 +78,7 @@ export function CategoryHistoryPage() {
       ) : history.error || !history.data ? (
         <div className="callout callout-muted" role="alert"><IconInfo /><span>{errorMessage(history.error)}</span></div>
       ) : (
-        <HistoryBody category={category} history={history.data} dreams={dreams.data ?? []} />
+        <HistoryBody category={category} history={history.data} dreams={dreams.data ?? []} sessions={[...(sessions.data ?? [])].sort(byTimeAsc)} />
       )}
     </div>
   );
@@ -72,15 +86,17 @@ export function CategoryHistoryPage() {
 
 /* ---------- Body ---------- */
 
-function HistoryBody({ category, history, dreams }: { category: RatingCategory; history: CategoryHistory; dreams: { id: number; title: string; slot: 1 | 2 | 3 | 4 }[] }) {
+function HistoryBody({ category, history, dreams, sessions }: { category: RatingCategory; history: CategoryHistory; dreams: { id: number; title: string; slot: 1 | 2 | 3 | 4 }[]; sessions: CoachingSession[] }) {
   const m = CATEGORY_META[category];
   const entries = history.entries;
   const latest = entries[entries.length - 1];
   const previous = entries[entries.length - 2];
-  const delta = latest && previous ? latest.value - previous.value : null;
   const insight = useMemo(() => rangeInsight(category, entries), [category, entries]);
   const points = useMemo(() => entries.map(toTrendPoint), [entries]);
   const [composing, setComposing] = useState(false);
+  const touch = useTouch();
+  // Sessions whose cell holds a shared value: a value hidden from one of them can't be shared back.
+  const sharedSessions = useMemo(() => new Set(entries.filter((e) => e.source === 'session' && !e.isPrivate).map((e) => e.sessionId)), [entries]);
 
   const items = useMemo<Item[]>(() => {
     const list: Item[] = [
@@ -101,7 +117,7 @@ function HistoryBody({ category, history, dreams }: { category: RatingCategory; 
     return groups;
   }, [items]);
 
-  const sessions = entries.filter((e) => e.source === 'session').length;
+  const fromSessions = entries.filter((e) => e.source === 'session').length;
 
   return (
     <>
@@ -110,7 +126,7 @@ function HistoryBody({ category, history, dreams }: { category: RatingCategory; 
           <div className="dc-hero-value">
             <span className="dc-cat-value tnum" data-testid="category-latest">{latest ? latest.value : '–'}</span>
             <span className="dc-cat-of">/ 10</span>
-            {latest && <span className="dc-cat-delta"><Delta value={delta} digits={0} /></span>}
+            {latest && <SessionDelta entry={latest} sessions={sessions} />}
           </div>
           <div className="dc-hero-meta">
             {latest ? (
@@ -135,13 +151,13 @@ function HistoryBody({ category, history, dreams }: { category: RatingCategory; 
       </Card>
 
       <Card className="dc-section" data-testid="category-chart">
-        <CardHead title="Trend" sub={entries.length ? `${plural(entries.length, 'entry', 'entries')} · ${sessions} from coaching sessions, ${entries.length - sessions} self check-in${entries.length - sessions === 1 ? '' : 's'}` : 'Each rating becomes a point here'} />
+        <CardHead title="Trend" sub={entries.length ? `${plural(entries.length, 'entry', 'entries')} · ${fromSessions} from coaching sessions, ${entries.length - fromSessions} self check-in${entries.length - fromSessions === 1 ? '' : 's'}` : 'Each rating becomes a point here'} />
         {entries.length ? (
           <>
             <TrendChart points={points} max={10} color={m.color} height={260} />
             <div className="spread dc-chart-foot">
               <SourceLegend color={m.color} />
-              <span className="muted tiny">Hover a point for its note</span>
+              <span className="muted tiny">{touch ? 'Tap a point to see its note' : 'Hover a point for its note'}</span>
             </div>
           </>
         ) : (
@@ -168,7 +184,7 @@ function HistoryBody({ category, history, dreams }: { category: RatingCategory; 
               <Card pad={false} className="dc-entries">
                 {g.items.map((it) =>
                   it.kind === 'rating' ? (
-                    <EntryRow key={`r${it.entry.id}`} entry={it.entry} />
+                    <EntryRow key={`r${it.entry.id}`} entry={it.entry} cellTaken={it.entry.sessionId != null && sharedSessions.has(it.entry.sessionId)} />
                   ) : (
                     <div key={`j${it.entry.id}`} className="dc-entry dc-entry-reflection" data-testid="category-reflection">
                       <div className="dc-entry-label"><IconPen /> {it.entry.checkInId != null ? 'Check-in reflection' : `Reflection tagged ${m.label}`}</div>
@@ -202,7 +218,7 @@ function RateNow({ category, latest, onDone }: { category: RatingCategory; lates
     if (value == null || create.isPending) return;
     const text = note.trim();
     const anyPrivate = priv || (!!text && notePriv);
-    create.mutate({ ratings: [{ category, value, isPrivate: priv, ...(text ? { note: text, notePrivate: notePriv } : {}) }] }, {
+    create.mutate({ ratings: [{ category, value, isPrivate: priv, ...(text ? { note: text, notePrivate: notePriv || priv } : {}) }] }, {
       onSuccess: () => {
         const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, `${m.label} saved as private — only you can see it.`);
         toast(msg, kind);
@@ -224,7 +240,7 @@ function RateNow({ category, latest, onDone }: { category: RatingCategory; lates
       <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="What’s behind this number? (optional)" aria-label="Note" rows={2} maxLength={4000} disabled={create.isPending} data-testid="category-ratenow-note" />
       <div className="row-wrap dc-privacy-row">
         <span data-testid="category-ratenow-privacy"><PrivacyToggle size="sm" value={priv} onChange={setPriv} labels={['Rating shared with coach', 'Rating private']} /></span>
-        {note.trim() && <span data-testid="category-ratenow-note-privacy"><PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} /></span>}
+        {note.trim() && <span data-testid="category-ratenow-note-privacy">{priv ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} />}</span>}
       </div>
       {error && <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>}
       <div className="dc-pending-actions">
@@ -237,36 +253,54 @@ function RateNow({ category, latest, onDone }: { category: RatingCategory; lates
 
 /* ---------- Entry row ---------- */
 
-function EntryRow({ entry }: { entry: RatingEntry }) {
-  const { auth } = useAuth();
+type EditError = { message: string; hiddenNote: boolean };
+
+function EntryRow({ entry, cellTaken }: { entry: RatingEntry; cellTaken: boolean }) {
+  const { auth, unlockPrivate } = useAuth();
   const { toast } = useToast();
   const update = useUpdateRating('me');
   const remove = useDeleteRating('me');
   const [editing, setEditing] = useState(false);
+  const [editError, setEditError] = useState<EditError | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmHide, setConfirmHide] = useState(false);
 
   const own = entry.source === 'self';
+  const orphan = entry.source === 'session' && entry.sessionId == null;
+  // Session values: the dreamer may remove one while it is private (staff can't see it) or once its session is gone,
+  // and may share a hidden one back only while its session cell is free.
+  const canDelete = own || entry.isPrivate || orphan;
+  const shareBlocked = entry.isPrivate && !own && (orphan || cellTaken);
+  // A note on a private rating is private with it, whatever its own switch says.
+  const notePrivate = !!entry.note && (entry.note.isPrivate || entry.isPrivate);
   const busy = update.isPending || remove.isPending;
   const m = CATEGORY_META[entry.category];
+  // Once private entries are showing, the hidden note is in the editor and the message no longer applies.
+  const shownError = editError && !(editError.hiddenNote && auth?.privateUnlocked) ? editError : null;
 
   const patch = (body: Omit<Parameters<typeof update.mutate>[0], 'ratingId'>, message: string, kind: 'success' | 'info' | 'private' = 'success', after?: () => void) =>
     update.mutate({ ratingId: entry.id, ...body }, {
       onSuccess: () => { toast(message, kind); after?.(); },
-      onError: (e) => toast(errorMessage(e), 'error'),
+      onError: (e) => toast(errorMessage(e), isConflict(e) ? 'info' : 'error'),
     });
 
-  const saveEdit = (body: EntryEdit) =>
+  const saveEdit = (body: EntryEdit) => {
+    setEditError(null);
     update.mutate({ ratingId: entry.id, ...body }, {
-      onSuccess: (saved) => {
-        // Whatever is now private disappears while private entries are hidden, so the toast says why.
-        const nowPrivate = (saved.isPrivate && !entry.isPrivate) || (!!saved.note?.isPrivate && !entry.note?.isPrivate);
+      onSuccess: () => {
+        // Judged from the request, never the response: whatever was just made private disappears while private
+        // entries are hidden, so the toast says why.
+        const nowPrivate = body.isPrivate === true || body.notePrivate === true;
         const [msg, kind] = savedToast(auth, nowPrivate, 'Entry updated.', 'Entry updated — the private parts are only visible to you.');
         toast(msg, kind);
         setEditing(false);
       },
-      onError: (e) => toast(errorMessage(e), 'error'),
+      // Shown in the editor, which keeps what was typed; a note hidden right now can be shown from there.
+      onError: (e) => setEditError({ message: errorMessage(e), hiddenNote: isConflict(e) }),
     });
+  };
+  const startEdit = () => { setEditError(null); setEditing(true); };
   const makePrivate = () => patch({ isPrivate: true }, auth?.privateUnlocked ? 'Now private — only you can see this rating.' : PRIVATE_HIDDEN_MSG, 'private', () => setConfirmHide(false));
   const share = () => patch({ isPrivate: false }, 'Rating shared with your coach.');
   const noteMakePrivate = () => patch({ notePrivate: true }, auth?.privateUnlocked ? 'Note is now private — the rating stays as it was.' : PRIVATE_HIDDEN_MSG, 'private');
@@ -282,7 +316,14 @@ function EntryRow({ entry }: { entry: RatingEntry }) {
       <ValueBadge category={entry.category} value={entry.value} />
       <div className="dc-entry-body">
         {editing ? (
-          <EntryEditor entry={entry} pending={update.isPending} onCancel={() => setEditing(false)} onSave={saveEdit} />
+          <EntryEditor
+            entry={entry}
+            pending={update.isPending}
+            error={shownError}
+            onShowPrivate={shownError?.hiddenNote ? () => setUnlocking(true) : undefined}
+            onCancel={() => setEditing(false)}
+            onSave={saveEdit}
+          />
         ) : (
           <>
             <div className="dc-entry-meta">
@@ -291,8 +332,8 @@ function EntryRow({ entry }: { entry: RatingEntry }) {
               {entry.isPrivate && <PrivateChip />}
             </div>
             {entry.note && (
-              <div className={`note-block${entry.note.isPrivate ? ' private' : ''}`} data-testid="category-entry-note">
-                {entry.note.isPrivate && <span className="dc-note-private"><IconLock /> Private note</span>}
+              <div className={`note-block${notePrivate ? ' private' : ''}`} data-testid="category-entry-note">
+                {notePrivate && <span className="dc-note-private"><IconLock /> {entry.note.isPrivate ? 'Private note' : 'Private with its rating'}</span>}
                 {entry.note.body}
               </div>
             )}
@@ -306,20 +347,28 @@ function EntryRow({ entry }: { entry: RatingEntry }) {
               <Button variant="ghost" icon size="sm" aria-label={`Options for ${m.label} ${entry.value} on ${fmtDate(entry.occurredAt)}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} data-testid="category-entry-menu"><IconMore /></Button>
             )}
           >
-            <button type="button" className="menu-item" onClick={() => setEditing(true)} data-testid="category-entry-edit"><IconEdit /> {own ? 'Edit value or note' : entry.note ? 'Edit note' : 'Add a note'}</button>
+            <button type="button" className="menu-item" onClick={startEdit} data-testid="category-entry-edit"><IconEdit /> {own ? 'Edit value or note' : entry.note ? 'Edit note' : 'Add a note'}</button>
             {entry.isPrivate
-              ? <button type="button" className="menu-item" onClick={share} data-testid="category-entry-share"><IconUnlock /> Share rating with coach</button>
+              ? !shareBlocked && <button type="button" className="menu-item" onClick={share} data-testid="category-entry-share"><IconUnlock /> Share rating with coach</button>
               : <button type="button" className="menu-item" onClick={() => (own ? makePrivate() : setConfirmHide(true))} data-testid="category-entry-make-private"><IconLock /> Make rating private</button>}
-            {entry.note && (entry.note.isPrivate
+            {entry.note && !entry.isPrivate && (entry.note.isPrivate
               ? <button type="button" className="menu-item" onClick={noteShare} data-testid="category-entry-note-share"><IconUnlock /> Share note with coach</button>
               : <button type="button" className="menu-item" onClick={noteMakePrivate} data-testid="category-entry-note-make-private"><IconLock /> Make note private</button>)}
-            {own && (
+            {canDelete && (
               <>
                 <div className="divider" />
                 <button type="button" className="menu-item dc-menu-danger" onClick={() => setConfirmDelete(true)} data-testid="category-entry-delete"><IconTrash /> Delete entry</button>
               </>
             )}
-            {!own && <div className="dc-menu-note muted tiny">Recorded by your coach — the value itself is changed in a session.</div>}
+            {!own && (
+              <div className="dc-menu-note muted tiny" data-testid="category-entry-menu-note">
+                {orphan
+                  ? 'Its coaching session was later removed, so this value stays private.'
+                  : shareBlocked
+                    ? 'Your coach recorded a new value for this session after you hid this one, so this one stays private.'
+                    : 'Recorded by your coach — the value itself is changed in a session.'}
+              </div>
+            )}
           </Dropdown>
         </div>
       )}
@@ -329,7 +378,9 @@ function EntryRow({ entry }: { entry: RatingEntry }) {
         onClose={() => setConfirmDelete(false)}
         onConfirm={confirmRemove}
         title="Delete this entry?"
-        body={<>Your {m.label} rating of <b>{entry.value}</b> from {fmtDate(entry.occurredAt)}{entry.note ? ' and its note' : ''} will be removed for good.</>}
+        body={own
+          ? <>Your {m.label} rating of <b>{entry.value}</b> from {fmtDate(entry.occurredAt)}{entry.note ? ' and its note' : ''} will be removed for good.</>
+          : <>This {m.label} value of <b>{entry.value}</b>, recorded in a coaching session on {fmtDate(entry.occurredAt)}{entry.note ? ', and your note on it' : ''} will be removed for good.{entry.isPrivate ? ' It’s private, so nothing changes in your coach’s views.' : ''}</>}
         confirmLabel="Delete"
         danger
         loading={remove.isPending}
@@ -339,20 +390,26 @@ function EntryRow({ entry }: { entry: RatingEntry }) {
         onClose={() => setConfirmHide(false)}
         onConfirm={makePrivate}
         title="Make this session value private?"
-        body={<>This {m.label} rating of <b>{entry.value}</b> was recorded in a coaching session. Making it private hides the value from your coach — it will no longer appear in their view of that session. Only you will see it here, and you can share it again any time.</>}
+        body={<>This {m.label} rating of <b>{entry.value}</b> was recorded in a coaching session. Making it private hides the value from your coach — it will no longer appear in their view of that session. Only you will see it here. You can share it again later, unless your coach records a new value for that session in the meantime.</>}
         confirmLabel="Make private"
         loading={update.isPending}
       />
+      <UnlockDialog open={unlocking} onClose={() => setUnlocking(false)} onUnlock={unlockPrivate} />
     </div>
   );
 }
 
+const isConflict = (e: unknown) => e instanceof ApiRequestError && e.code === 'conflict';
+
 type EntryEdit = { value?: number; note?: string | null; isPrivate?: boolean; notePrivate?: boolean };
 
 /** Self entries: value, note and privacy. Session entries: the dreamer's own note only (privacy has its own warning in the menu). */
-function EntryEditor({ entry, pending, onSave, onCancel }: {
+function EntryEditor({ entry, pending, error, onShowPrivate, onSave, onCancel }: {
   entry: RatingEntry;
   pending: boolean;
+  error: EditError | null;
+  /** Set when saving found a note that is hidden right now: offers to show private entries. */
+  onShowPrivate?: () => void;
   onSave: (body: EntryEdit) => void;
   onCancel: () => void;
 }) {
@@ -361,9 +418,18 @@ function EntryEditor({ entry, pending, onSave, onCancel }: {
   const [note, setNote] = useState(entry.note?.body ?? '');
   const [priv, setPriv] = useState(entry.isPrivate);
   const [notePriv, setNotePriv] = useState(entry.note?.isPrivate ?? false);
+  // Private entries were shown while editing, so a note that was hidden is here now: start from it (and its
+  // privacy), keeping anything typed meanwhile below it. Saving can then never overwrite a note unseen.
+  const [seenNote, setSeenNote] = useState(entry.note);
+  if (entry.note?.id !== seenNote?.id) {
+    const typed = note.trim() !== (seenNote?.body ?? '') ? note.trim() : '';
+    setSeenNote(entry.note);
+    setNote([entry.note?.body, typed].filter(Boolean).join('\n\n'));
+    setNotePriv(entry.note?.isPrivate ?? false);
+  }
   const text = note.trim();
   const original = entry.note?.body ?? '';
-  const dirty = value !== entry.value || text !== original || priv !== entry.isPrivate || (!!text && notePriv !== (entry.note?.isPrivate ?? false));
+  const dirty = value !== entry.value || text !== original || priv !== entry.isPrivate || (!!text && !priv && notePriv !== (entry.note?.isPrivate ?? false));
 
   const submit = () => {
     if (value == null) return;
@@ -372,7 +438,9 @@ function EntryEditor({ entry, pending, onSave, onCancel }: {
     if (value !== entry.value) body.value = value;
     if (text !== original) body.note = text || null;
     if (priv !== entry.isPrivate) body.isPrivate = priv;
-    if (text && (!entry.note || notePriv !== entry.note.isPrivate)) body.notePrivate = notePriv;
+    // A new note on a private rating is private too; an existing note keeps its own switch unless changed here.
+    if (text && !entry.note) body.notePrivate = notePriv || priv;
+    else if (text && entry.note && !priv && notePriv !== entry.note.isPrivate) body.notePrivate = notePriv;
     onSave(body);
   };
 
@@ -384,12 +452,21 @@ function EntryEditor({ entry, pending, onSave, onCancel }: {
       </div>
       {own
         ? <RatingInput value={value} onChange={setValue} category={entry.category} compact />
-        : <div className="muted small">The {entry.value} was recorded in your coaching session; the value itself is changed in a session. You can add your own note to it.</div>}
+        : <div className="muted small">{entry.sessionId == null ? `The ${entry.value} was recorded in a coaching session that was later removed.` : `The ${entry.value} was recorded in your coaching session; the value itself is changed in a session.`} You can add your own note to it.</div>}
       <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="A note for this rating (optional)" aria-label="Note" rows={2} maxLength={4000} disabled={pending} data-testid="category-entry-edit-note" />
       {(own || text) && (
         <div className="row-wrap dc-privacy-row">
           {own && <span data-testid="category-entry-edit-privacy"><PrivacyToggle size="sm" value={priv} onChange={setPriv} labels={['Rating shared with coach', 'Rating private']} /></span>}
-          {text && <span data-testid="category-entry-edit-note-privacy"><PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} /></span>}
+          {text && <span data-testid="category-entry-edit-note-privacy">{priv ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} />}</span>}
+        </div>
+      )}
+      {error && (
+        <div className={`callout ${error.hiddenNote ? 'callout-private' : 'callout-muted'}`} role="alert" data-testid="category-entry-edit-error">
+          {error.hiddenNote ? <IconLock /> : <IconInfo />}
+          <div className="dc-callout-body">
+            <span>{error.message}{onShowPrivate ? ' What you typed stays here.' : ''}</span>
+            {onShowPrivate && <Button variant="secondary" size="sm" onClick={onShowPrivate} data-testid="category-entry-edit-show-private">Show private entries</Button>}
+          </div>
         </div>
       )}
       <div className="dc-pending-actions">

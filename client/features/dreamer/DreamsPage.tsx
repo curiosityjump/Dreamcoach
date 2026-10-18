@@ -3,18 +3,20 @@
  */
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { useDreams, useOverview } from '@/api/hooks';
+import { useDreams, useOverview, useSessions } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
-import { Bar, Button, Card, Chip, Delta, EmptyState, PageHeader, PrivateChip, Skeleton } from '@/components/ui';
+import { Bar, Button, Card, Chip, EmptyState, PageHeader, PrivateChip, Skeleton } from '@/components/ui';
 import { IconArrowRight, IconCheck, IconEdit, IconInfo, IconStar, IconTarget } from '@/components/icons';
 import { fmtDate, plural, relativeTime } from '@/lib/format';
-import type { Dream, Program } from '@shared/types';
+import type { CoachingSession, Dream, Program } from '@shared/types';
 import { DREAM_COLOR, DreamsProgressDialog } from './DreamsProgressDialog';
 import { DreamsEditDialog } from './DreamsEditDialog';
+import { SessionDelta, dreamBaseline } from './HomePage';
 
 export function DreamsPage() {
   const dreams = useDreams('me');
   const overview = useOverview('me');
+  const sessions = useSessions('me');
   const program = overview.data?.dreamer.program ?? null;
 
   return (
@@ -48,7 +50,7 @@ export function DreamsPage() {
       {dreams.data && dreams.data.length > 0 && (
         <div className="grid grid-2 dd-grid">
           {dreams.data.map((d) => (
-            <DreamCard key={d.id} dream={d} program={program} />
+            <DreamCard key={d.id} dream={d} program={program} sessions={sessions.data ?? []} />
           ))}
         </div>
       )}
@@ -65,11 +67,10 @@ export function AchievedChip({ achievedAt, compact }: { achievedAt: string; comp
   );
 }
 
-function DreamCard({ dream, program }: { dream: Dream; program: Program | null }) {
+function DreamCard({ dream, program, sessions }: { dream: Dream; program: Program | null; sessions: CoachingSession[] }) {
   const [updating, setUpdating] = useState(false);
   const [editing, setEditing] = useState(false);
   const achieved = !!dream.achievedAt;
-  const delta = dream.progress != null && dream.previousProgress != null ? dream.progress - dream.previousProgress : null;
   const guidance = program?.slotGuidance[dream.slot - 1];
 
   return (
@@ -86,7 +87,7 @@ function DreamCard({ dream, program }: { dream: Dream; program: Program | null }
         <div className="dd-progress">
           <div className="row dd-progress-head">
             <span className="dd-progress-value tnum" data-testid="dream-progress-value">{dream.progress == null ? '—' : `${dream.progress}%`}</span>
-            {delta != null && <Delta value={delta} digits={0} suffix="%" />}
+            {dream.progress != null && <SessionDelta value={dream.progress} base={dreamBaseline(sessions, dream)} suffix=" pts" />}
             {dream.progressIsPrivate && <span data-testid="dream-progress-private"><PrivateChip /></span>}
             {dream.progress == null && <span className="muted small">No progress recorded yet</span>}
           </div>
