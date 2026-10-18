@@ -58,14 +58,18 @@ why, and what was traded off.
 9. **Attached notes inherit their parent's visibility and also have their own
    flag.** Shared rating + private note = coach sees the rating with `note: null`
    and no hint. Private rating + shared note = both hidden (a note alone would
-   reveal the rating).
+   reveal the rating), and the dreamer's own views show such a note as private,
+   with its switch disabled ("private with its rating").
 
 10. **Dream "achieved" is derived from shared progress only.** A private 100% is
     visible to the dreamer as 100% but does not flip the shared achieved badge
     (otherwise staff could infer the private entry).
 
-11. **Unlock state lives on the server session, slides with activity, and expires
-    after 30 idle minutes.** Sign-in always starts hidden; sign-out destroys the
+11. **Unlock state lives on the server session, slides with real activity, and
+    expires after 30 idle minutes.** "Activity" means the person touched the page:
+    polling, focus refetches and expiry checks don't count, so a live page left
+    open still re-hides. If the Hide request can't reach the server, the screen
+    stays hidden and keeps retrying rather than showing private entries again. Sign-in always starts hidden; sign-out destroys the
     session; switching accounts therefore starts hidden. Wrong-password attempts
     on unlock are rate-limited like logins (5 → 60s lockout).
 
@@ -82,7 +86,12 @@ why, and what was traded off.
 13. **The live workspace is a grid, not a wizard.** Months are columns, the
     current session is the editable column, and the six-step sequence is a
     checklist in the sidebar whose completion is inferred from the data. The
-    coach can enter anything in any order, as with the spreadsheet.
+    coach can enter anything in any order, as with the spreadsheet. "Review
+    previous actions" is the one step with nothing to infer from, so its tick is
+    saved with the session. The review list shows what was open when the session
+    began plus whatever was completed or set aside since the previous session
+    ended — never actions from later months — and the previous session's focus
+    and notes sit above it.
 
 14. **Session entries are upserts keyed by (session, category) / (session,
     dream) among *shared* rows.** Correcting a number during a conversation never
@@ -92,7 +101,13 @@ why, and what was traded off.
     new shared value, while clearing it removes only the shared one — the private
     row is never updated, deleted or revealed, so an empty cell behaves exactly like
     a never-recorded one. The dreamer then sees both entries in their own history;
-    the shared one is what the grid shows.
+    the shared one is what the grid shows. The dreamer can always hide a session
+    value again (including one the coach re-entered) and can delete a session
+    value while it is private, since that changes nothing staff can see; sharing
+    a hidden value back is refused kindly once the coach has recorded a newer one
+    for that session. When staff clear or delete an entry, a note the dreamer
+    attached to it is kept as a standalone entry — staff actions never destroy a
+    dreamer's words.
 
 15. **One open session per dreamer.** "Start session" returns the existing
     in-progress session if there is one. Completed sessions can be reopened or
@@ -100,10 +115,16 @@ why, and what was traded off.
     session can be deleted. "Empty" is judged on what the coach can see, so the
     answer never reveals private rows; anything the dreamer kept private survives
     the deletion as part of their own history, detached from the session.
+    Reopening a completed session is refused while another one is open, and
+    completing a session with nothing recorded asks first (and offers Delete).
 
 16. **Sources are explicit everywhere.** Every rating/progress entry has
     `source: session | self`; charts draw sessions as solid points and self
-    check-ins hollow; lists show a Session / Self chip.
+    check-ins hollow; lists show a Session / Self chip. A standalone reflection is
+    labelled "Reflection", never "Self check-in". Changes shown next to a current
+    value are measured against a coaching session and say so ("vs S8", "since
+    S9"), for dreamers and staff alike, so the numbers agree with the session grid
+    and the coach's notes. Dream progress changes read in points ("▲ 8 pts").
 
 ## Director metrics
 
@@ -120,7 +141,8 @@ why, and what was traded off.
       completed. Archived actions are reconsidered priorities, not failures.
     - Dreams achieved: shared progress reached 100%.
     - Sessions (total, 30d, monthly trend) are credited to the coach who *ran*
-      them, so reassigning a dreamer doesn't move their history to a new coach.
+      them — whoever completed the session — so reassigning a dreamer doesn't move
+      their history to a new coach.
       Every other per-coach figure describes the coach's *current* caseload.
     - A session's "N actions chosen · M completed" counts the actions chosen in
       that session and how many of those are now done.
@@ -153,3 +175,13 @@ why, and what was traded off.
     Commitment/Satisfaction) and were run through its colour-vision validator;
     all series are direct-labelled since the four-hue set sits in the warn band
     for one deuteranopia pair.
+
+23. **Rows a dreamer can make private get random ids.** Sequential ids would let
+    staff count the gaps in what they see (and even tell which CARE area of a
+    check-in was hidden). Ratings, progress, journal entries, actions and
+    check-ins therefore use random 48-bit ids; people, dreams and sessions keep
+    readable sequential ids because they are never private.
+
+24. **No future-dated entries.** Check-ins, entries and session dates more than a
+    few minutes ahead are rejected; backdating is allowed (people often record
+    after the fact).

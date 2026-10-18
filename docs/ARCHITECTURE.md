@@ -44,23 +44,33 @@ one `npm start`, no external services.
   programs can use different dream horizons.
 - **dreams** — exactly four per dreamer (slot 1–4). `achieved_at` is derived from
   *shared* progress reaching 100%.
-- **coaching_sessions** — one per one-on-one: coach, status (`in_progress` →
-  `completed`), `occurred_at`, running `notes` and `focus` (visible to the dreamer).
+- **coaching_sessions** — one per one-on-one: coach (credited to whoever completes
+  it), status (`in_progress` → `completed`), `occurred_at`, running `notes` and
+  `focus` (visible to the dreamer), and `actions_reviewed` (the one session-flow
+  step that can't be inferred from data).
 - **check_ins** — a grouping record for a self check-in (several entries made
   together). Sessions and check-ins are the two *sources* of entries.
 - **ratings** — one row per rating: category (`contribution | alignment |
   relationships | energy | commitment | satisfaction`), value 0–10, `source`
   (`session | self`), `session_id` / `check_in_id`, `recorded_by`, `is_private`.
-  A unique index on (`session_id`, `category`) makes session values upserts.
+  A unique index on (`session_id`, `category`) over *shared* rows makes session
+  values upserts; a session value the dreamer has made private sits beside it,
+  untouched by staff writes (DECISIONS #14).
 - **dream_progress** — same shape for 0–100% progress per dream.
 - **journal_entries** — reflections. Standalone, attached to a check-in, attached
   to one rating (`rating_id`) or one progress entry (`progress_id`), each with its
-  own `is_private`. Optional dream/category tags.
+  own `is_private`. Optional dream/category tags. When staff remove an entry, its
+  note is detached into a standalone entry rather than deleted with it.
 - **actions** — title, details, status (`active | completed | archived`), optional
   dream or CARE category link, `is_private`, creator, originating session.
 - **auth_sessions** — opaque token (httpOnly cookie), idle expiry,
   `private_unlocked_until`.
 - **login_attempts** — failure counter and lockout per email / per unlock.
+
+Rows a dreamer can make private (ratings, progress, journal entries, actions,
+check-ins) get random ids (`server/ids.ts`), so the gaps in what staff can see
+carry no information about private rows. People, dreams and sessions keep
+sequential ids.
 
 ## The privacy layer
 
@@ -85,11 +95,18 @@ includePrivate = isOwner && viewer.session.private_unlocked_until > now
   from the same filtered reads. A self check-in whose every entry is private does
   not exist for staff — it is not listed and not counted.
 - "Show private" (`POST /api/auth/privacy/unlock`) verifies the account password
-  and stamps `private_unlocked_until` on the *server-side session*; it slides
-  with activity and expires after 30 idle minutes. "Hide private" clears it.
+  and stamps `private_unlocked_until` on the *server-side session*. It slides
+  from the last real interaction — every request carries `x-dc-idle`, the
+  milliseconds since the person last touched the page — so polling and
+  background refetches never keep private entries showing; it expires after 30
+  idle minutes. "Hide private" clears it.
   Signing in always starts hidden. Signing out destroys the session.
 - Staff can never create private rows (403), never toggle privacy (403), and
-  never see `isPrivate: true` in any response.
+  never see `isPrivate: true` in any response. Owner-only markers (a private
+  current value, private session cells, a note private with its parent) are
+  present only while the owner has private entries showing, and omitted from
+  staff and hidden-mode payloads. Write responses are built through the same
+  Scope, so a hidden-mode response never carries a private body.
 
 The client never filters privacy itself; it renders what the server returns. The
 `tests/api/privacy.test.ts` suite asserts all of the above end-to-end, including

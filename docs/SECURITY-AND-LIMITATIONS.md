@@ -15,7 +15,15 @@ personal information. This document is honest about the gap.
 - Private rows are filtered in SQL for every read, count and aggregate; staff can
   never create or toggle private data. Covered by automated tests.
 - Input validation with zod on every write; JSON body size limit; no stack traces
-  returned to clients.
+  returned to clients. Future-dated entries are rejected.
+- Private rows leave no trace for staff: random ids for privatizable rows (no
+  countable gaps), owner-only markers omitted from staff payloads, and staff
+  writes that never update, delete or cascade into a dreamer's private entries
+  or notes.
+- The private unlock expires 30 minutes after the last real interaction. The
+  idle time is reported by the dreamer's own browser (`x-dc-idle`); that is a
+  convenience against walking away from an open screen, not a defence against
+  the account owner, who knows the password anyway.
 
 ## Before handling real personal data
 
