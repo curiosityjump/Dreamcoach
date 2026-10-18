@@ -78,13 +78,21 @@ why, and what was traded off.
     coach can enter anything in any order, as with the spreadsheet.
 
 14. **Session entries are upserts keyed by (session, category) / (session,
-    dream).** Correcting a number during a conversation never creates duplicates.
-    Entries take the session's date; changing the session date moves them.
+    dream) among *shared* rows.** Correcting a number during a conversation never
+    creates duplicates. Entries take the session's date; changing the session date
+    moves them. Staff writes only ever touch shared rows: if the dreamer has made a
+    session value private, the coach's cell is empty and typing into it creates a
+    new shared value, while clearing it removes only the shared one — the private
+    row is never updated, deleted or revealed, so an empty cell behaves exactly like
+    a never-recorded one. The dreamer then sees both entries in their own history;
+    the shared one is what the grid shows.
 
 15. **One open session per dreamer.** "Start session" returns the existing
     in-progress session if there is one. Completed sessions can be reopened or
     edited (values remain editable from the workspace); only an empty in-progress
-    session can be deleted.
+    session can be deleted. "Empty" is judged on what the coach can see, so the
+    answer never reveals private rows; anything the dreamer kept private survives
+    the deletion as part of their own history, detached from the session.
 
 16. **Sources are explicit everywhere.** Every rating/progress entry has
     `source: session | self`; charts draw sessions as solid points and self

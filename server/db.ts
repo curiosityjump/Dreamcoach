@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS ratings (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ratings_dreamer ON ratings(dreamer_id, category, occurred_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ratings_session_cat ON ratings(session_id, category) WHERE session_id IS NOT NULL;
+DROP INDEX IF EXISTS idx_ratings_session_cat;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ratings_session_cat_v2 ON ratings(session_id, category, is_private) WHERE session_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS dream_progress (
   id INTEGER PRIMARY KEY,
@@ -104,7 +105,8 @@ CREATE TABLE IF NOT EXISTS dream_progress (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_progress_dream ON dream_progress(dream_id, occurred_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_progress_session_dream ON dream_progress(session_id, dream_id) WHERE session_id IS NOT NULL;
+DROP INDEX IF EXISTS idx_progress_session_dream;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_progress_session_dream_v2 ON dream_progress(session_id, dream_id, is_private) WHERE session_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS journal_entries (
   id INTEGER PRIMARY KEY,

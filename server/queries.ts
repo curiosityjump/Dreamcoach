@@ -290,10 +290,10 @@ export function listDreams(db: DB, scope: Scope): Dream[] {
   }[];
   const progress = db
     .prepare(
-      `SELECT dream_id, value, occurred_at FROM dream_progress
+      `SELECT dream_id, value, occurred_at, is_private FROM dream_progress
        WHERE dreamer_id = ? AND (is_private = 0 OR ? = 1) ORDER BY occurred_at DESC, id DESC`,
     )
-    .all(scope.dreamerId, INC(scope)) as { dream_id: number; value: number; occurred_at: string }[];
+    .all(scope.dreamerId, INC(scope)) as { dream_id: number; value: number; occurred_at: string; is_private: number }[];
   const actions = db
     .prepare(
       `SELECT dream_id, COUNT(*) AS n FROM actions WHERE dreamer_id = ? AND status = 'active' AND dream_id IS NOT NULL AND (is_private = 0 OR ? = 1) GROUP BY dream_id`,
@@ -312,6 +312,7 @@ export function listDreams(db: DB, scope: Scope): Dream[] {
       progress: entries[0]?.value ?? null,
       progressAt: entries[0]?.occurred_at ?? null,
       previousProgress: entries[1]?.value ?? null,
+      progressIsPrivate: !!entries[0]?.is_private,
       achievedAt: d.achieved_at,
       createdAt: d.created_at,
       updatedAt: d.updated_at,
@@ -346,14 +347,14 @@ export function getRating(db: DB, scope: Scope, id: number): RatingEntry | null 
 export function latestRatings(db: DB, scope: Scope): Partial<Record<RatingCategory, LatestRating>> {
   const rows = db
     .prepare(
-      `SELECT category, value, occurred_at, source FROM ratings
+      `SELECT category, value, occurred_at, source, is_private FROM ratings
        WHERE dreamer_id = ? AND (is_private = 0 OR ? = 1) ORDER BY occurred_at DESC, id DESC`,
     )
-    .all(scope.dreamerId, INC(scope)) as { category: RatingCategory; value: number; occurred_at: string; source: 'session' | 'self' }[];
+    .all(scope.dreamerId, INC(scope)) as { category: RatingCategory; value: number; occurred_at: string; source: 'session' | 'self'; is_private: number }[];
   const out: Partial<Record<RatingCategory, LatestRating>> = {};
   for (const cat of RATING_CATEGORIES) {
     const [latest, prev] = rows.filter((r) => r.category === cat);
-    if (latest) out[cat] = { category: cat, value: latest.value, occurredAt: latest.occurred_at, source: latest.source, previous: prev?.value ?? null };
+    if (latest) out[cat] = { category: cat, value: latest.value, occurredAt: latest.occurred_at, source: latest.source, previous: prev?.value ?? null, isPrivate: !!latest.is_private };
   }
   return out;
 }
@@ -424,12 +425,13 @@ export function getAction(db: DB, scope: Scope, id: number): ActionItem | null {
 /* ---------- Coaching sessions ---------- */
 
 function mapSession(db: DB, scope: Scope, s: SessionRow, number: number): CoachingSession {
+  // Shared rows win over private ones for the same cell (a coach may re-enter a value the dreamer privatised).
   const ratings = db
-    .prepare(`SELECT category, value FROM ratings WHERE session_id = ? AND (is_private = 0 OR ? = 1)`)
-    .all(s.id, INC(scope)) as { category: RatingCategory; value: number }[];
+    .prepare(`SELECT category, value, is_private FROM ratings WHERE session_id = ? AND (is_private = 0 OR ? = 1) ORDER BY is_private DESC, updated_at ASC`)
+    .all(s.id, INC(scope)) as { category: RatingCategory; value: number; is_private: number }[];
   const progress = db
-    .prepare(`SELECT dream_id, value FROM dream_progress WHERE session_id = ? AND (is_private = 0 OR ? = 1)`)
-    .all(s.id, INC(scope)) as { dream_id: number; value: number }[];
+    .prepare(`SELECT dream_id, value, is_private FROM dream_progress WHERE session_id = ? AND (is_private = 0 OR ? = 1) ORDER BY is_private DESC, updated_at ASC`)
+    .all(s.id, INC(scope)) as { dream_id: number; value: number; is_private: number }[];
   const counts = db
     .prepare(
       `SELECT SUM(CASE WHEN session_id = ? THEN 1 ELSE 0 END) AS created,
@@ -438,9 +440,19 @@ function mapSession(db: DB, scope: Scope, s: SessionRow, number: number): Coachi
     )
     .get(s.id, s.occurred_at, s.completed_at ?? '9999', s.dreamer_id, INC(scope)) as { created: number | null; completed: number | null };
   const r: Partial<Record<RatingCategory, number>> = {};
-  for (const row of ratings) r[row.category] = row.value;
+  const privateRatings: RatingCategory[] = [];
+  for (const row of ratings) {
+    r[row.category] = row.value;
+    if (row.is_private) privateRatings.push(row.category);
+    else { const i = privateRatings.indexOf(row.category); if (i >= 0) privateRatings.splice(i, 1); }
+  }
   const p: Record<number, number> = {};
-  for (const row of progress) p[row.dream_id] = row.value;
+  const privateProgress: number[] = [];
+  for (const row of progress) {
+    p[row.dream_id] = row.value;
+    if (row.is_private) privateProgress.push(row.dream_id);
+    else { const i = privateProgress.indexOf(row.dream_id); if (i >= 0) privateProgress.splice(i, 1); }
+  }
   return {
     id: s.id,
     dreamerId: s.dreamer_id,
@@ -453,6 +465,7 @@ function mapSession(db: DB, scope: Scope, s: SessionRow, number: number): Coachi
     focus: s.focus,
     ratings: r,
     progress: p,
+    ...(scope.includePrivate ? { privateRatings, privateProgress } : {}),
     actionsCreated: counts.created ?? 0,
     actionsCompleted: counts.completed ?? 0,
   };

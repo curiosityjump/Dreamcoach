@@ -227,3 +227,77 @@ test('dreamer in hidden mode cannot read or edit own private rows by id', async 
   await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
   assert.equal((await dreamer.del(`/dreamers/me/journal/${j.body.id}`)).status, 200);
 });
+
+test('a coach re-entering a cell the dreamer privatised neither reveals, overwrites nor deletes the private row', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const grid = await coach.get(`/dreamers/${dreamerId}/grid`);
+  const session = grid.body.sessions.filter((s: any) => s.status === 'completed').slice(-1)[0];
+  const ratings = await dreamer.get('/dreamers/me/ratings?category=relationships');
+  const target = ratings.body.find((r: any) => r.sessionId === session.id);
+  const originalValue = target.value;
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${target.id}`, { isPrivate: true })).status, 200);
+  // Coach sees an empty cell and types a value: it appears as a shared value (no inference channel).
+  const put = await coach.put(`/dreamers/${dreamerId}/sessions/${session.id}/ratings`, { category: 'relationships', value: 2 });
+  assert.equal(put.status, 200);
+  assert.equal(put.body.ratings.relationships, 2, 'the coach sees the value they typed, exactly as for a never-recorded cell');
+  // The private row is untouched.
+  let mine = (await dreamer.get(`/dreamers/me/ratings?category=relationships`)).body.filter((r: any) => r.sessionId === session.id);
+  const priv = mine.find((r: any) => r.id === target.id);
+  assert.ok(priv && priv.isPrivate && priv.value === originalValue, 'private row keeps its value and privacy');
+  assert.equal(mine.length, 2, 'the owner sees both their private value and the coach’s shared one');
+  const mySession = (await dreamer.get(`/dreamers/me/sessions/${session.id}`)).body;
+  assert.ok(mySession.privateRatings.includes('relationships') === false, 'shared row wins in the grid; privateRatings lists only cells whose shown value is private');
+  // Coach clears the cell: only the shared row goes.
+  const clear = await coach.put(`/dreamers/${dreamerId}/sessions/${session.id}/ratings`, { category: 'relationships', value: null });
+  assert.equal(clear.status, 200);
+  assert.equal(clear.body.ratings.relationships, undefined);
+  mine = (await dreamer.get(`/dreamers/me/ratings?category=relationships`)).body.filter((r: any) => r.sessionId === session.id);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].id, target.id);
+  const after = (await dreamer.get(`/dreamers/me/sessions/${session.id}`)).body;
+  assert.ok(after.privateRatings.includes('relationships'), 'owner is told the shown value is private');
+  assert.equal(after.ratings.relationships, originalValue);
+  // Staff never receive the marker fields at all.
+  const coachSession = (await coach.get(`/dreamers/${dreamerId}/sessions/${session.id}`)).body;
+  assert.equal(coachSession.privateRatings, undefined);
+  assert.equal(coachSession.privateProgress, undefined);
+  assert.ok(!JSON.stringify(coachSession).includes('private'));
+  // Restore.
+  await dreamer.patch(`/dreamers/me/ratings/${target.id}`, { isPrivate: false });
+});
+
+test('deleting a session never destroys private rows, and non-empty sessions cannot be deleted', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const started = await coach.post(`/dreamers/${dreamerId}/sessions`, {});
+  const sid = started.body.id;
+  await coach.put(`/dreamers/${dreamerId}/sessions/${sid}/ratings`, { category: 'energy', value: 4 });
+  assert.equal((await coach.del(`/dreamers/${dreamerId}/sessions/${sid}`)).status, 400, 'a session with entries cannot be deleted');
+  // The dreamer privatises the only entry; to the coach the session now looks empty.
+  const row = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => r.sessionId === sid);
+  await dreamer.patch(`/dreamers/me/ratings/${row.id}`, { isPrivate: true });
+  const del = await coach.del(`/dreamers/${dreamerId}/sessions/${sid}`);
+  assert.equal(del.status, 200);
+  const kept = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => r.id === row.id);
+  assert.ok(kept, 'the private entry survives the session deletion');
+  assert.equal(kept.sessionId, null);
+  assert.equal(kept.isPrivate, true);
+  await dreamer.del(`/dreamers/me/ratings/${row.id}`).catch(() => {});
+});
+
+test('journal entries cannot be attached to another dreamer’s session', async () => {
+  const { coach, dreamerId, director } = await dreamerAndCoach();
+  const others = await director.get('/director/dreamers');
+  const other = others.body.find((r: any) => r.dreamer.id !== dreamerId);
+  const otherSessions = await director.get(`/dreamers/${other.dreamer.id}/sessions`);
+  const started = await coach.post(`/dreamers/${dreamerId}/sessions`, {});
+  const bad = await coach.post(`/dreamers/${dreamerId}/journal`, { body: 'x', sessionId: otherSessions.body[0].id });
+  assert.equal(bad.status, 400);
+  const missing = await coach.post(`/dreamers/${dreamerId}/journal`, { body: 'x', sessionId: 999999 });
+  assert.equal(missing.status, 400);
+  const good = await coach.post(`/dreamers/${dreamerId}/journal`, { body: 'Shared in session', sessionId: started.body.id });
+  assert.equal(good.status, 201);
+  await coach.del(`/dreamers/${dreamerId}/journal/${good.body.id}`);
+  await coach.del(`/dreamers/${dreamerId}/sessions/${started.body.id}`);
+});

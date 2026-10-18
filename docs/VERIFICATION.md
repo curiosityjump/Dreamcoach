@@ -1,7 +1,7 @@
 # Verification
 
 How each requirement in the brief was verified. "API test" = `tests/api/*.test.ts`
-(21 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
+(24 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
 journey in `tests/e2e/journey.spec.ts` (6 serial steps, fresh database on :3100).
 "Manual" = exercised in Chromium with screenshots in `docs/screenshots/`.
 
@@ -37,6 +37,8 @@ Run everything: `npm run typecheck && npm run test:api && npm run test:e2e`.
 | Locked state on sign-out / sign-in / expiry / account switch | New login always hidden; logout destroys session; 30-min idle relock | API tests ("re-login starts hidden", "unlock times out server-side"), E2E 7 |
 | Real access control, not cosmetic | Server-side filtering; hidden-mode owner cannot read/edit private rows by id | API test "dreamer in hidden mode cannot read or edit own private rows by id"; "hide private: the dreamer sees exactly what the coach sees" (deep-equal of 7 endpoints) |
 | Staff can never create or toggle private | 403s | API test |
+| A coach's session grid can never update, delete or reveal a value the dreamer made private | Staff writes touch shared rows only; owner-only markers are omitted from staff payloads | API test "a coach re-entering a cell the dreamer privatised…" |
+| Deleting a session never destroys private rows; sessions with entries cannot be deleted | Emptiness judged on coach-visible content; private rows detached, not cascaded | API test "deleting a session never destroys private rows…" |
 
 ## Coach experience
 
