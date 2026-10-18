@@ -312,7 +312,7 @@ export function listDreams(db: DB, scope: Scope): Dream[] {
       progress: entries[0]?.value ?? null,
       progressAt: entries[0]?.occurred_at ?? null,
       previousProgress: entries[1]?.value ?? null,
-      progressIsPrivate: !!entries[0]?.is_private,
+      ...(scope.includePrivate ? { progressIsPrivate: !!entries[0]?.is_private } : {}),
       achievedAt: d.achieved_at,
       createdAt: d.created_at,
       updatedAt: d.updated_at,
@@ -354,7 +354,7 @@ export function latestRatings(db: DB, scope: Scope): Partial<Record<RatingCatego
   const out: Partial<Record<RatingCategory, LatestRating>> = {};
   for (const cat of RATING_CATEGORIES) {
     const [latest, prev] = rows.filter((r) => r.category === cat);
-    if (latest) out[cat] = { category: cat, value: latest.value, occurredAt: latest.occurred_at, source: latest.source, previous: prev?.value ?? null, isPrivate: !!latest.is_private };
+    if (latest) out[cat] = { category: cat, value: latest.value, occurredAt: latest.occurred_at, source: latest.source, previous: prev?.value ?? null, ...(scope.includePrivate ? { isPrivate: !!latest.is_private } : {}) };
   }
   return out;
 }

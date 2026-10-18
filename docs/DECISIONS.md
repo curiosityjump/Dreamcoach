@@ -19,7 +19,10 @@ why, and what was traded off.
    The UI warns the dreamer that it will hide the value from the coach's views.
    *Why:* "dreams belong to the dreamer" — ownership shouldn't depend on who typed
    the number. *Trade-off:* the coach may remember the number; software cannot
-   un-remember a conversation.
+   un-remember a conversation. The *value* of a session entry stays the coach's
+   to record, but the dreamer can add, edit or remove their own note on it (shared
+   or private). Per-entry notes are always the dreamer's words; coaches write the
+   session's notes and focus (#3).
 
 3. **Coaches have no private notes.** Session notes and focus are visible to the
    dreamer. The brief says dreamers can access "coaching notes", and transparency
@@ -68,7 +71,11 @@ why, and what was traded off.
 
 12. **The dreamer can create private entries while private is hidden.** The entry
     simply disappears from view and a toast explains why. Requiring an unlock to
-    write a private note felt like a barrier to honest reflection.
+    write a private note felt like a barrier to honest reflection. The one thing
+    hidden mode never does is change a private entry blindly: if a shared rating
+    already carries a private note the dreamer can't currently see, "Add a note"
+    asks them to show private entries first instead of overwriting it, and clearing
+    or re-flagging that unseen note does nothing.
 
 ## Coaching workflow
 
@@ -103,14 +110,22 @@ why, and what was traded off.
 17. **Definitions chosen to be honest and explained in the UI.**
     - Participation (45d): % of *active* dreamers with a completed session in the
       last 45 days (monthly cadence with slack).
-    - Engaged between sessions (30d): dreamers with at least one *shared* self
-      check-in or reflection.
+    - Engaged between sessions (30d): *active* dreamers with at least one *shared*
+      self check-in or reflection of their own, shown "of" the active dreamers.
+      Paused dreamers are counted the same way on coach and Director pages.
     - CARE change: mean of (latest session CARE average − first session CARE
       average) for dreamers with ≥ 2 sessions carrying all four ratings; always
       shown with n.
     - Follow-through: among shared actions created more than 30 days ago, %
       completed. Archived actions are reconsidered priorities, not failures.
     - Dreams achieved: shared progress reached 100%.
+    - Sessions (total, 30d, monthly trend) are credited to the coach who *ran*
+      them, so reassigning a dreamer doesn't move their history to a new coach.
+      Every other per-coach figure describes the coach's *current* caseload.
+    - A session's "N actions chosen · M completed" counts the actions chosen in
+      that session and how many of those are now done.
+    - "Last self activity" names what it was (check-in or reflection), and the
+      column sorts by what it shows.
     A visible caveat states caseloads differ and these are not rankings.
 
 ## Technical

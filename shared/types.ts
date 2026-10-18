@@ -73,8 +73,8 @@ export interface Dream {
   progressAt: string | null;
   /** Progress recorded in the previous visible update, for delta display. */
   previousProgress: number | null;
-  /** True only for the owner (unlocked) when the current progress comes from a private update. */
-  progressIsPrivate: boolean;
+  /** Owner-only, present only while private entries are shown: the current progress is a private update. */
+  progressIsPrivate?: boolean;
   achievedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -198,8 +198,8 @@ export interface LatestRating {
   source: EntrySource;
   /** The previous visible value for this category, for delta display. */
   previous: number | null;
-  /** True only for the owner (unlocked) when the latest value is a private entry. */
-  isPrivate: boolean;
+  /** Owner-only, present only while private entries are shown: the latest value is a private entry. */
+  isPrivate?: boolean;
 }
 
 export interface Snapshot {

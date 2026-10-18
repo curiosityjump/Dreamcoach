@@ -235,10 +235,12 @@ test('7–8. hide/show private with password re-entry, and the history views', a
   await expect(page.getByText(PRIVATE_NOTE).first()).toBeVisible();
   await expect(page.getByTestId('category-entry').first()).toBeVisible();
 
-  // Hide private is instant and complete.
+  // Hide private is instant and complete: the screen clears before the server confirms the lock.
+  const locked = page.waitForResponse((r) => r.url().endsWith('/api/auth/privacy/lock') && r.ok());
   await page.getByTestId('privacy-toggle').click();
   await expect(page.getByTestId('privacy-toggle')).toContainText(/show private/i);
   await expect(page.getByText(PRIVATE_NOTE)).toHaveCount(0);
+  await locked;
   await page.goto('/journal');
   await expect(page.getByText(PRIVATE_JOURNAL)).toHaveCount(0);
 

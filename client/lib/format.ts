@@ -31,17 +31,19 @@ export function fmtDateTime(iso: string): string {
   return `${fmtDate(iso)} · ${fmtTime(iso)}`;
 }
 
+const ago = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+
 export function relativeTime(iso: string | null | undefined): string {
   if (!iso) return 'never';
   const diff = Date.now() - new Date(iso).getTime();
   const days = Math.floor(diff / DAY);
   if (diff < 60000) return 'just now';
   if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
-  if (days < 1) return `${Math.floor(diff / 3600000)}h ago`;
+  if (days < 1) return ago(Math.floor(diff / 3600000), 'hour');
   if (days === 1) return 'yesterday';
   if (days < 7) return `${days} days ago`;
-  if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  if (days < 30) return ago(Math.floor(days / 7), 'week');
+  if (days < 365) return ago(Math.floor(days / 30), 'month');
   return fmtDate(iso);
 }
 

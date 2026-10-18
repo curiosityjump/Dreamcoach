@@ -17,7 +17,7 @@ import { sessionPath, staffDreamerPath } from '@/app/routes';
 import { useToast } from '@/components/toast';
 import { Avatar, Bar, Button, Card, CardHead, Chip, EmptyState, LoadingPage, PageHeader, Stat } from '@/components/ui';
 import { IconArrowRight, IconChevronDown, IconInfo, IconPlay, IconUsers } from '@/components/icons';
-import { fmtDate, num, pct, plural, relativeTime } from '@/lib/format';
+import { fmtDate, fmtDateTime, num, pct, plural, relativeTime } from '@/lib/format';
 
 type SortKey = 'name' | 'lastSession' | 'lastActivity';
 type SortDir = 'asc' | 'desc';
@@ -33,7 +33,7 @@ function sortCaseload(list: CaseloadEntry[], key: SortKey, dir: SortDir): Caselo
     let d = 0;
     if (key === 'name') d = a.dreamer.name.localeCompare(b.dreamer.name);
     else if (key === 'lastSession') d = time(a.snapshot.lastSession?.occurredAt) - time(b.snapshot.lastSession?.occurredAt);
-    else d = time(a.snapshot.lastSelfCheckIn) - time(b.snapshot.lastSelfCheckIn);
+    else d = time(a.snapshot.lastSelfActivity?.at) - time(b.snapshot.lastSelfActivity?.at);
     return d * sign || a.dreamer.name.localeCompare(b.dreamer.name);
   });
 }
@@ -63,11 +63,11 @@ function LastSessionCell({ entry }: { entry: CaseloadEntry }) {
 }
 
 function LastSelfCell({ entry }: { entry: CaseloadEntry }) {
-  const at = entry.snapshot.lastSelfCheckIn;
-  if (!at) return <span className="muted">—</span>;
+  const last = entry.snapshot.lastSelfActivity;
+  if (!last) return <span className="muted">—</span>;
   return (
     <span className="cv-cell-stack">
-      <span><span className="cv-strong">Self check-in</span> <span className="muted">· {relativeTime(at)}</span></span>
+      <span title={fmtDateTime(last.at)}><span className="cv-strong">{last.kind === 'reflection' ? 'Reflection' : 'Check-in'}</span> <span className="muted">· {relativeTime(last.at)}</span></span>
       {entry.snapshot.selfCheckIns30d > 0 && <span className="muted tiny">{plural(entry.snapshot.selfCheckIns30d, 'check-in')} in 30 days</span>}
     </span>
   );
@@ -257,7 +257,7 @@ export function CoachDashboardPage() {
       <div className="stat-row cv-stats" data-testid="coach-stats">
         <Stat label="Dreamers" value={stats.dreamers} sub={caseload.filter((c) => c.dreamer.status === 'active').length === stats.dreamers ? 'all active' : `${caseload.filter((c) => c.dreamer.status === 'active').length} active`} />
         <Stat label="Sessions this month" value={stats.sessionsThisMonth} sub={`${stats.sessionsLast30d} in the last 30 days`} />
-        <Stat label="Seen in the last 45 days" value={`${stats.dreamersSeenLast45d} of ${stats.dreamers}`} sub="completed a session" />
+        <Stat label="Seen in the last 45 days" value={`${stats.dreamersSeenLast45d} of ${stats.activeDreamers}`} sub="completed a session" />
         <Stat label="Self check-ins" value={stats.selfCheckInsLast30d} sub="last 30 days, across your dreamers" />
         <Stat label="Sessions in progress" value={stats.openSessions} sub={stats.openSessions === 0 ? 'nothing left open' : 'ready to continue'} />
       </div>

@@ -302,3 +302,30 @@ test('journal entries cannot be attached to another dreamer’s session', async 
   await coach.del(`/dreamers/${dreamerId}/journal/${good.body.id}`);
   await coach.del(`/dreamers/${dreamerId}/sessions/${started.body.id}`);
 });
+
+test('a private note the dreamer cannot see right now is never overwritten, cleared or re-flagged blindly', async () => {
+  const { dreamer, coach, dreamerId } = await dreamerAndCoach();
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const rating = (await dreamer.get('/dreamers/me/ratings?category=alignment')).body.find((r: any) => !r.isPrivate && !r.note);
+  assert.ok(rating);
+  const secret = `Hidden note ${uniqueMarker()}`;
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: secret, notePrivate: true })).status, 200);
+  await dreamer.post('/auth/privacy/lock');
+
+  // In hidden mode the rating looks note-less, exactly as the coach sees it…
+  const hidden = (await dreamer.get('/dreamers/me/ratings?category=alignment')).body.find((r: any) => r.id === rating.id);
+  assert.equal(hidden.note, null);
+  // …so "Add a note" asks to unlock instead of replacing the private text, and clearing or re-flagging does nothing.
+  const add = await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: 'Typed while hidden', notePrivate: false });
+  assert.equal(add.status, 409);
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: null })).status, 200);
+  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { notePrivate: false })).status, 200);
+  const coachView = (await coach.get(`/dreamers/${dreamerId}/care/alignment`)).body.entries.find((e: any) => e.id === rating.id);
+  assert.equal(coachView.note, null, 'the coach still sees no note');
+
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const after = (await dreamer.get('/dreamers/me/ratings?category=alignment')).body.find((r: any) => r.id === rating.id);
+  assert.equal(after.note.body, secret, 'the private note survives untouched');
+  assert.equal(after.note.isPrivate, true);
+  await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: null });
+});

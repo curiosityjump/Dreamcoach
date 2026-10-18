@@ -50,6 +50,14 @@ function at(d: Date, hour = 15, minute = 0): string {
   x.setUTCHours(hour, minute, 0, 0);
   return x.toISOString();
 }
+/** A waking-hours time on the same (UTC) day as `t`, never later than `latest`. */
+function wakingTime(t: number, latest: number): number {
+  const x = Date.parse(at(new Date(t), 8 + Math.floor(rand() * 14), pick([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55])));
+  if (x <= latest) return x;
+  const morning = Date.parse(at(new Date(t), 8));
+  if (latest > morning) return Math.floor(morning + rand() * (latest - morning)); // earlier that day
+  return Date.parse(at(new Date(t - DAY), 18 + Math.floor(rand() * 4), pick([0, 15, 30, 45]))); // the evening before
+}
 function addDays(d: Date | string, n: number): Date {
   return new Date(new Date(d).getTime() + n * DAY);
 }
@@ -858,17 +866,17 @@ export function resetAndSeed(db: DB): SeedSummary {
         // Standalone journal entries & dreamer-created actions in this window
         const nJournal = spec.engagement === 'high' ? 2 : spec.engagement === 'moderate' ? 1 : 0;
         for (let j = 0; j < nJournal && span > 0; j++) {
-          const when = new Date(windowStart + rand() * span).toISOString();
+          const when = new Date(wakingTime(windowStart + rand() * span, windowEnd)).toISOString();
           const priv = chance(0.35);
-          const dreamTag = chance(0.3) ? dreamIds[Math.floor(rand() * 4)]! : null;
+          // The reflection banks are about life in general, so they are not tagged to a particular dream.
           const body = pickUnused(priv ? REFLECTIONS_PRIVATE : REFLECTIONS_SHARED, used);
           if (!body) continue;
-          insJournal.run(dreamerId, body, when, priv ? 1 : 0, 'self', null, null, null, null, dreamTag, null, userId, when, when);
+          insJournal.run(dreamerId, body, when, priv ? 1 : 0, 'self', null, null, null, null, null, null, userId, when, when);
           counts.journal++;
           if (priv) counts.private++;
         }
         if (spec.engagement !== 'light' && chance(0.6) && span > 0) {
-          const t = windowStart + rand() * span;
+          const t = wakingTime(windowStart + rand() * span, windowEnd);
           const when = new Date(t).toISOString();
           const priv = chance(0.35);
           const di = Math.floor(rand() * 4);
@@ -882,7 +890,7 @@ export function resetAndSeed(db: DB): SeedSummary {
           else { category = pick(CARE_CATEGORIES); title = pickUnused(CARE_ACTIONS[category], used); }
           if (title) {
             const done = chance(0.4);
-            const doneAt = done ? new Date(t + (2 + rand() * 12) * DAY) : null;
+            const doneAt = done ? new Date(wakingTime(t + (2 + rand() * 12) * DAY, Number.MAX_SAFE_INTEGER)) : null;
             const doneIso = doneAt && doneAt.getTime() < NOW.getTime() ? doneAt.toISOString() : null;
             const r = insAction.run(dreamerId, title, '', doneIso ? 'completed' : 'active', dreamId, category, priv ? 1 : 0, userId, null, when, doneIso, null, doneIso ?? when);
             // Shared open actions come up for review at the next session; private ones are the dreamer's alone.

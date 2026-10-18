@@ -74,6 +74,12 @@ function upsertAttachedNote(
   const existing = db.prepare(`SELECT id, is_private FROM journal_entries WHERE ${col} = ?`).get(pid) as { id: number; is_private: number } | undefined;
   const text = body?.trim();
   const now = nowIso();
+  if (existing?.is_private && !scope.includePrivate) {
+    // A private note the owner cannot see right now (private entries hidden) is never changed or
+    // removed blindly: clearing or re-flagging it is a no-op, and writing over it asks them to unlock.
+    if (text) throw new HttpError(409, 'This entry already has a note that is hidden right now. Show private entries to edit it.', 'conflict');
+    return;
+  }
   if (body === undefined) {
     if (existing && isPrivate !== undefined) db.prepare('UPDATE journal_entries SET is_private = ?, updated_at = ? WHERE id = ?').run(isPrivate ? 1 : 0, now, existing.id);
     return;

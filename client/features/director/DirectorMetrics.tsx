@@ -68,7 +68,8 @@ export function CareChangeValue({ change, size = 'md' }: { change: { value: numb
   return (
     <span className={`dir-signed ${tone}${size === 'lg' ? ' dir-signed-lg' : ''}`}>
       <span className="tnum">{signed(value)}</span>
-      {n != null && <span className="dir-n">n = {n}</span>}
+      {/* Large stat tiles state n in their sub-line, so only table cells repeat it inline. */}
+      {n != null && size !== 'lg' && <span className="dir-n">n = {n}</span>}
     </span>
   );
 }
