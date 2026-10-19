@@ -70,6 +70,24 @@ them; coaches and the Director never receive them.
 | `npm run test:api` | API & privacy tests (node:test) against an in-memory database |
 | `npm run test:e2e` | Playwright end-to-end journey (starts its own server on :3100) |
 
+## Deploying (Railway or any Docker host)
+
+The included `Dockerfile` builds the client and runs the server in one container.
+It listens on `$PORT` when the platform provides it (Railway does) and otherwise
+on 3000.
+
+On **Railway**: connect the GitHub repo (the `Dockerfile` and `railway.toml` are
+picked up automatically), then in the service settings:
+
+1. Attach a **Volume** mounted at `/data` so the SQLite database survives
+   redeploys. Without a volume the app still runs, but reseeds the demo data on
+   every deploy.
+2. Add the variable `DC_SECURE_COOKIES=1` so session cookies are marked Secure
+   (Railway serves over HTTPS).
+3. Optionally set `DC_RESET_DB=1` once to force a fresh demo dataset, then remove it.
+
+The first request after a deploy may take a second while the demo data is seeded.
+
 ## Tech
 
 Node.js · Express 5 · SQLite (better-sqlite3) · TypeScript · React 19 · Vite ·
