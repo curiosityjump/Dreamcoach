@@ -399,7 +399,13 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
             <div className="dj-entry-meta" data-testid="journal-entry-meta">
               {when}
               {/* A reflection written on its own is a "Reflection"; "Self check-in" is kept for what was written in one. */}
-              <SourceChip source={shown.source} reflection={standalone} coachName={shown.source === 'session' && coachAuthored ? shown.author.name : undefined} />
+              {/* A dreamer's own note on a session-recorded value is theirs, not the coach's record. */}
+              <SourceChip
+                source={shown.source}
+                reflection={standalone}
+                coachName={shown.source === 'session' && coachAuthored ? shown.author.name : undefined}
+                label={shown.source === 'session' && !coachAuthored && attached ? (isDreamer ? 'Your note on a session value' : `${shown.author.name.split(' ')[0]}’s note on a session value`) : undefined}
+              />
               {contextText && (
                 isDreamer && shown.ratingId != null && shown.category
                   ? <Link to={`/care/${shown.category}`} className="dj-entry-context" data-testid="journal-entry-context">{contextText}</Link>

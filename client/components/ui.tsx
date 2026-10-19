@@ -196,8 +196,9 @@ export function CategoryChip({ category, short }: { category: RatingCategory; sh
   );
 }
 /** Where an entry came from. `reflection`: a journal entry written on its own, which is a "Reflection", not a check-in. */
-export function SourceChip({ source, coachName, reflection }: { source: EntrySource; coachName?: string; reflection?: boolean }) {
-  return <Chip className={source === 'session' ? 'chip-session' : 'chip-self'}>{source === 'session' ? (coachName ? `Session · ${coachName}` : 'Coaching session') : reflection ? 'Reflection' : 'Self check-in'}</Chip>;
+export function SourceChip({ source, coachName, reflection, label }: { source: EntrySource; coachName?: string; reflection?: boolean; label?: string }) {
+  const text = label ?? (source === 'session' ? (coachName ? `Session · ${coachName}` : 'Coaching session') : reflection ? 'Reflection' : 'Self check-in');
+  return <Chip className={source === 'session' ? 'chip-session' : 'chip-self'}>{text}</Chip>;
 }
 export function PrivateChip({ compact }: { compact?: boolean }) {
   return (

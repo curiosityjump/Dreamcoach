@@ -2,7 +2,9 @@
 
 How each requirement in the brief was verified. "API test" = `tests/api/*.test.ts`
 (60 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
-journey in `tests/e2e/journey.spec.ts` (6 serial steps, fresh database on :3100).
+suites in `tests/e2e/` — the brief's journey (`journey.spec.ts`, 6 serial steps) and
+less common dreamer/coach flows (`dreamer-flows.spec.ts`, 5 tests) — against a fresh
+database on :3100.
 "Manual" = exercised in Chromium with screenshots in `docs/screenshots/`.
 
 Run everything: `npm run typecheck && npm run test:api && npm run test:e2e`.
