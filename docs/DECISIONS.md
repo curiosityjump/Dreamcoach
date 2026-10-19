@@ -22,7 +22,8 @@ why, and what was traded off.
    un-remember a conversation. The *value* of a session entry stays the coach's
    to record, but the dreamer can add, edit or remove their own note on it (shared
    or private). Per-entry notes are always the dreamer's words; coaches write the
-   session's notes and focus (#3).
+   session's notes and focus (#3). Every sentence about a past session names the
+   coach who ran it, even after the dreamer moves to another coach.
 
 3. **Coaches have no private notes.** Session notes and focus are visible to the
    dreamer. The brief says dreamers can access "coaching notes", and transparency
