@@ -43,7 +43,7 @@ function ProgressDialogInner({ dream, refreshing, onClose, onSaved }: { dream: D
   const [asking, setAsking] = useState(false);
   const hasNote = note.trim().length > 0;
   // A private update (or a private note) stays here, covered, while private entries are hidden.
-  const covered = useCoveredParts(isPrivate ? ['all'] : hasNote && notePrivate ? ['note'] : []);
+  const [covered] = useCoveredParts(isPrivate ? ['all'] : hasNote && notePrivate ? ['note'] : []);
   const delta = refreshing || dream.progress == null ? null : value - dream.progress;
   // "Achieved" comes from shared progress only, so only a shared 100% can mark the dream achieved.
   const reachesHundred = value >= 100 && !dream.achievedAt;

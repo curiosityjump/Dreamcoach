@@ -17,7 +17,7 @@ import { useToast } from '@/components/toast';
 import { Button, CategoryChip, Check, Chip, ConfirmDialog, Dropdown, EmptyState, Field, PrivacyToggle, PrivateChip, TextArea } from '@/components/ui';
 import { IconArchive, IconEdit, IconInfo, IconList, IconLock, IconMore, IconPlus, IconRotate, IconStar, IconTrash, IconUnlock } from '@/components/icons';
 import { firstName, fmtDate } from '@/lib/format';
-import { CoveredDraft, useCovered } from '@/features/dreamer/drafts';
+import { CoveredDraft, useCovered, useKeptDraft } from '@/features/dreamer/drafts';
 
 export type ActionMode = 'dreamer' | 'staff';
 type DreamRef = Pick<Dream, 'id' | 'title' | 'slot'>;
@@ -206,6 +206,8 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
 
   const trimmed = title.trim();
   const canSubmit = trimmed.length > 0;
+  // A private draft goes under cover when private entries are hidden (it can still be added) and comes back when shown.
+  const [covered, uncover] = useCovered(mode === 'dreamer' && isPrivate && (title.trim() !== '' || details.trim() !== ''));
 
   const onDraftRef = useRef(onDraftChange);
   onDraftRef.current = onDraftChange;
@@ -220,7 +222,8 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
     setIsPrivate(d.isPrivate);
   };
 
-  const clear = () => fill({ title: '', details: '', showDetails: false, dreamId: defaultDreamId ?? null, category: defaultCategory ?? null, isPrivate: false });
+  // The draft is gone (added, or discarded), so whatever is typed next is written in view.
+  const clear = () => { fill({ title: '', details: '', showDetails: false, dreamId: defaultDreamId ?? null, category: defaultCategory ?? null, isPrivate: false }); uncover(); };
 
   /** Saves one action; resolves whether it went through. If not, it's kept as not added. */
   const send = (draft: ComposerDraft): Promise<boolean> => {
@@ -289,9 +292,6 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
     if (e.key === 'Escape' && onCancel) onCancel();
   };
-
-  // A private draft goes under cover when private entries are hidden (it can still be added) and comes back when shown.
-  const covered = useCovered(mode === 'dreamer' && isPrivate && (title.trim() !== '' || details.trim() !== ''));
 
   return (
     <form className={`da-composer da-composer-${mode}`} onSubmit={submit} data-testid="action-composer" aria-busy={saving > 0 || undefined}>
@@ -446,7 +446,11 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatus
   const { toast } = useToast();
   const update = useUpdateAction(dreamerRef);
   const remove = useDeleteAction(dreamerRef);
-  const [editing, setEditing] = useState(false);
+  // The edit's draft is kept by a dreamer page, so it is still here after the list loads again (hiding private entries).
+  const { draft, setDraft, patchDraft, covered } = useKeptDraft<EditDraft>(`action-${action.id}`, editDraftPrivate);
+  const editing = draft !== null;
+  // Opened from this row's menu (not found again after the list reloaded): only then does the form take the focus.
+  const [opened, setOpened] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -477,7 +481,7 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatus
 
   const saveEdit = (body: EditBody) =>
     update.mutateAsync({ actionId: action.id, ...body }).then(
-      () => { toast('Saved.'); setEditing(false); return true; },
+      () => { toast('Saved.'); setDraft(null); return true; },
       (e: unknown) => { toast(errorMessage(e), 'error'); return false; },
     );
   // The page hears about an edit with changes not yet saved, under this action's id.
@@ -521,10 +525,14 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatus
         {editing ? (
           <ActionEditForm
             action={shown}
+            draft={draft}
+            onChange={patchDraft}
+            covered={covered}
+            autoFocus={opened}
             dreams={dreams}
             labels={labels}
             pending={update.isPending}
-            onCancel={() => setEditing(false)}
+            onCancel={() => setDraft(null)}
             onSave={saveEdit}
             onOpenChange={onEditChange ? onEditOpen : undefined}
           />
@@ -570,7 +578,7 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatus
               </Button>
             )}
           >
-            <button type="button" className="menu-item" onClick={() => setEditing(true)} data-testid="action-edit"><IconEdit /> Edit</button>
+            <button type="button" className="menu-item" onClick={() => { setOpened(true); setDraft({ title: shown.title, details: shown.details, dreamId: shown.dreamId, category: shown.category, isPrivate: isDreamer && shown.isPrivate }); }} data-testid="action-edit"><IconEdit /> Edit</button>
             {shown.status === 'active' && <button type="button" className="menu-item" onClick={setAside} data-testid="action-archive"><IconArchive /> Set aside</button>}
             {shown.status === 'completed' && <button type="button" className="menu-item" onClick={() => onCheck(false, 'menu')} data-testid="action-reopen"><IconRotate /> Reopen</button>}
             {shown.status === 'archived' && <button type="button" className="menu-item" onClick={restore} data-testid="action-restore"><IconRotate /> Restore</button>}
@@ -606,9 +614,18 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatus
 /* ---------- Inline edit form ---------- */
 
 type EditBody = { title: string; details: string; dreamId: number | null; category: CareCategory | null };
+/** What the form holds as typed, and whether the action is private (kept by a dreamer page; see `useKeptDraft`). */
+type EditDraft = EditBody & { isPrivate: boolean };
+const editDraftPrivate = (d: EditDraft) => d.isPrivate;
 
-function ActionEditForm({ action, dreams, labels, pending, onSave, onCancel, onOpenChange }: {
+function ActionEditForm({ action, draft, onChange, covered, autoFocus, dreams, labels, pending, onSave, onCancel, onOpenChange }: {
   action: ActionItem;
+  draft: EditDraft;
+  onChange: (patch: Partial<EditDraft>) => void;
+  /** The action is private and private entries went out of view: the edit waits, covered, until they're shown again. */
+  covered: boolean;
+  /** Take the focus (with the title selected) when the form opens. */
+  autoFocus: boolean;
   dreams: DreamRef[];
   labels: Map<number, DreamLabel>;
   pending: boolean;
@@ -618,12 +635,15 @@ function ActionEditForm({ action, dreams, labels, pending, onSave, onCancel, onO
   onOpenChange?: (edit: OpenActionEdit | null) => void;
 }) {
   const id = useId();
-  const [title, setTitle] = useState(action.title);
-  const [details, setDetails] = useState(action.details);
-  const [dreamId, setDreamId] = useState<number | null>(action.dreamId);
-  const [category, setCategory] = useState<CareCategory | null>(action.category);
+  const { title, details, dreamId, category } = draft;
+  const setTitle = (v: string) => onChange({ title: v });
+  const setDetails = (v: string) => onChange({ details: v });
+  const setDreamId = (v: number | null) => onChange({ dreamId: v });
+  const setCategory = (v: CareCategory | null) => onChange({ category: v });
   const titleRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { titleRef.current?.focus(); titleRef.current?.select(); }, []);
+  // Found again after the list reloaded, it leaves the focus where it is (and the typed title unselected).
+  const focusOnOpen = useRef(autoFocus);
+  useEffect(() => { if (focusOnOpen.current) { titleRef.current?.focus(); titleRef.current?.select(); } }, []);
 
   const trimmed = title.trim();
   const dirty = trimmed !== action.title || details.trim() !== action.details || dreamId !== action.dreamId || category !== action.category;
@@ -649,27 +669,33 @@ function ActionEditForm({ action, dreams, labels, pending, onSave, onCancel, onO
     void onSave(body());
   };
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
+    // Keys pressed in a dialog opened from here (showing private entries) aren't this form's.
+    if (!e.currentTarget.contains(e.target as Node)) return;
     if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
   };
 
   return (
     <form className="da-edit" onSubmit={submit} onKeyDown={onKey} data-testid="action-edit-form" aria-busy={pending || undefined}>
-      <Field label="Action" htmlFor={`${id}-title`}>
-        <input ref={titleRef} id={`${id}-title`} type="text" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required disabled={pending} data-testid="action-edit-title" />
-      </Field>
-      <Field label="Details" hint="Optional — why it matters, where to start.">
-        <TextArea
-          value={details}
-          onChange={(e) => setDetails(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit(); } }}
-          rows={2}
-          maxLength={4000}
-          disabled={pending}
-          aria-label="Details"
-          data-testid="action-edit-details"
-        />
-      </Field>
-      <LinkSelects dreams={dreams} labels={labels} dreamId={dreamId} category={category} onDreamId={setDreamId} onCategory={setCategory} disabled={pending} idPrefix={`${id}-link`} />
+      {covered ? <CoveredDraft testId="action-edit-covered" /> : (
+        <>
+          <Field label="Action" htmlFor={`${id}-title`}>
+            <input ref={titleRef} id={`${id}-title`} type="text" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} required disabled={pending} data-testid="action-edit-title" />
+          </Field>
+          <Field label="Details" hint="Optional — why it matters, where to start.">
+            <TextArea
+              value={details}
+              onChange={(e) => setDetails(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit(); } }}
+              rows={2}
+              maxLength={4000}
+              disabled={pending}
+              aria-label="Details"
+              data-testid="action-edit-details"
+            />
+          </Field>
+          <LinkSelects dreams={dreams} labels={labels} dreamId={dreamId} category={category} onDreamId={setDreamId} onCategory={setCategory} disabled={pending} idPrefix={`${id}-link`} />
+        </>
+      )}
       <div className="da-edit-actions">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={pending} data-testid="action-edit-cancel">Cancel</Button>
         <Button type="submit" variant="primary" size="sm" disabled={!canSave} loading={pending} data-testid="action-edit-save">Save</Button>

@@ -37,17 +37,29 @@ const NONE: ReadonlySet<string> = new Set();
  * Which parts of a form are covered right now: `privateParts` names the parts that are private and hold something;
  * those that were private when private entries went out of view stay covered until they are shown again. A part
  * made private while private entries are hidden is being written there and then, so it is never covered.
+ *
+ * A form that stays open after it lets go of its draft (saved it, cleared it, discarded a part) calls `uncover` —
+ * with the parts it let go of, or with none for all of them: what it holds next is being written while private
+ * entries are hidden. Only the form can tell: a part that merely drops out of `privateParts` may still hold the
+ * same words (its rating made private too, a card taken off and put back), so it stays covered.
  */
-export function useCoveredParts(privateParts: readonly string[]): ReadonlySet<string> {
+export function useCoveredParts(privateParts: readonly string[]): [ReadonlySet<string>, (parts?: readonly string[]) => void] {
   const unlocked = !!useAuth().auth?.privateUnlocked;
   const [seen, setSeen] = useState({ unlocked, covered: NONE });
   const now = seen.unlocked === unlocked ? seen.covered : unlocked ? NONE : new Set(privateParts);
   if (seen.unlocked !== unlocked) setSeen({ unlocked, covered: now });
-  return now;
+  const uncover = useCallback((parts?: readonly string[]) => setSeen((s) => {
+    const left = parts ? [...s.covered].filter((p) => !parts.includes(p)) : [];
+    return left.length === s.covered.size ? s : { ...s, covered: left.length ? new Set(left) : NONE };
+  }), []);
+  return [now, uncover];
 }
 
-/** `useCoveredParts` for a form with one private switch. */
-export const useCovered = (isPrivate: boolean): boolean => useCoveredParts(isPrivate ? ['draft'] : []).has('draft');
+/** `useCoveredParts` for a form with one private switch: whether it is covered, and `uncover` once it is emptied. */
+export function useCovered(isPrivate: boolean): [boolean, () => void] {
+  const [parts, uncover] = useCoveredParts(isPrivate ? ['draft'] : []);
+  return [parts.has('draft'), useCallback(() => uncover(), [uncover])];
+}
 
 /**
  * Stands in for a covered draft (or the private part of one). Saving it still works; its words come back once

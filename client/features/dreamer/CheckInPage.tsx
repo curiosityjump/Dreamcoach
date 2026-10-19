@@ -116,7 +116,7 @@ function CheckInForm({ latest, dreams: current }: { latest: Partial<Record<Ratin
   const canSave = hasContent && !dateProblem && !create.isPending;
 
   // Parts that were private when private entries went out of view stay here, covered, until they're shown again.
-  const covered = useCoveredParts([
+  const [covered] = useCoveredParts([
     ...selected.flatMap((c) => privatePart(`rating-${c}`, ratings[c], ratings[c]?.value != null)),
     ...selectedDreams.flatMap((id) => privatePart(`dream-${id}`, progress[id], true)),
     ...(reflectionPrivate && reflectionText ? ['reflection'] : []),
@@ -177,7 +177,9 @@ function CheckInForm({ latest, dreams: current }: { latest: Partial<Record<Ratin
   };
 
   return (
-    <form className="page page-narrow dc-page dci-page" onSubmit={submit} data-testid="checkin-page" aria-busy={create.isPending || undefined}>
+    // The page checks the date itself (a half-typed one is saved as now, as it says), so the browser's own checks
+    // must not stop the save.
+    <form className="page page-narrow dc-page dci-page" onSubmit={submit} noValidate data-testid="checkin-page" aria-busy={create.isPending || undefined}>
       <PageHeader eyebrow="Self check-in" title="Check in" lead="Rate whatever you’d like today — one area or all of them. Add a note where it helps, and choose what to share with your coach." />
 
       <Card className="dci-picker" data-testid="checkin-picker">

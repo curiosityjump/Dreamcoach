@@ -82,8 +82,11 @@ why, and what was traded off.
     on unlock are rate-limited like logins (5 → 60s lockout).
 
 12. **Hiding private entries never costs the dreamer their unsaved work.** Drafts
-    survive Hide private and the automatic re-hide; a draft marked private stays
-    but its text is covered until private entries are shown again.
+    survive Hide private and the automatic re-hide (including an open edit of an
+    action); a draft marked private stays but its text is covered until private
+    entries are shown again. Taking a pending area off the CARE wheel discards its
+    note and privacy too, so rating it again starts fresh; a half-typed check-in
+    date is saved as "now", as the page says.
 
     **The dreamer can create private entries while private is hidden.** The entry
     simply disappears from view and a toast explains why. Requiring an unlock to

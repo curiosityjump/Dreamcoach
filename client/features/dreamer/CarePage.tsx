@@ -117,7 +117,7 @@ function WheelSection({ latest, lastSession }: { latest: Snapshot['latest']; las
   /** Areas rated on the wheel and not saved yet. Picking the same number as before still counts (with a note, say). */
   const rated = CARE_CATEGORIES.filter((c) => pending[c] != null);
   // Ratings (or notes) that were private when private entries went out of view stay pending, covered, until shown again.
-  const covered = useCoveredParts(rated.flatMap((c) => (priv[c] ? [c] : notePriv[c] && notes[c]?.trim() ? [`${c}-note`] : [])));
+  const [covered, uncover] = useCoveredParts(rated.flatMap((c) => (priv[c] ? [c] : notePriv[c] && notes[c]?.trim() ? [`${c}-note`] : [])));
   const latestValues = useMemo<WheelValues>(() => Object.fromEntries(CARE_CATEGORIES.map((c) => [c, latest[c]?.value ?? null])) as WheelValues, [latest]);
   const wheelValues = useMemo<WheelValues>(() => ({ ...latestValues, ...Object.fromEntries(Object.entries(pending).filter(([c]) => !covered.has(c))) }), [latestValues, pending, covered]);
 
@@ -139,10 +139,16 @@ function WheelSection({ latest, lastSession }: { latest: Snapshot['latest']; las
     setError(null);
     setPending((p) => ({ ...p, [c]: v }));
   };
+  // Taking an area off the list drops its note and privacy with it, so rating it again starts afresh (in view).
+  const without = <T,>(r: Partial<Record<CareCategory, T>>, c: CareCategory) => { const n = { ...r }; delete n[c]; return n; };
   const undo = (c: CareCategory) => {
-    setPending((p) => { const n = { ...p }; delete n[c]; return n; });
+    setPending((p) => without(p, c));
+    setNotes((n) => without(n, c));
+    setPriv((p) => without(p, c));
+    setNotePriv((p) => without(p, c));
+    uncover([c, `${c}-note`]);
   };
-  const reset = () => { setPending({}); setNotes({}); setPriv({}); setNotePriv({}); setError(null); };
+  const reset = () => { setPending({}); setNotes({}); setPriv({}); setNotePriv({}); setError(null); uncover(); };
 
   const save = () => {
     if (!rated.length || create.isPending) return;
@@ -338,11 +344,11 @@ function QuickRatingCard({ category, latest, refreshing, sessions }: { category:
   const [error, setError] = useState<string | null>(null);
   const text = note.trim();
   // A private draft (or private note) stays here, covered, while private entries are hidden.
-  const covered = useCovered(value != null && priv);
-  const noteCovered = useCovered(value != null && !priv && notePriv && !!text);
+  const [covered, uncover] = useCovered(value != null && priv);
+  const [noteCovered, uncoverNote] = useCovered(value != null && !priv && notePriv && !!text);
 
   const pick = (v: number | null) => { if (v != null) { setError(null); setValue(v); } };
-  const reset = () => { setValue(null); setNote(''); setPriv(false); setNotePriv(false); setError(null); };
+  const reset = () => { setValue(null); setNote(''); setPriv(false); setNotePriv(false); setError(null); uncover(); uncoverNote(); };
 
   const save = () => {
     if (value == null || create.isPending) return;

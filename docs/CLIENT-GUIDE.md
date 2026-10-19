@@ -182,7 +182,11 @@ typing. `client/features/dreamer/drafts.tsx` holds the conventions:
   row reloading.
 - Cover a draft whose privacy switch is on with `useCovered` / `CoveredDraft`
   while private entries are hidden; it can still be saved, and its words come back
-  when private entries are shown.
+  when private entries are shown. `useCovered` / `useCoveredParts` return
+  `[covered, uncover]`: a form that stays open after saving or clearing its draft
+  calls `uncover()` (or `uncover(parts)` for the parts it discarded). A part is
+  never uncovered just because it stopped being private — it may still hold the
+  same private words.
 - Dialogs are portaled; `Modal` stops form submits at its root and only the
   topmost dialog answers Escape and Tab.
 

@@ -229,7 +229,7 @@ function RateNow({ category, latest, onDone }: { category: RatingCategory; lates
   const [error, setError] = useState<string | null>(null);
   const text = note.trim();
   // A private rating (or a private note) stays here, covered, while private entries are hidden.
-  const covered = useCoveredParts(priv && (value != null || text) ? ['all'] : notePriv && text ? ['note'] : []);
+  const [covered] = useCoveredParts(priv && (value != null || text) ? ['all'] : notePriv && text ? ['note'] : []);
 
   const save = () => {
     if (value == null || create.isPending) return;

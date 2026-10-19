@@ -1,7 +1,7 @@
 # Verification
 
 How each requirement in the brief was verified. "API test" = `tests/api/*.test.ts`
-(59 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
+(60 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
 journey in `tests/e2e/journey.spec.ts` (6 serial steps, fresh database on :3100).
 "Manual" = exercised in Chromium with screenshots in `docs/screenshots/`.
 
@@ -128,3 +128,7 @@ server behaviour got an API test.
 | 2 | 99 | 2 | 21 |
 | 3 | 40 | 0 | 13 |
 | 4 | 36 | 2 | 10 |
+
+Round 4's fixes then got a focused verification (every fix re-run against its
+original repro, with simulated clock skew, failed requests and phone widths): 60
+checks held and 8 gaps were found; those were fixed and re-verified the same way.

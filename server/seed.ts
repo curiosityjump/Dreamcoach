@@ -147,9 +147,14 @@ type Engagement = 'high' | 'moderate' | 'light';
 /**
  * A dream and the dreamer's words about it: the steps they take (calendar-free, so any month can choose them), short
  * notes that go with a progress update, an optional reflection written about the dream, and, for a dream that
- * reaches 100%, what they wrote on that value.
+ * reaches 100%, what they wrote on that value. Words that presuppose one of the steps name it (`needs`): they are
+ * written only once that step is done — never while it is still open, or after it was set aside — and a note that
+ * needs a step is how the dreamer tells of finishing it.
  */
-interface DreamSpec { title: string; description: string; start: number; end: number; actions: string[]; notes: string[]; reflection?: string; achieved?: string }
+type DreamWords = string | { text: string; needs: string };
+const wordsText = (w: DreamWords) => (typeof w === 'string' ? w : w.text);
+const wordsNeeds = (w: DreamWords) => (typeof w === 'string' ? null : w.needs);
+interface DreamSpec { title: string; description: string; start: number; end: number; actions: string[]; notes: DreamWords[]; reflection?: DreamWords; achieved?: string }
 interface DreamerSpec {
   name: string;
   email: string;
@@ -187,13 +192,13 @@ const DREAMERS: DreamerSpec[] = [
         title: 'Finish my bachelor’s degree', description: 'Complete the remaining 30 credits in social work, part-time.', start: 15, end: 32,
         actions: ['Meet with the admissions advisor about transfer credits', 'Submit the FAFSA renewal', 'Register for next term’s evening course', 'Map the remaining credits semester by semester', 'Ask my supervisor about a study-friendly schedule'],
         notes: ['One more course mapped out. The finish line is starting to look real.', 'Turned in the paper I’d been dreading, and it came back with a good grade.'],
-        reflection: 'Worked out that I can finish the degree in two years if I keep taking one evening class. Two years sounds long, but it was “someday” for a decade.',
+        reflection: { text: 'Worked out that I can finish the degree in two years if I keep taking one evening class. Two years sounds long, but it was “someday” for a decade.', needs: 'Map the remaining credits semester by semester' },
       },
       {
         title: 'Start a community garden at Oakwood', description: 'A shared garden where residents grow food together.', start: 0, end: 12,
         actions: ['Sketch the garden idea on one page', 'Talk to the property manager about the empty lot', 'Visit the Eastside community garden for ideas', 'Ask five residents what they would grow', 'Draft a one-page proposal for the resident council'],
-        notes: ['Three residents said they’d help. That’s three more than I had.', 'Measured the empty lot. It’s bigger than it looks from the parking lot.'],
-        reflection: 'Mrs. Lin on the second floor wants to grow peppers like her mother did. That’s the whole reason for the garden, right there.',
+        notes: [{ text: 'Three residents said they’d help. That’s three more than I had.', needs: 'Ask five residents what they would grow' }, 'Measured the empty lot. It’s bigger than it looks from the parking lot.'],
+        reflection: { text: 'Mrs. Lin on the second floor wants to grow peppers like her mother did. That’s the whole reason for the garden, right there.', needs: 'Ask five residents what they would grow' },
       },
     ],
   },
@@ -205,7 +210,7 @@ const DREAMERS: DreamerSpec[] = [
       {
         title: 'Earn my HVAC certification', description: 'Pass the EPA 608 and the state HVAC exam.', start: 20, end: 90,
         actions: ['Schedule the EPA 608 exam', 'Study one chapter each evening', 'Ask Ray to mentor me on the commercial units', 'Take a full EPA 608 practice test', 'Book the state HVAC exam date'],
-        notes: ['Scored better on the practice questions than last month.', 'Studied every evening this week, even the tired ones.'],
+        notes: ['Scored better on the practice questions than last month.', { text: 'Studied every evening this week, even the tired ones.', needs: 'Study one chapter each evening' }],
         reflection: 'Ray said I troubleshoot like someone who’s been doing this for twenty years. Six years ago I couldn’t tell a compressor from a condenser. The certificate is just catching up.',
       },
       {
@@ -218,13 +223,13 @@ const DREAMERS: DreamerSpec[] = [
       {
         title: 'Buy a home for my family', description: 'Three bedrooms, a yard, within 30 minutes of work.', start: 5, end: 25,
         actions: ['Pull my credit report and read it line by line', 'Open a dedicated down-payment savings account', 'Attend the first-time buyer workshop', 'Meet a lender about pre-approval', 'Automate a monthly transfer to the down-payment fund'],
-        notes: ['The down-payment fund grows every month now, without me thinking about it.', 'Credit score went up again. Slowly getting there.'],
+        notes: [{ text: 'The down-payment fund grows every month now, without me thinking about it.', needs: 'Automate a monthly transfer to the down-payment fund' }, 'Credit score went up again. Slowly getting there.'],
         reflection: 'Drove past a house with a yard on the way home and let myself picture us there for a minute. It didn’t feel silly this time.',
       },
       {
         title: 'Build a workshop and teach kids to fix things', description: 'A garage workshop where neighborhood kids learn hands-on skills.', start: 0, end: 8,
         actions: ['Write down what the first class would cover', 'Price a used workbench and basic tools', 'Ask the community center about a room for a pilot class'],
-        notes: ['Wrote down the first class: fixing a bike chain.', 'A neighbor offered me his old tools. It’s starting to feel possible.'],
+        notes: [{ text: 'Wrote down the first class: fixing a bike chain.', needs: 'Write down what the first class would cover' }, 'A neighbor offered me his old tools. It’s starting to feel possible.'],
       },
     ],
   },
@@ -233,9 +238,9 @@ const DREAMERS: DreamerSpec[] = [
     about: 'Leasing Consultant · 1 year', engagement: 'light', joinedMonthsAgo: 8, missedMonths: [5, 1, 0],
     care: { contribution: [5, 6], alignment: [5, 6], relationships: [6, 7], energy: [5, 6] }, commitment: [6, 7], satisfaction: [5, 7],
     dreams: [
-      { title: 'Get promoted to Assistant Property Manager', description: 'Lead a site team within the year.', start: 10, end: 45, actions: ['Ask my manager what the APM role requires', 'Shadow the APM on month-end reporting', 'Complete the Fair Housing refresher'], notes: ['Sat in on month-end reporting. It made more sense than I expected.'] },
+      { title: 'Get promoted to Assistant Property Manager', description: 'Lead a site team within the year.', start: 10, end: 45, actions: ['Ask my manager what the APM role requires', 'Shadow the APM on month-end reporting', 'Complete the Fair Housing refresher'], notes: [{ text: 'Sat in on month-end reporting. It made more sense than I expected.', needs: 'Shadow the APM on month-end reporting' }] },
       { title: 'Learn to cook ten family recipes', description: 'The dishes my grandmother made — written down and mastered.', start: 10, end: 50, actions: ['Call Abuela and write down the arroz con pollo recipe', 'Cook one recipe every Sunday'], notes: ['Cooked another family recipe. Mom said it tasted like home.'] },
-      { title: 'Travel to Oaxaca with my mom', description: 'Two weeks, Day of the Dead, her hometown.', start: 5, end: 20, actions: ['Set up an automatic $75 transfer into a travel fund', 'Renew my passport'], notes: ['The travel fund is finally growing.'] },
+      { title: 'Travel to Oaxaca with my mom', description: 'Two weeks, Day of the Dead, her hometown.', start: 5, end: 20, actions: ['Set up an automatic $75 transfer into a travel fund', 'Renew my passport'], notes: [{ text: 'The travel fund is finally growing.', needs: 'Set up an automatic $75 transfer into a travel fund' }] },
       { title: 'Own a small café', description: 'A neighborhood place with good coffee and pan dulce.', start: 0, end: 5, actions: ['Write a one-page vision of the café'], notes: ['Sketched a café menu on a napkin at lunch.'] },
     ],
   },
@@ -247,7 +252,7 @@ const DREAMERS: DreamerSpec[] = [
       {
         title: 'Write and perform a set of original songs', description: 'Ten songs, one open-mic night, no apologies.', start: 20, end: 60,
         actions: ['Finish the bridge for “Northbound”', 'Book a slot at the Tuesday open mic', 'Record rough demos on my phone', 'Write one new verse every week', 'Play two songs for a friend before the open mic'],
-        notes: ['Wrote two new verses this week. One of them is a keeper.', 'Listened back to a rough demo and didn’t delete it. Progress.'],
+        notes: ['Wrote two new verses this week. One of them is a keeper.', { text: 'Listened back to a rough demo and didn’t delete it. Progress.', needs: 'Record rough demos on my phone' }],
         reflection: 'Played guitar for an hour without checking the time. Writing songs again feels like talking to the version of me who was nineteen.',
       },
       {
@@ -259,9 +264,9 @@ const DREAMERS: DreamerSpec[] = [
       {
         title: 'Move into a role that uses my analysis skills', description: 'Data or policy work — something that uses the numbers side of me.', start: 5, end: 30,
         actions: ['Finish the SQL course', 'Ask the finance team if I can help with the annual report data', 'Update my résumé with the compliance dashboards work', 'Ask an analyst about how they got into the role'],
-        notes: ['Another module of the SQL course done.', 'Built a small dashboard at work, and people actually used it.'],
+        notes: [{ text: 'Used what I learned in the SQL course on a real question at work.', needs: 'Finish the SQL course' }, 'Built a small dashboard at work, and people actually used it.'],
       },
-      { title: 'Live by the sea for a year', description: 'Somewhere with a long beach and a small apartment.', start: 0, end: 6, actions: ['Make a list of coastal towns with remote-friendly work', 'Price a month-long rental in one of them'], notes: ['Looked at a few coastal towns. One of them stuck with me.', 'Started a small savings pot labelled “sea”.'] },
+      { title: 'Live by the sea for a year', description: 'Somewhere with a long beach and a small apartment.', start: 0, end: 6, actions: ['Make a list of coastal towns with remote-friendly work', 'Price a month-long rental in one of them'], notes: [{ text: 'Looked at a few coastal towns. One of them stuck with me.', needs: 'Make a list of coastal towns with remote-friendly work' }, 'Started a small savings pot labelled “sea”.'] },
     ],
   },
   {
@@ -269,14 +274,15 @@ const DREAMERS: DreamerSpec[] = [
     about: 'Accounts Payable Clerk · new this year', engagement: 'moderate', joinedMonthsAgo: 2,
     care: { contribution: [5, 6], alignment: [6, 7], relationships: [7, 7], energy: [6, 7] }, commitment: [8, 8], satisfaction: [6, 7],
     dreams: [
-      { title: 'Pass the bookkeeping certification', description: 'The AIPB certified bookkeeper exam by spring.', start: 10, end: 25, actions: ['Order the study guide', 'Block two study hours on Tuesday and Thursday'], notes: ['Two study sessions this week, both on time.', 'The practice questions on reconciliations finally clicked.'] },
+      { title: 'Pass the bookkeeping certification', description: 'The AIPB certified bookkeeper exam by spring.', start: 10, end: 25, actions: ['Order the study guide', 'Block two study hours on Tuesday and Thursday'], notes: [{ text: 'Two study sessions this week, both on time.', needs: 'Block two study hours on Tuesday and Thursday' }, 'The practice questions on reconciliations finally clicked.'] },
       {
         title: 'Swim twice a week', description: 'Back in the pool after ten years.', start: 0, end: 35,
         actions: ['Buy goggles and a membership at the Y', 'Swim Monday and Thursday mornings'],
-        notes: ['Swam twice this week, and ten more lengths than last time.', 'The early swims are getting easier to get up for.'],
-        reflection: 'First time in the pool in ten years. I was nervous walking in, and then I forgot to be nervous.',
+        notes: [{ text: 'Swam twice this week, and ten more lengths than last time.', needs: 'Buy goggles and a membership at the Y' }, { text: 'The early swims are getting easier to get up for.', needs: 'Swim Monday and Thursday mornings' }],
+        // Looking back on the first swim, so it reads true beside whichever swims came before it.
+        reflection: { text: 'Back in the pool after ten years. I was nervous walking in that first morning, and then I forgot to be nervous.', needs: 'Buy goggles and a membership at the Y' },
       },
-      { title: 'Visit my grandparents in Hamburg', description: 'Three weeks there, with my daughter.', start: 5, end: 10, actions: ['Price flights for next summer'], notes: ['Found flights that might work. My daughter is already excited.'] },
+      { title: 'Visit my grandparents in Hamburg', description: 'Three weeks there, with my daughter.', start: 5, end: 10, actions: ['Price flights for next summer'], notes: [{ text: 'Found flights that might work. My daughter is already excited.', needs: 'Price flights for next summer' }] },
       { title: 'Start a small bakery', description: 'Rye bread, cardamom buns, and a counter with four stools.', start: 0, end: 3, actions: ['Bake one new recipe each weekend'], notes: ['The cardamom buns came out right on the second try.'] },
     ],
   },
@@ -288,24 +294,34 @@ const DREAMERS: DreamerSpec[] = [
       {
         title: 'Launch a youth mentoring program at Cedar Court', description: 'Twelve mentors, twelve kids, one school year.', start: 15, end: 75,
         actions: ['Draft the mentor commitment form', 'Meet the principal at Lincoln Middle', 'Recruit three mentors from the maintenance team', 'Hold the mentor orientation', 'Pair the first mentors with students', 'Plan the first mentor check-in night'],
-        notes: ['Two more mentors signed up.', 'The kids asked when the next mentor night is. That’s the best sign yet.', 'The principal at Lincoln Middle wants to send more students our way.'],
-        reflection: 'One of the boys at Cedar Court asked whether his mentor would “still come back next month.” I want this program to be the thing that does come back.',
+        notes: [
+          { text: 'Two more mentors signed up.', needs: 'Draft the mentor commitment form' },
+          { text: 'The kids asked when the next mentor night is. That’s the best sign yet.', needs: 'Plan the first mentor check-in night' },
+          { text: 'The principal at Lincoln Middle wants to send more students our way.', needs: 'Meet the principal at Lincoln Middle' },
+        ],
+        reflection: { text: 'One of the boys at Cedar Court asked whether his mentor would “still come back next month.” I want this program to be the thing that does come back.', needs: 'Pair the first mentors with students' },
       },
       {
         title: 'Be fully present at dinner every night', description: 'Phone in the drawer. Real conversation with Keisha and the boys.', start: 30, end: 90,
         actions: ['Buy a basket for phones by the door', 'Ask each kid one real question at dinner', 'Let the boys cook one dinner a week', 'Turn off work notifications after six'],
-        notes: ['Phones in the basket five nights out of seven.', 'The boys did most of the talking at dinner. I mostly listened.'],
+        notes: [{ text: 'Phones in the basket five nights out of seven.', needs: 'Buy a basket for phones by the door' }, 'The boys did most of the talking at dinner. I mostly listened.'],
         reflection: 'Keisha said dinner feels different now. I didn’t realize how much I was only half there until I stopped.',
       },
       {
         title: 'Complete a master’s in nonprofit leadership', description: 'Part-time, two years, starting next fall.', start: 5, end: 30,
         actions: ['Request transcripts', 'Go to the program’s next info session', 'Draft the personal statement', 'Ask two colleagues for recommendation letters'],
-        notes: ['The personal statement has a real first draft now.', 'Talked to two people who did the program. Both said go for it.'],
+        notes: [
+          { text: 'The personal statement has a real first draft now.', needs: 'Draft the personal statement' },
+          { text: 'Talked to two people who did the program. Both said go for it.', needs: 'Go to the program’s next info session' },
+        ],
       },
       {
         title: 'Found a nonprofit that serves families like mine', description: 'Housing stability plus mentoring, under one roof.', start: 2, end: 10,
         actions: ['Write the mission statement in one sentence', 'Have coffee with the director of Bright Futures', 'List the first five families we’d want to serve'],
-        notes: ['Got the mission down to one sentence. It took me twelve tries.', 'Learned a lot about running a nonprofit, and nothing that scared me off.'],
+        notes: [
+          { text: 'Got the mission down to one sentence. It took me twelve tries.', needs: 'Write the mission statement in one sentence' },
+          { text: 'Learned a lot about running a nonprofit, and nothing that scared me off.', needs: 'Have coffee with the director of Bright Futures' },
+        ],
         reflection: 'Someday, the nonprofit. For now I keep a list of what helped my family when we needed it. The list is getting long.',
       },
     ],
@@ -318,17 +334,27 @@ const DREAMERS: DreamerSpec[] = [
       {
         title: 'Take a real two-week vacation', description: 'Fully offline. Someone else handles the property.', start: 5, end: 65,
         actions: ['Train Luis to cover emergency calls', 'Request two weeks off and put them on the team calendar', 'Write the coverage handbook', 'Pick the destination and book the flights', 'Let Luis cover a trial weekend on his own'],
-        notes: ['Luis handled two emergency calls on his own this week.', 'The coverage handbook is mostly written.'],
+        notes: [
+          { text: 'Luis handled two emergency calls on his own this week.', needs: 'Train Luis to cover emergency calls' },
+          { text: 'The coverage handbook is written. Luis says it answers most of his questions.', needs: 'Write the coverage handbook' },
+        ],
         reflection: 'Pictured two weeks with no phone and felt my shoulders drop. I’ve never once had that at this job.',
       },
       {
         title: 'Paint again — one canvas a month', description: 'Oils, the way I did in college.', start: 10, end: 80,
         actions: ['Set up the spare room as a studio corner', 'Paint on the first Sunday of the month', 'Buy new brushes and two canvases', 'Finish the lake painting I started in college'],
         notes: ['Another canvas finished. The light on the water is better than in the last one.', 'Painted for three hours straight and lost track of time.'],
-        reflection: 'The studio corner is the only place where nobody needs anything from me. I didn’t know how much I needed that.',
+        reflection: { text: 'The studio corner is the only place where nobody needs anything from me. I didn’t know how much I needed that.', needs: 'Set up the spare room as a studio corner' },
       },
-      { title: 'Become a regional manager', description: 'Oversee a portfolio of sites and mentor new managers.', start: 10, end: 35, actions: ['Ask the VP of Property Management for feedback on my readiness', 'Lead the budgeting workshop for new PMs', 'Shadow the regional manager on a site visit'], notes: ['The new property managers asked good questions in the budgeting workshop.', 'Got honest feedback on what I still need for the regional role.'] },
-      { title: 'Build a cabin with my partner', description: 'Small, off-grid, near the lake where we met.', start: 0, end: 10, actions: ['Start a shared “cabin” savings account', 'Visit two lots near the lake'], notes: ['Walked two lots by the lake. One of them felt right.'] },
+      {
+        title: 'Become a regional manager', description: 'Oversee a portfolio of sites and mentor new managers.', start: 10, end: 35,
+        actions: ['Ask the VP of Property Management for feedback on my readiness', 'Lead the budgeting workshop for new PMs', 'Shadow the regional manager on a site visit'],
+        notes: [
+          { text: 'The new property managers asked good questions in the budgeting workshop.', needs: 'Lead the budgeting workshop for new PMs' },
+          { text: 'Got honest feedback on what I still need for the regional role.', needs: 'Ask the VP of Property Management for feedback on my readiness' },
+        ],
+      },
+      { title: 'Build a cabin with my partner', description: 'Small, off-grid, near the lake where we met.', start: 0, end: 10, actions: ['Start a shared “cabin” savings account', 'Visit two lots near the lake'], notes: [{ text: 'Walked two lots by the lake. One of them felt right.', needs: 'Visit two lots near the lake' }] },
     ],
   },
   {
@@ -336,10 +362,10 @@ const DREAMERS: DreamerSpec[] = [
     about: 'Groundskeeper · 9 years', engagement: 'light', joinedMonthsAgo: 8, status: 'paused', missedMonths: [1, 0],
     care: { contribution: [5, 6], alignment: [6, 6], relationships: [7, 7], energy: [6, 5] }, commitment: [6, 6], satisfaction: [5, 6],
     dreams: [
-      { title: 'Get my commercial driver’s license', description: 'Open up weekend work and a path to fleet maintenance.', start: 10, end: 40, actions: ['Pick up the CDL study manual', 'Schedule the permit test', 'Practice the pre-trip inspection checklist'], notes: ['Studied the manual on my breaks this week.'] },
-      { title: 'Coach my son’s soccer team', description: 'Every Saturday this season.', start: 20, end: 70, actions: ['Sign up as assistant coach', 'Run one practice on my own', 'Plan three drills for the next practice'], notes: ['Ran practice on my own. The kids listened, mostly.'] },
-      { title: 'Pay off the truck', description: 'Zero balance by year three.', start: 15, end: 30, actions: ['Add $100 to the payment each month'], notes: ['Paid an extra hundred again this month.'] },
-      { title: 'Retire to a small ranch', description: 'A few acres, a couple of horses, grandkids visiting.', start: 0, end: 4, actions: ['Talk with Maria about where we’d want the ranch to be'], notes: ['Maria and I talked about the ranch over dinner. She wants horses too.'] },
+      { title: 'Get my commercial driver’s license', description: 'Open up weekend work and a path to fleet maintenance.', start: 10, end: 40, actions: ['Pick up the CDL study manual', 'Schedule the permit test', 'Practice the pre-trip inspection checklist'], notes: [{ text: 'Studied the manual on my breaks this week.', needs: 'Pick up the CDL study manual' }] },
+      { title: 'Coach my son’s soccer team', description: 'Every Saturday this season.', start: 20, end: 70, actions: ['Sign up as assistant coach', 'Run one practice on my own', 'Plan three drills for the next practice'], notes: [{ text: 'Ran practice on my own. The kids listened, mostly.', needs: 'Run one practice on my own' }] },
+      { title: 'Pay off the truck', description: 'Zero balance by year three.', start: 15, end: 30, actions: ['Add $100 to the payment each month'], notes: [{ text: 'Paid an extra hundred again this month.', needs: 'Add $100 to the payment each month' }] },
+      { title: 'Retire to a small ranch', description: 'A few acres, a couple of horses, grandkids visiting.', start: 0, end: 4, actions: ['Talk with Maria about where we’d want the ranch to be'], notes: [{ text: 'Maria and I talked about the ranch over dinner. She wants horses too.', needs: 'Talk with Maria about where we’d want the ranch to be' }] },
     ],
   },
   {
@@ -350,20 +376,36 @@ const DREAMERS: DreamerSpec[] = [
       {
         title: 'Earn the SHRM-CP credential', description: 'Certified by the fall testing window.', start: 20, end: 85,
         actions: ['Register for the fall exam window', 'Finish the employment law module', 'Take a full practice exam', 'Block two study evenings a week', 'Join the online study group'],
-        notes: ['Practice exam score went up nine points.', 'Two study evenings this week, and the material is sticking.'],
-        reflection: 'Explaining the leave rules to the study group made them finally make sense to me. Teaching is how I learn.',
+        notes: [
+          { text: 'Practice exam score went up nine points.', needs: 'Take a full practice exam' },
+          { text: 'Two study evenings this week, and the material is sticking.', needs: 'Block two study evenings a week' },
+        ],
+        reflection: { text: 'Explaining the leave rules to the study group made them finally make sense to me. Teaching is how I learn.', needs: 'Join the online study group' },
       },
       {
         title: 'Host a monthly dinner for friends', description: 'Eight people, one long table, no phones.', start: 10, end: 90,
         actions: ['Send the first invitation', 'Learn jollof the way my mother makes it', 'Pick a date for the next dinner and send the invites', 'Try a new recipe on a weeknight first'],
-        notes: ['Eight people around the table again, and nobody looked at a phone.', 'The jollof came out right this time. My mother would approve.'],
-        reflection: 'Someone at the dinner said it’s the one night a month she feels fully herself. That’s exactly what I hoped this table would be.',
+        notes: [
+          { text: 'Eight people around the table, and nobody looked at a phone.', needs: 'Send the first invitation' },
+          { text: 'The jollof came out right this time. My mother would approve.', needs: 'Learn jollof the way my mother makes it' },
+        ],
+        reflection: { text: 'Someone at the dinner said it’s the one night a month she feels fully herself. That’s exactly what I hoped this table would be.', needs: 'Send the first invitation' },
       },
-      { title: 'Lead people operations at a mission-driven organization', description: 'Shape how a whole organization treats its people.', start: 10, end: 30, actions: ['Ask to sit in on the leadership team’s planning day', 'Find a mentor in people operations', 'Read one book on workplace culture'], notes: ['Found someone who leads people operations at a nonprofit and is happy to mentor me.', 'Sat in on a planning meeting and actually spoke up.'] },
+      {
+        title: 'Lead people operations at a mission-driven organization', description: 'Shape how a whole organization treats its people.', start: 10, end: 30,
+        actions: ['Ask to sit in on the leadership team’s planning day', 'Find a mentor in people operations', 'Read one book on workplace culture'],
+        notes: [
+          { text: 'Found someone who leads people operations at a nonprofit and is happy to mentor me.', needs: 'Find a mentor in people operations' },
+          { text: 'Sat in on a planning meeting and actually spoke up.', needs: 'Ask to sit in on the leadership team’s planning day' },
+        ],
+      },
       {
         title: 'Write a book about belonging at work', description: 'Essays, stories, and a little research.', start: 2, end: 12,
         actions: ['Write 300 words every Saturday morning', 'Outline five chapters', 'Share one essay with a friend for feedback'],
-        notes: ['Three hundred words a week so far. They add up.', 'Outlined the first chapter. It’s about the first day at a new job.'],
+        notes: [
+          { text: 'Three hundred words a week so far. They add up.', needs: 'Write 300 words every Saturday morning' },
+          { text: 'Five chapters outlined. The first one is about the first day at a new job.', needs: 'Outline five chapters' },
+        ],
         reflection: 'Every essay I write for the book comes back to the same thing: people do their best work where they don’t have to pretend.',
       },
     ],
@@ -373,9 +415,9 @@ const DREAMERS: DreamerSpec[] = [
     about: 'IT Support Specialist · 3 years', engagement: 'light', joinedMonthsAgo: 8, missedMonths: [4, 0],
     care: { contribution: [6, 7], alignment: [5, 6], relationships: [4, 6], energy: [5, 6] }, commitment: [6, 7], satisfaction: [5, 7],
     dreams: [
-      { title: 'Earn the Network+ certification', description: 'Then Security+ next year.', start: 30, end: 80, actions: ['Book the Network+ exam date', 'Do one practice lab each weekend'], notes: ['Practice lab went smoothly this weekend.'] },
+      { title: 'Earn the Network+ certification', description: 'Then Security+ next year.', start: 30, end: 80, actions: ['Book the Network+ exam date', 'Do one practice lab each weekend'], notes: [{ text: 'Practice lab went smoothly this weekend.', needs: 'Do one practice lab each weekend' }] },
       { title: 'Climb outdoors once a month', description: 'Trade the gym wall for real rock.', start: 10, end: 60, actions: ['Join the Saturday outdoor meetup', 'Buy a used rope and quickdraws'], notes: ['Climbed real rock again. Hands are wrecked; worth it.'] },
-      { title: 'Move into cybersecurity', description: 'An analyst role within three years.', start: 5, end: 20, actions: ['Set up a home lab', 'Ask Dana about shadowing the security team'], notes: ['The home lab is up and running.'] },
+      { title: 'Move into cybersecurity', description: 'An analyst role within three years.', start: 5, end: 20, actions: ['Set up a home lab', 'Ask Dana about shadowing the security team'], notes: [{ text: 'The home lab is up and running.', needs: 'Set up a home lab' }] },
       { title: 'Sail across the Baltic', description: 'Stockholm to Helsinki, on a boat I helped crew.', start: 0, end: 5, actions: ['Take the basic keelboat course'], notes: ['Read about crewing on a sailboat. It sounds hard and wonderful.'] },
     ],
   },
@@ -387,16 +429,20 @@ const DREAMERS: DreamerSpec[] = [
       {
         title: 'Build a preventive maintenance program', description: 'Fewer emergencies, more planned work, across all sites.', start: 20, end: 70,
         actions: ['Inventory the HVAC units at Cedar Court', 'Draft the quarterly inspection checklist', 'Present the plan to the leadership team', 'Pilot the checklist at one site for a month', 'Track emergency calls before and after the pilot'],
-        notes: ['Fewer emergency calls this month at the first site.', 'The team is starting to plan work instead of chasing it.'],
+        notes: [{ text: 'Fewer emergency calls this month at the first site.', needs: 'Pilot the checklist at one site for a month' }, 'The team is starting to plan work instead of chasing it.'],
         reflection: 'For the first time in years I planned a week instead of reacting to it. That’s what this program is really for.',
       },
-      { title: 'Walk 10,000 steps a day', description: 'Every day of the program.', start: 20, end: 85, actions: ['Walk the sites instead of driving between buildings', 'Evening walk with Dee after dinner', 'Take the stairs at every site', 'Plan a weekend hike with Dee'], notes: ['Hit 10,000 steps six days out of seven.', 'Walking between buildings adds up faster than I thought.'] },
-      { title: 'Become Director of Facilities', description: 'Lead the whole facilities function.', start: 10, end: 35, actions: ['Enroll in the leadership certificate', 'Mentor two new supervisors', 'Ask the VP of Operations what the director role needs most'], notes: ['Finished the first unit of the leadership certificate.'] },
+      {
+        title: 'Walk 10,000 steps a day', description: 'Every day of the program.', start: 20, end: 85,
+        actions: ['Walk the sites instead of driving between buildings', 'Evening walk with Dee after dinner', 'Take the stairs at every site', 'Plan a weekend hike with Dee'],
+        notes: ['Hit 10,000 steps six days out of seven.', { text: 'Walking between buildings adds up faster than I thought.', needs: 'Walk the sites instead of driving between buildings' }],
+      },
+      { title: 'Become Director of Facilities', description: 'Lead the whole facilities function.', start: 10, end: 35, actions: ['Enroll in the leadership certificate', 'Mentor two new supervisors', 'Ask the VP of Operations what the director role needs most'], notes: [{ text: 'Finished the first unit of the leadership certificate.', needs: 'Enroll in the leadership certificate' }] },
       {
         title: 'Restore a 1968 Mustang with my daughter', description: 'Weekends in the garage, one part at a time.', start: 5, end: 15,
         actions: ['Find the car', 'Clear out the garage bay', 'Set a parts budget together'],
-        notes: ['Got the old carburetor off with my daughter. Grease everywhere, both of us grinning.'],
-        reflection: 'My daughter knows the name of every part now. Honestly, the car is the excuse; the weekends with her are the point.',
+        notes: [{ text: 'Got the old carburetor off with my daughter. Grease everywhere, both of us grinning.', needs: 'Find the car' }],
+        reflection: { text: 'My daughter knows the name of every part now. Honestly, the car is the excuse; the weekends with her are the point.', needs: 'Find the car' },
       },
     ],
   },
@@ -651,12 +697,15 @@ const PROGRESS_NOTES = {
     'Further along than I expected by now.',
   ],
 };
-// A note on a progress value right after the dreamer finished one of the dream's steps says so.
-const STEP_NOTES: ((step: string) => string)[] = [
-  (t) => `${t} — done.`,
-  (t) => `${t} — done, and it moved this one along.`,
-  (t) => `${t} — done. On to the next step.`,
-  (t) => `${t} — finally done.`,
+// A note on a progress value right after the dreamer finished one of the dream's steps says so, in words that fit
+// what happened: "moved this one along" only beside a value that rose since the dream's last entry, "on to the next
+// step" only while another of the dream's steps is open, "finally" only for a step that took four weeks or more.
+interface StepFacts { rise: number; took: number; more: boolean }
+const STEP_NOTES: { say: (step: string) => string; fits?: (s: StepFacts) => boolean }[] = [
+  { say: (t) => `${t} — done.` },
+  { say: (t) => `${t} — done, and it moved this one along.`, fits: (s) => s.rise > 0 },
+  { say: (t) => `${t} — done. On to the next step.`, fits: (s) => s.more },
+  { say: (t) => `${t} — finally done.`, fits: (s) => s.took >= 28 * DAY },
 ];
 // Check-in reflections fit the check-in they belong to: nothing hard beside a good week, no bright news beside a low one.
 const HARD_WEEK = new Set([
@@ -856,7 +905,13 @@ for (const t of [...HARD_WEEK, ...GOOD_WEEK]) if (!REFLECTIONS_SHARED.includes(t
 // Any month can choose any step, so no action names a calendar date; and the demo's own staff only ever appear as
 // themselves, so no action or dreamer's words name one of them.
 const ACTION_TITLES = [...DREAMERS.flatMap((d) => d.dreams.flatMap((x) => x.actions)), ...Object.values(CARE_ACTIONS).flat(), ...PRIVATE_ACTIONS, ...Object.values(PRIVACY_EXAMPLES).map((e) => e.action)];
-const DREAM_WORDS = DREAMERS.flatMap((d) => d.dreams.flatMap((x) => [...x.notes, x.reflection ?? '', x.achieved ?? '']));
+const DREAM_WORDS = DREAMERS.flatMap((d) => d.dreams.flatMap((x) => [...x.notes, x.reflection ?? '', x.achieved ?? ''].map(wordsText)));
+for (const d of DREAMERS.flatMap((x) => x.dreams)) {
+  for (const w of [...d.notes, d.reflection ?? '']) {
+    const step = wordsNeeds(w);
+    if (step != null && !d.actions.includes(step)) throw new Error(`words need a step their dream does not have: ${step}`);
+  }
+}
 const STAFF_NAME = new RegExp(`\\b(${[DIRECTOR, ...COACHES].flatMap((p) => p.name.split(' ')).join('|')})\\b`);
 const CALENDAR_DATE = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b|\b\d{1,2}(st|nd|rd|th)\b/;
 for (const t of ACTION_TITLES) if (CALENDAR_DATE.test(t)) throw new Error(`action names a date: ${t}`);
@@ -1040,9 +1095,12 @@ export function resetAndSeed(db: DB): SeedSummary {
       const lastProgressAt = spec.dreams.map(() => plan[0]!.start); // and when it was recorded
       const dreamActionIdx = spec.dreams.map(() => 0);
       const openActions: { id: number; createdAt: string; dream: number | null; title: string }[] = [];
-      // Completed dream steps, so the focus never asks for a first step twice and a progress note can name the step
-      // just finished (each step once).
-      const stepsDone: { dream: number; at: number; title: string; told?: boolean }[] = [];
+      // Completed dream steps (when chosen and when done), so the focus never asks for a first step twice, a progress
+      // note can name the step just finished (each step once), and words that presuppose a step wait for it.
+      const stepsDone: { dream: number; chosen: number; at: number; title: string; told?: boolean }[] = [];
+      const stepDoneAt = (di: number, title: string) => stepsDone.find((s) => s.dream === di && s.title === title)?.at ?? Infinity;
+      /** Whether words about dream `di` may be written at `t`: the step they presuppose, if any, is done by then. */
+      const wordsFit = (di: number, w: DreamWords, t: number) => { const step = wordsNeeds(w); return step == null || stepDoneAt(di, step) <= t; };
       const example = PRIVACY_EXAMPLES[spec.email];
       const used = new Set<string>(example?.rulesOut); // texts and titles this dreamer already has, or must not get
       // Steps go to the dreams that have moved furthest ahead of the steps already chosen for them, so a dream's
@@ -1053,17 +1111,24 @@ export function resetAndSeed(db: DB): SeedSummary {
         return Math.max(0.2, due + 0.5 - dreamActionIdx[i]!);
       };
       const hasSteps = (i: number, progress: number) => dreamActionIdx[i]! < spec.dreams[i]!.actions.length && progress < 100;
-      /** The dreamer's words on a progress value recorded at `t`: the step they finished since the dream's last entry, else a line of their own. */
-      const progressWords = (di: number, since: number, t: number): string | null => {
+      /**
+       * The dreamer's words on a progress value recorded at `t`, `rise` points from the dream's last entry: the step
+       * they finished since that entry (in a line of their own for it, if they have one), else a line of their own
+       * whose step, if it needs one, is done by then.
+       */
+      const progressWords = (di: number, since: number, t: number, rise: number): string | null => {
+        const lines = spec.dreams[di]!.notes;
         const step = stepsDone.find((s) => s.dream === di && !s.told && s.at > since && s.at <= t);
         if (step) {
           step.told = true;
-          return pick(STEP_NOTES, wordsRand)(step.title);
+          const own = pickUnused(lines.filter((w) => wordsNeeds(w) === step.title).map(wordsText), used, wordsRand);
+          const done: StepFacts = { rise, took: step.at - step.chosen, more: openActions.some((a) => a.dream === di) };
+          return own ?? pick(STEP_NOTES.filter((n) => n.fits?.(done) ?? true), wordsRand).say(step.title);
         }
-        return pickUnused(spec.dreams[di]!.notes, used, wordsRand);
+        return pickUnused(lines.filter((w) => wordsFit(di, w, t)).map(wordsText), used, wordsRand);
       };
       // Reflections written about a particular dream, spread across the months (an engaged dreamer writes them).
-      const dreamReflections = spec.engagement === 'light' ? [] : spec.dreams.flatMap((d, i) => (d.reflection ? [{ dream: i, body: d.reflection }] : []));
+      const dreamReflections = spec.engagement === 'light' ? [] : spec.dreams.flatMap((d, i) => (d.reflection ? [{ dream: i, words: d.reflection }] : []));
       const heldCount = plan.filter((s) => s.held).length;
       const reflectionDue = dreamReflections.map((_, r) => Math.floor(((r + 0.5) * heldCount) / dreamReflections.length));
 
@@ -1087,6 +1152,7 @@ export function resetAndSeed(db: DB): SeedSummary {
           counts.ratings++;
         }
         const sinceLast = [...lastProgressAt]; // for the dreamer's notes on these values, below
+        const lastValue = [...lastProgress];
         const progressIds = p.progress.map((v, i) => {
           const id = insert(insProgress, dreamerId, dreamIds[i], v, occurredAt, 'session', sessionId, null, coachUserId, 0, occurredAt, completedAt);
           counts.progress++;
@@ -1123,7 +1189,7 @@ export function resetAndSeed(db: DB): SeedSummary {
             const between = due < p.start - HOUR ? timeBetween(due - 12 * HOUR, Math.min(due + 12 * HOUR, p.start - HOUR)) : null;
             const doneAt = between != null ? new Date(between).toISOString() : reviewAt;
             db.prepare(`UPDATE actions SET status = 'completed', completed_at = ?, updated_at = ? WHERE id = ?`).run(doneAt, doneAt, a.id);
-            if (a.dream != null) stepsDone.push({ dream: a.dream, at: Date.parse(doneAt), title: a.title });
+            if (a.dream != null) stepsDone.push({ dream: a.dream, chosen: Date.parse(a.createdAt), at: Date.parse(doneAt), title: a.title });
             openActions.splice(openActions.indexOf(a), 1);
           } else if (roll < 0.7) {
             db.prepare(`UPDATE actions SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?`).run(reviewAt, reviewAt, a.id);
@@ -1199,7 +1265,7 @@ export function resetAndSeed(db: DB): SeedSummary {
           // A finished step or a big jump is what a dreamer most often puts into words.
           if (!isAchieved && !chance(stepped || rise >= 10 ? 0.8 : noteChance, wordsRand)) continue;
           const writtenAt = timeBetween(p.end + HOUR, noteBy, undefined, wordsRand);
-          const body = (isAchieved ? spec.dreams[i]!.achieved : null) ?? progressWords(i, sinceLast[i]!, p.end);
+          const body = (isAchieved ? spec.dreams[i]!.achieved : null) ?? progressWords(i, sinceLast[i]!, p.end, p.progress[i]! - lastValue[i]!);
           if (writtenAt == null || !body) continue;
           const written = new Date(writtenAt).toISOString();
           insert(insJournal, dreamerId, body, occurredAt, 0, 'session', sessionId, null, null, progressIds[i], dreamIds[i], null, userId, written, written);
@@ -1275,7 +1341,7 @@ export function resetAndSeed(db: DB): SeedSummary {
               counts.progress++;
               if (isPriv) counts.private++;
               // In their own words: the step just finished, a line about this dream, or — once those are used — a general one.
-              const note = chance(0.65) ? progressWords(di, since, tWhen) ?? pickUnused(step >= 5 ? PROGRESS_NOTES.big : PROGRESS_NOTES.small, used, wordsRand) : null;
+              const note = chance(0.65) ? progressWords(di, since, tWhen, step) ?? pickUnused(step >= 5 ? PROGRESS_NOTES.big : PROGRESS_NOTES.small, used, wordsRand) : null;
               if (note) {
                 insert(insJournal, dreamerId, note, when, 0, 'self', null, ciId, null, progressId, dreamIds[di], null, userId, when, when);
                 counts.journal++;
@@ -1310,12 +1376,18 @@ export function resetAndSeed(db: DB): SeedSummary {
           counts.journal++;
           if (priv) counts.private++;
         }
-        // A reflection about one of the dreams, tagged to it, when its turn comes (or at the next window with room).
-        const r = dreamReflections.findIndex((_, i) => reflectionDue[i]! <= k && reflectionDue[i]! >= 0);
-        const reflectionAt = r >= 0 && span > DAY ? timeBetween(windowStart, windowEnd, textTime(dreamReflections[r]!.body), wordsRand) : null;
-        if (reflectionAt != null) {
+        // A reflection about one of the dreams, tagged to it, when its turn comes (or at the next window with room),
+        // and never before the step it presupposes is done.
+        const reflectionFrom = ({ dream, words }: (typeof dreamReflections)[number]) => {
+          const step = wordsNeeds(words);
+          return Math.max(windowStart, step == null ? -Infinity : stepDoneAt(dream, step) + HOUR);
+        };
+        const r = dreamReflections.findIndex((x, i) => reflectionDue[i]! <= k && reflectionDue[i]! >= 0 && windowEnd - reflectionFrom(x) > DAY);
+        const reflection = dreamReflections[r];
+        const reflectionAt = reflection ? timeBetween(reflectionFrom(reflection), windowEnd, textTime(wordsText(reflection.words)), wordsRand) : null;
+        if (reflection && reflectionAt != null) {
           const when = new Date(reflectionAt).toISOString();
-          insert(insJournal, dreamerId, dreamReflections[r]!.body, when, 0, 'self', null, null, null, null, dreamIds[dreamReflections[r]!.dream], null, userId, when, when);
+          insert(insJournal, dreamerId, wordsText(reflection.words), when, 0, 'self', null, null, null, null, dreamIds[reflection.dream], null, userId, when, when);
           counts.journal++;
           reflectionDue[r] = -1;
         }
@@ -1340,7 +1412,7 @@ export function resetAndSeed(db: DB): SeedSummary {
             const id = insert(insAction, dreamerId, title, '', doneIso ? 'completed' : 'active', dreamId, category, priv ? 1 : 0, userId, null, when, doneIso, null, doneIso ?? when);
             // Shared open actions come up for review at the next session; private ones are the dreamer's alone.
             if (!doneIso && !priv) openActions.push({ id, createdAt: when, dream: dreamId == null ? null : di, title });
-            if (doneAt != null && dreamId != null) stepsDone.push({ dream: di, at: doneAt, title });
+            if (doneAt != null && dreamId != null) stepsDone.push({ dream: di, chosen: actionAt, at: doneAt, title });
             counts.actions++;
             if (priv) counts.private++;
           }

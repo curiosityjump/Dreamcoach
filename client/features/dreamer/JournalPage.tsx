@@ -368,9 +368,9 @@ function Composer({ dreams, coachName, expanded, autoFocus, onOpen, onClose, can
   const trimmed = body.trim();
   const canSubmit = trimmed.length > 0 && !create.isPending;
   // A private reflection being written stays here, covered, while private entries are hidden.
-  const covered = useCovered(isPrivate && trimmed.length > 0);
+  const [covered, uncover] = useCovered(isPrivate && trimmed.length > 0);
 
-  const reset = () => { setBody(''); setDreamId(null); setCategory(null); setIsPrivate(false); setError(null); };
+  const reset = () => { setBody(''); setDreamId(null); setCategory(null); setIsPrivate(false); setError(null); uncover(); };
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();

@@ -562,10 +562,10 @@ function ReflectionComposer({ dreamId }: { dreamId: number }) {
   const hasText = body.trim().length > 0;
   const expanded = focused || hasText;
   // A private reflection being written stays here, covered, while private entries are hidden.
-  const covered = useCovered(isPrivate && hasText);
+  const [covered, uncover] = useCovered(isPrivate && hasText);
 
   // Fold away and let go of focus (the buttons below keep it in the text box while pressed).
-  const reset = () => { setBody(''); setIsPrivate(false); setFocused(false); box.current?.blur(); };
+  const reset = () => { setBody(''); setIsPrivate(false); setFocused(false); box.current?.blur(); uncover(); };
   const save = async () => {
     setError(null);
     try {

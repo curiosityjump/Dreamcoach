@@ -168,10 +168,12 @@ a.dj-chip-dream:hover { text-decoration: none; border-color: var(--border-strong
   background: transparent; color: var(--accent); font-size: 13px; font-weight: 500; white-space: nowrap;
 }
 .dj-text-btn:hover { background: var(--accent-soft); }
-/* Touch: "Clear" and a timeline row's dream link get the kit's invisible 40px hit area. */
+/* Touch: "Clear" gets the kit's invisible 40px hit area. A timeline row's dream link often wraps, so each of its
+   lines gets the 40px instead: vertical padding on an inline box reaches taps without moving the text. */
 @media (pointer: coarse) {
-  .dj-text-btn, .dj-tl-dream { position: relative; }
-  .dj-text-btn::after, .dj-tl-dream::after { content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
+  .dj-text-btn { position: relative; }
+  .dj-text-btn::after { content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
+  .dj-tl-dream { position: relative; padding-block: 12px; }
 }
 
 .dj-day { margin-bottom: 22px; }
@@ -189,4 +191,9 @@ a.dj-chip-dream:hover { text-decoration: none; border-color: var(--border-strong
   .dj-filters-clear { order: -1; }
   .dj-composer-actions { width: 100%; justify-content: flex-end; }
   .dj-chip-text { max-width: 150px; }
+}
+/* A scrolling rail clips what overflows it: on touch it is tall enough for the chips' and Clear's 40px hit areas,
+   in the same footprint. */
+@media (max-width: 640px) and (pointer: coarse) {
+  .dj-chips { margin-block: -2px; padding-block: 4px; }
 }
