@@ -13,13 +13,25 @@ import { Bar, Button, Card, CategoryChip, LoadingPage, PageHeader, PercentInput,
 import { IconCalendar, IconInfo, IconStar, IconX } from '@/components/icons';
 import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, isRatingCategory, type RatingCategory } from '@shared/care';
 import type { CheckInInput, Dream, LatestRating } from '@shared/types';
-import { fmtDate, fromLocalInputValue, plural, toLocalInputValue } from '@/lib/format';
+import { fmtDate, plural, toLocalInputValue } from '@/lib/format';
 import { NotePrivateWith, catVars, savedToast } from './CareShared';
+import { CoveredDraft, useCoveredParts, useLastKnown, useLoadedOnce } from './drafts';
 
 interface RatingDraft { value: number | null; note: string; isPrivate: boolean; notePrivate: boolean }
 interface ProgressDraft { value: number; note: string; isPrivate: boolean; notePrivate: boolean }
 
 const emptyRating = (): RatingDraft => ({ value: null, note: '', isPrivate: false, notePrivate: false });
+
+/** The server takes dates up to a few minutes ahead (clocks differ); later ones are still to come. */
+const FUTURE_SLACK_MS = 5 * 60 * 1000;
+
+/** The private part of a draft, to cover if private entries go out of view: all of it, or just its note. */
+function privatePart(key: string, d: RatingDraft | ProgressDraft | undefined, hasValue: boolean): string[] {
+  if (!d) return [];
+  const hasNote = d.note.trim().length > 0;
+  if (d.isPrivate) return hasValue || hasNote ? [key] : [];
+  return d.notePrivate && hasNote ? [`${key}-note`] : [];
+}
 
 function fromQuery(params: URLSearchParams): RatingCategory[] {
   return (params.get('category') ?? '').split(',').map((s) => s.trim()).filter(isRatingCategory);
@@ -31,8 +43,10 @@ export function CheckInPage() {
   const overview = useOverview('me');
   const dreams = useDreams('me');
 
-  if (overview.isLoading || dreams.isLoading) return <LoadingPage label="Getting ready…" />;
-  if (overview.error || !overview.data) {
+  // Hiding private entries loads all of this again; the form stays, with what's typed, while it does.
+  const loaded = useLoadedOnce(!!overview.data && !dreams.isLoading);
+  if (!loaded) {
+    if (overview.isLoading || dreams.isLoading) return <LoadingPage label="Getting ready…" />;
     return (
       <div className="page page-narrow">
         <PageHeader eyebrow="Self check-in" title="Check in" />
@@ -40,15 +54,19 @@ export function CheckInPage() {
       </div>
     );
   }
-  return <CheckInForm latest={overview.data.snapshot.latest} dreams={dreams.data ?? overview.data.snapshot.dreams} />;
+  return <CheckInForm latest={overview.data?.snapshot.latest} dreams={dreams.data ?? overview.data?.snapshot.dreams} />;
 }
 
-function CheckInForm({ latest, dreams }: { latest: Partial<Record<RatingCategory, LatestRating>>; dreams: Dream[] }) {
+/** `latest` and `dreams` are undefined while they load again. */
+function CheckInForm({ latest, dreams: current }: { latest: Partial<Record<RatingCategory, LatestRating>> | undefined; dreams: Dream[] | undefined }) {
   const { auth } = useAuth();
   const { toast } = useToast();
   const nav = useNavigate();
   const [params] = useSearchParams();
   const create = useCreateCheckIn('me');
+  // While the dreams load again their cards stay, by title; what they hold (progress) waits for the fresh data.
+  const dreams = useLastKnown(current) ?? [];
+  const refreshing = !latest || !current;
 
   const [selected, setSelected] = useState<RatingCategory[]>(() => fromQuery(params));
   const [ratings, setRatings] = useState<Partial<Record<RatingCategory, RatingDraft>>>(() => Object.fromEntries(fromQuery(params).map((c) => [c, emptyRating()])));
@@ -87,8 +105,22 @@ function CheckInForm({ latest, dreams }: { latest: Partial<Record<RatingCategory
   const incompleteRatings = orderedSelected.filter((c) => ratings[c]?.value == null);
   const chosenDreams = sortedDreams.filter((d) => selectedDreams.includes(d.id));
   const reflectionText = reflection.trim();
-  const dateChanged = when !== toLocalInputValue(new Date().toISOString()).slice(0, 16) && showDate;
-  const canSave = (completeRatings.length > 0 || chosenDreams.length > 0 || reflectionText.length > 0) && !create.isPending;
+  // A cleared or half-typed date means "now"; one that can't be read, or is still to come, is pointed out.
+  const whenTime = showDate && when ? new Date(when).getTime() : NaN;
+  const dateProblem = !showDate || !when ? null
+    : Number.isNaN(whenTime) ? 'That date doesn’t look right.'
+    : whenTime > Date.now() + FUTURE_SLACK_MS ? 'That date is still to come. Choose a date and time up to now.'
+    : null;
+  const dateChanged = showDate && !dateProblem && !Number.isNaN(whenTime) && when !== toLocalInputValue(new Date().toISOString());
+  const hasContent = completeRatings.length > 0 || chosenDreams.length > 0 || reflectionText.length > 0;
+  const canSave = hasContent && !dateProblem && !create.isPending;
+
+  // Parts that were private when private entries went out of view stay here, covered, until they're shown again.
+  const covered = useCoveredParts([
+    ...selected.flatMap((c) => privatePart(`rating-${c}`, ratings[c], ratings[c]?.value != null)),
+    ...selectedDreams.flatMap((id) => privatePart(`dream-${id}`, progress[id], true)),
+    ...(reflectionPrivate && reflectionText ? ['reflection'] : []),
+  ]);
 
   const summary = [
     completeRatings.length ? `${completeRatings.length} rating${completeRatings.length === 1 ? '' : 's'}` : null,
@@ -118,11 +150,7 @@ function CheckInForm({ latest, dreams }: { latest: Partial<Record<RatingCategory
       });
     }
     if (reflectionText) input.reflection = { body: reflectionText, isPrivate: reflectionPrivate };
-    if (dateChanged) {
-      const iso = fromLocalInputValue(when);
-      if (Number.isNaN(new Date(iso).getTime())) { setError('That date doesn’t look right.'); return; }
-      input.occurredAt = iso;
-    }
+    if (dateChanged) input.occurredAt = new Date(whenTime).toISOString();
     const anyPrivate =
       (input.ratings ?? []).some((r) => r.isPrivate || r.notePrivate) ||
       (input.progress ?? []).some((p) => p.isPrivate || p.notePrivate) ||
@@ -193,10 +221,10 @@ function CheckInForm({ latest, dreams }: { latest: Partial<Record<RatingCategory
 
       <div className="dci-cards">
         {orderedSelected.map((c) => (
-          <RatingCard key={c} category={c} draft={ratings[c] ?? emptyRating()} last={latest[c]} onChange={(patch) => setRating(c, patch)} onRemove={() => toggleCategory(c)} disabled={create.isPending} />
+          <RatingCard key={c} category={c} draft={ratings[c] ?? emptyRating()} last={latest?.[c]} refreshing={refreshing} covered={covered.has(`rating-${c}`)} noteCovered={covered.has(`rating-${c}-note`)} onChange={(patch) => setRating(c, patch)} onRemove={() => toggleCategory(c)} disabled={create.isPending} />
         ))}
         {chosenDreams.map((d) => (
-          <ProgressCard key={d.id} dream={d} draft={progress[d.id]!} onChange={(patch) => setProg(d.id, patch)} onRemove={() => toggleDream(d)} disabled={create.isPending} />
+          <ProgressCard key={d.id} dream={d} draft={progress[d.id]!} refreshing={refreshing} covered={covered.has(`dream-${d.id}`)} noteCovered={covered.has(`dream-${d.id}-note`)} onChange={(patch) => setProg(d.id, patch)} onRemove={() => toggleDream(d)} disabled={create.isPending} />
         ))}
 
         <Card className="dci-card dci-reflection" data-testid="checkin-reflection-card">
@@ -206,10 +234,14 @@ function CheckInForm({ latest, dreams }: { latest: Partial<Record<RatingCategory
               <div className="muted small">An overall reflection for today. Optional.</div>
             </div>
           </div>
-          <TextArea value={reflection} onChange={(e) => setReflection(e.target.value)} placeholder="What’s on your mind today?" aria-label="Reflection" rows={3} maxLength={8000} disabled={create.isPending} data-testid="checkin-reflection" />
-          <div className="row-wrap dc-privacy-row">
-            <span data-testid="checkin-reflection-privacy"><PrivacyToggle size="sm" value={reflectionPrivate} onChange={setReflectionPrivate} labels={['Reflection shared with coach', 'Reflection private']} /></span>
-          </div>
+          {covered.has('reflection') ? <CoveredDraft testId="checkin-reflection-covered" /> : (
+            <>
+              <TextArea value={reflection} onChange={(e) => setReflection(e.target.value)} placeholder="What’s on your mind today?" aria-label="Reflection" rows={3} maxLength={8000} disabled={create.isPending} data-testid="checkin-reflection" />
+              <div className="row-wrap dc-privacy-row">
+                <span data-testid="checkin-reflection-privacy"><PrivacyToggle size="sm" value={reflectionPrivate} onChange={setReflectionPrivate} labels={['Reflection shared with coach', 'Reflection private']} /></span>
+              </div>
+            </>
+          )}
         </Card>
 
         <div className="dci-date">
@@ -218,6 +250,9 @@ function CheckInForm({ latest, dreams }: { latest: Partial<Record<RatingCategory
               <label htmlFor="checkin-when" className="field-label"><IconCalendar /> Date and time</label>
               <input id="checkin-when" type="datetime-local" value={when} max={toLocalInputValue(new Date().toISOString())} onChange={(e) => setWhen(e.target.value)} disabled={create.isPending} data-testid="checkin-date" />
               <button type="button" className="dc-text-btn" onClick={() => { setShowDate(false); setWhen(toLocalInputValue(new Date().toISOString())); }}>Use now</button>
+              {dateProblem
+                ? <div className="dci-date-note dci-date-error" role="alert" data-testid="checkin-date-error">{dateProblem}</div>
+                : !when && <div className="dci-date-note muted small" data-testid="checkin-date-empty">Without a full date and time, it’s saved as now.</div>}
             </div>
           ) : (
             <button type="button" className="dc-text-btn" onClick={() => setShowDate(true)} data-testid="checkin-date-toggle"><IconCalendar /> This happened earlier? Set a date</button>
@@ -230,10 +265,12 @@ function CheckInForm({ latest, dreams }: { latest: Partial<Record<RatingCategory
       <div className="dci-footer" data-testid="checkin-footer">
         <div className="dci-footer-text muted small">
           {canSave || create.isPending
-            ? <>Saving {summaryLine}{dateChanged ? ` · dated ${fmtDate(fromLocalInputValue(when))}` : ''}{incompleteRatings.length ? ` · ${incompleteRatings.map((c) => CATEGORY_META[c].label).join(', ')} still need${incompleteRatings.length === 1 ? 's' : ''} a number` : ''}</>
-            : incompleteRatings.length
-              ? <>Choose a number for {incompleteRatings.map((c) => CATEGORY_META[c].label).join(', ')} to save</>
-              : <>Nothing to save yet</>}
+            ? <>Saving {summaryLine}{dateChanged ? ` · dated ${fmtDate(new Date(whenTime).toISOString())}` : ''}{incompleteRatings.length ? ` · ${incompleteRatings.map((c) => CATEGORY_META[c].label).join(', ')} still need${incompleteRatings.length === 1 ? 's' : ''} a number` : ''}</>
+            : hasContent && dateProblem
+              ? <>Check the date to save</>
+              : incompleteRatings.length
+                ? <>Choose a number for {incompleteRatings.map((c) => CATEGORY_META[c].label).join(', ')} to save</>
+                : <>Nothing to save yet</>}
         </div>
         <div className="row">
           <Button variant="ghost" onClick={cancel} disabled={create.isPending} data-testid="checkin-cancel">Cancel</Button>
@@ -254,10 +291,15 @@ function PickChip({ selected, onClick, children, style, title, testId }: { selec
   );
 }
 
-function RatingCard({ category, draft, last, onChange, onRemove, disabled }: {
+function RatingCard({ category, draft, last, refreshing, covered, noteCovered, onChange, onRemove, disabled }: {
   category: RatingCategory;
   draft: RatingDraft;
   last: LatestRating | undefined;
+  /** The latest values are loading again. */
+  refreshing: boolean;
+  /** The whole draft, or only its note, is private and covered while private entries are hidden. */
+  covered: boolean;
+  noteCovered: boolean;
   onChange: (patch: Partial<RatingDraft>) => void;
   onRemove: () => void;
   disabled: boolean;
@@ -271,7 +313,7 @@ function RatingCard({ category, draft, last, onChange, onRemove, disabled }: {
           <div className="row-wrap">
             <CategoryChip category={category} />
             <span className="muted small tnum" data-testid={`checkin-last-${category}`}>
-              {last ? `Last: ${last.value} · ${fmtDate(last.occurredAt)} · ${last.source === 'session' ? 'session' : 'self check-in'}` : 'Not rated yet'}
+              {last ? `Last: ${last.value} · ${fmtDate(last.occurredAt)} · ${last.source === 'session' ? 'session' : 'self check-in'}` : refreshing ? '…' : 'Not rated yet'}
             </span>
             {last?.isPrivate && <span data-testid={`checkin-last-private-${category}`}><PrivateChip /></span>}
           </div>
@@ -279,32 +321,40 @@ function RatingCard({ category, draft, last, onChange, onRemove, disabled }: {
         </div>
         <Button variant="ghost" icon size="sm" aria-label={`Remove ${m.label}`} onClick={onRemove} disabled={disabled} data-testid={`checkin-remove-${category}`}><IconX /></Button>
       </div>
-      <RatingInput value={draft.value} onChange={(v) => onChange({ value: v })} category={category} label={`${m.label} rating`} />
-      <div className="row-wrap dci-under">
-        {draft.value == null ? (
-          <span className="muted small">Choose a number from 0 to 10.{last ? ' ' : ''}{last && <button type="button" className="dc-text-btn" onClick={() => onChange({ value: last.value })} disabled={disabled} data-testid={`checkin-keep-${category}`}>Same as last ({last.value})</button>}</span>
-        ) : (
-          <span className="small tnum"><b>{draft.value}</b>{last ? <span className="muted"> · {draft.value === last.value ? 'same as last time' : `${draft.value > last.value ? '+' : '−'}${Math.abs(draft.value - last.value)} since ${fmtDate(last.occurredAt)}`}</span> : null}</span>
-        )}
-      </div>
-      <TextArea value={draft.note} onChange={(e) => onChange({ note: e.target.value })} placeholder="Add a note (optional)" aria-label={`${m.label} note`} rows={2} maxLength={4000} disabled={disabled} data-testid={`checkin-note-${category}`} />
-      <div className="row-wrap dc-privacy-row">
-        <span data-testid={`checkin-privacy-${category}`}><PrivacyToggle size="sm" value={draft.isPrivate} onChange={(v) => onChange({ isPrivate: v })} labels={['Rating shared with coach', 'Rating private']} /></span>
-        {hasNote && <span data-testid={`checkin-note-privacy-${category}`}>{draft.isPrivate ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={draft.notePrivate} onChange={(v) => onChange({ notePrivate: v })} labels={['Note shared with coach', 'Note private']} />}</span>}
-      </div>
+      {covered ? <CoveredDraft testId={`checkin-covered-${category}`} /> : (
+        <>
+          <RatingInput value={draft.value} onChange={(v) => onChange({ value: v })} category={category} label={`${m.label} rating`} />
+          <div className="row-wrap dci-under">
+            {draft.value == null ? (
+              <span className="muted small">Choose a number from 0 to 10.{last ? ' ' : ''}{last && <button type="button" className="dc-text-btn" onClick={() => onChange({ value: last.value })} disabled={disabled} data-testid={`checkin-keep-${category}`}>Same as last ({last.value})</button>}</span>
+            ) : (
+              <span className="small tnum"><b>{draft.value}</b>{last ? <span className="muted"> · {draft.value === last.value ? 'same as last time' : `${draft.value > last.value ? '+' : '−'}${Math.abs(draft.value - last.value)} since ${fmtDate(last.occurredAt)}`}</span> : null}</span>
+            )}
+          </div>
+          {noteCovered ? <CoveredDraft testId={`checkin-covered-note-${category}`} /> : <TextArea value={draft.note} onChange={(e) => onChange({ note: e.target.value })} placeholder="Add a note (optional)" aria-label={`${m.label} note`} rows={2} maxLength={4000} disabled={disabled} data-testid={`checkin-note-${category}`} />}
+          <div className="row-wrap dc-privacy-row">
+            <span data-testid={`checkin-privacy-${category}`}><PrivacyToggle size="sm" value={draft.isPrivate} onChange={(v) => onChange({ isPrivate: v })} labels={['Rating shared with coach', 'Rating private']} /></span>
+            {hasNote && !noteCovered && <span data-testid={`checkin-note-privacy-${category}`}>{draft.isPrivate ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={draft.notePrivate} onChange={(v) => onChange({ notePrivate: v })} labels={['Note shared with coach', 'Note private']} />}</span>}
+          </div>
+        </>
+      )}
     </Card>
   );
 }
 
-function ProgressCard({ dream, draft, onChange, onRemove, disabled }: {
+function ProgressCard({ dream, draft, refreshing, covered, noteCovered, onChange, onRemove, disabled }: {
   dream: Dream;
   draft: ProgressDraft;
+  /** The dream is loading again: only its title and slot are shown meanwhile. */
+  refreshing: boolean;
+  covered: boolean;
+  noteCovered: boolean;
   onChange: (patch: Partial<ProgressDraft>) => void;
   onRemove: () => void;
   disabled: boolean;
 }) {
   const hasNote = draft.note.trim().length > 0;
-  const diff = dream.progress != null ? draft.value - dream.progress : null;
+  const diff = !refreshing && dream.progress != null ? draft.value - dream.progress : null;
   return (
     <Card className="dci-card dci-dream" data-testid={`checkin-dream-${dream.id}`}>
       <div className="dci-card-head">
@@ -312,22 +362,26 @@ function ProgressCard({ dream, draft, onChange, onRemove, disabled }: {
           <div className="dc-eyebrow">{dream.slotLabel}</div>
           <h3 className="dci-dream-title">{dream.title}</h3>
           <div className="row-wrap">
-            <span className="muted small tnum">{dream.progress != null ? `Now ${dream.progress}%${dream.progressAt ? ` · ${fmtDate(dream.progressAt)}` : ''}` : 'No progress recorded yet'}</span>
-            {dream.progressIsPrivate && <span data-testid={`checkin-dream-private-${dream.id}`}><PrivateChip /></span>}
+            <span className="muted small tnum">{refreshing ? '…' : dream.progress != null ? `Now ${dream.progress}%${dream.progressAt ? ` · ${fmtDate(dream.progressAt)}` : ''}` : 'No progress recorded yet'}</span>
+            {!refreshing && dream.progressIsPrivate && <span data-testid={`checkin-dream-private-${dream.id}`}><PrivateChip /></span>}
           </div>
         </div>
         <Button variant="ghost" icon size="sm" aria-label={`Remove ${dream.title}`} onClick={onRemove} disabled={disabled} data-testid={`checkin-remove-dream-${dream.id}`}><IconX /></Button>
       </div>
-      <Bar value={draft.value} large label={`${dream.title} progress`} />
-      <PercentInput value={draft.value} onChange={(v) => onChange({ value: v })} label={`${dream.title} progress`} disabled={disabled} />
-      <div className="row-wrap dci-under">
-        <span className="small tnum"><b>{draft.value}%</b>{diff != null && <span className="muted"> · {diff === 0 ? 'same as before' : `${diff > 0 ? '+' : '−'}${plural(Math.abs(diff), 'pt')}`}</span>}</span>
-      </div>
-      <TextArea value={draft.note} onChange={(e) => onChange({ note: e.target.value })} placeholder="What moved, or what got in the way? (optional)" aria-label={`${dream.title} note`} rows={2} maxLength={4000} disabled={disabled} data-testid={`checkin-dream-note-${dream.id}`} />
-      <div className="row-wrap dc-privacy-row">
-        <span data-testid={`checkin-dream-privacy-${dream.id}`}><PrivacyToggle size="sm" value={draft.isPrivate} onChange={(v) => onChange({ isPrivate: v })} labels={['Progress shared with coach', 'Progress private']} /></span>
-        {hasNote && <span data-testid={`checkin-dream-note-privacy-${dream.id}`}>{draft.isPrivate ? <NotePrivateWith parent="update" /> : <PrivacyToggle size="sm" value={draft.notePrivate} onChange={(v) => onChange({ notePrivate: v })} labels={['Note shared with coach', 'Note private']} />}</span>}
-      </div>
+      {covered ? <CoveredDraft testId={`checkin-dream-covered-${dream.id}`} /> : (
+        <>
+          <Bar value={draft.value} large label={`${dream.title} progress`} />
+          <PercentInput value={draft.value} onChange={(v) => onChange({ value: v })} label={`${dream.title} progress`} disabled={disabled} />
+          <div className="row-wrap dci-under">
+            <span className="small tnum"><b>{draft.value}%</b>{diff != null && <span className="muted"> · {diff === 0 ? 'same as before' : `${diff > 0 ? '+' : '−'}${plural(Math.abs(diff), 'pt')}`}</span>}</span>
+          </div>
+          {noteCovered ? <CoveredDraft testId={`checkin-dream-covered-note-${dream.id}`} /> : <TextArea value={draft.note} onChange={(e) => onChange({ note: e.target.value })} placeholder="What moved, or what got in the way? (optional)" aria-label={`${dream.title} note`} rows={2} maxLength={4000} disabled={disabled} data-testid={`checkin-dream-note-${dream.id}`} />}
+          <div className="row-wrap dc-privacy-row">
+            <span data-testid={`checkin-dream-privacy-${dream.id}`}><PrivacyToggle size="sm" value={draft.isPrivate} onChange={(v) => onChange({ isPrivate: v })} labels={['Progress shared with coach', 'Progress private']} /></span>
+            {hasNote && !noteCovered && <span data-testid={`checkin-dream-note-privacy-${dream.id}`}>{draft.isPrivate ? <NotePrivateWith parent="update" /> : <PrivacyToggle size="sm" value={draft.notePrivate} onChange={(v) => onChange({ notePrivate: v })} labels={['Note shared with coach', 'Note private']} />}</span>}
+          </div>
+        </>
+      )}
     </Card>
   );
 }

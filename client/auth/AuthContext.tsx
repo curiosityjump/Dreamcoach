@@ -48,6 +48,16 @@ const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms))
 
 /** How long before private entries would hide again the browser checks whether to keep them showing. */
 const KEEP_ALIVE_LEAD_MS = 60_000;
+/** While private entries show, how often the browser re-reads the session (a check never keeps them showing). */
+const UNLOCK_CHECK_EVERY_MS = 60_000;
+/** Once the time is up, how long an answer saying they may still show has to arrive before they hide anyway. */
+const UNLOCK_GRACE_MS = 5_000;
+const EXPIRED_NOTICE = 'Private entries are hidden again after 30 minutes without activity.';
+
+const hiddenState = (a: AuthState): AuthState => ({ ...a, privateUnlocked: false, privateUnlockedUntil: null, privateUnlockedForMs: null });
+/** The time left differs in every answer and is only read to time the re-hide, so on its own it is no change. */
+const sameAuth = (a: AuthState | null, b: AuthState | null) =>
+  JSON.stringify(a && { ...a, privateUnlockedForMs: null }) === JSON.stringify(b && { ...b, privateUnlockedForMs: null });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuthState] = useState<AuthState | null>(null);
@@ -63,10 +73,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // signing in or out).
   const hiding = useRef<{ stop: () => void } | null>(null);
   const stopHiding = useCallback(() => hiding.current?.stop(), []);
+  // When private entries hide again (Date.now() time), from the time left the server last gave; a new object for
+  // every answer, so the timers below start again from each one.
+  const [unlockedUntil, setUnlockedUntil] = useState<{ at: number } | null>(null);
 
-  // Keep the same object when nothing changed, so a re-check does not re-render the whole app.
   const setAuth = useCallback((next: AuthState | null) => {
-    if (JSON.stringify(next) === JSON.stringify(authRef.current)) return;
+    setUnlockedUntil(next?.privateUnlocked && next.privateUnlockedForMs != null ? { at: Date.now() + next.privateUnlockedForMs } : null);
+    // Keep the same object when nothing changed, so a re-check does not re-render the whole app.
+    if (sameAuth(next, authRef.current)) return;
     authRef.current = next;
     setAuthState(next);
   }, []);
@@ -79,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!next || next.user.id !== prev.user.id) qc.clear();
     else if (prev.privateUnlocked && !next.privateUnlocked) {
       void qc.resetQueries({ queryKey: ['dreamer'] });
-      if (expired) toast('Private entries are hidden again after 30 minutes without activity.', 'private');
+      if (expired) toast(EXPIRED_NOTICE, 'private');
     } else if (!prev.privateUnlocked && next.privateUnlocked) void qc.invalidateQueries({ queryKey: ['dreamer'] });
   }, [qc, setAuth, toast]);
 
@@ -113,21 +127,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHENTICATED_EVENT, h);
   }, [qc, setAuth, stopHiding]);
 
-  // Private unlock auto-expires server-side after 30 idle minutes, sliding from the last interaction a request
-  // reported. Reading or typing sends no requests, so shortly before the window closes, tell the server about
-  // any interaction it hasn't heard of (that slides the window). Otherwise let it lapse, and mirror that here.
-  useEffect(() => {
-    if (!auth?.privateUnlocked || !auth.privateUnlockedUntil) return;
-    const until = new Date(auth.privateUnlockedUntil).getTime();
-    let t = 0;
-    const at = (time: number, run: () => void) => { t = window.setTimeout(run, Math.max(1000, time - Date.now())); };
-    at(until - KEEP_ALIVE_LEAD_MS, () => {
-      if (interactedSinceLastRequest()) void refresh();
-      at(until + 500, () => void refresh());
-    });
-    return () => window.clearTimeout(t);
-  }, [auth?.privateUnlocked, auth?.privateUnlockedUntil, refresh]);
-
   // Coming back to this tab: the session may have changed while it was in the background.
   useEffect(() => {
     let pending: Promise<void> | null = null;
@@ -141,17 +140,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   /**
-   * Hide private entries in this tab at once, and keep them hidden. Pages drop their dreamer data and show
-   * their loading state (resetQueries; removeQueries would leave mounted observers showing stale private
-   * data), and every read waits until the server has locked — a read before that would bring the private
-   * entries straight back. If the server can't be reached the screen stays that way and the lock is retried
-   * in the background; it never falls back to showing. Resolves or rejects with the first attempt.
+   * Hide private entries in this tab at once, and keep them hidden. Pages drop their dreamer data and load it
+   * again (resetQueries; removeQueries would leave mounted observers showing stale private data) — keeping
+   * their forms and drafts on screen meanwhile (DECISIONS #12) — and every read waits until the server has
+   * locked: a read before that would bring the private entries straight back. If the server can't be reached
+   * the screen stays that way and the lock is retried in the background; it never falls back to showing.
+   * Resolves or rejects with the first attempt.
    */
   const hide = useCallback(() => {
     epoch.current++;
     stopHiding();
     const prev = authRef.current;
-    if (prev) setAuth({ ...prev, privateUnlocked: false, privateUnlockedUntil: null });
+    if (prev) setAuth(hiddenState(prev));
     let stopped = false;
     let release = () => {};
     const released = new Promise<void>((r) => { release = r; });
@@ -179,6 +179,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return first;
   }, [qc, setAuth, stopHiding]);
 
+  // Private entries hide again after 30 idle minutes: the server slides that window from the last interaction a
+  // request reported, and relocks when a request arrives after it. Time it from the server's "time left" in each
+  // answer (never its timestamp against this browser's clock, which may disagree), starting again from every one:
+  //  - reading or typing sends no requests, so shortly before the window closes, tell the server about any
+  //    interaction it hasn't heard of (that slides it);
+  //  - check in about once a minute, so a window slid or closed elsewhere is picked up (a check never slides it);
+  //  - once the time is up, ask; unless an answer soon says they may still show, hide them here anyway — and on
+  //    the server too, as soon as it can be reached.
+  useEffect(() => {
+    if (!unlockedUntil) return;
+    const { at } = unlockedUntil;
+    const timers: number[] = [];
+    const after = (ms: number, run: () => void) => timers.push(window.setTimeout(run, ms));
+    let closing = false;
+    const due = () => {
+      void refresh();
+      if (closing) return;
+      closing = true;
+      after(UNLOCK_GRACE_MS, () => {
+        if (!authRef.current?.privateUnlocked) return;
+        toast(EXPIRED_NOTICE, 'private');
+        hide().catch(() => {});
+      });
+    };
+    after(at - KEEP_ALIVE_LEAD_MS - Date.now(), () => { if (interactedSinceLastRequest()) void refresh(); });
+    after(at + 500 - Date.now(), due);
+    // Date.now() keeps counting while the computer sleeps, which timers may not.
+    const poll = window.setInterval(() => (Date.now() > at ? due() : void refresh()), UNLOCK_CHECK_EVERY_MS);
+    return () => { timers.forEach((t) => window.clearTimeout(t)); window.clearInterval(poll); };
+  }, [unlockedUntil, refresh, hide, toast]);
+
   // Another tab changed the shared session. Its lock and sign-out have already reached the server; a tab
   // that is still locking leaves this one to hide too, and to make sure of the lock itself.
   useEffect(() => onSignal((signal) => {
@@ -187,7 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (signal === 'locking') { if (prev?.privateUnlocked) hide().catch(() => {}); return; }
     stopHiding();
     if (signal === 'logout') adopt(null, false);
-    else if (signal === 'lock' && prev) adopt({ ...prev, privateUnlocked: false, privateUnlockedUntil: null }, false);
+    else if (signal === 'lock' && prev) adopt(hiddenState(prev), false);
     else void check(false);
   }), [adopt, check, hide, stopHiding]);
 

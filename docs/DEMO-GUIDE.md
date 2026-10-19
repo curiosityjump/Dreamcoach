@@ -31,7 +31,7 @@ to fill the form.
    coaching session with Maya's focus and notes, and a recent activity feed.
 2. **Dreams** — open *Run the Riverfront Half Marathon*. Edit the title or
    description inline, read the progress history (solid dots = coaching sessions,
-   hollow = self check-ins), hover points for the note behind each number, and use
+   hollow = self check-ins), hover points for the notes behind the numbers (the reflections about this dream sit beside them), and use
    **Update progress** to record a new percentage with an optional note — each with
    its own Shared/Private switch.
 3. **Actions** — Active / Completed / Set aside. Add an action, link it to a dream or

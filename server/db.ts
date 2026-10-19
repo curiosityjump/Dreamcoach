@@ -176,6 +176,11 @@ export function openDatabase(file: string): DB {
   // Columns added after the first release; CREATE TABLE IF NOT EXISTS leaves older databases without them.
   const sessionCols = (db.prepare('PRAGMA table_info(coaching_sessions)').all() as { name: string }[]).map((c) => c.name);
   if (!sessionCols.includes('actions_reviewed')) db.exec('ALTER TABLE coaching_sessions ADD COLUMN actions_reviewed INTEGER NOT NULL DEFAULT 0');
+  // "Achieved" is derived from the shared history (DECISIONS #10). Earlier versions followed the latest write, so a
+  // database they wrote can hold a badge that no longer matches its rows; derive it again (dreams that match are
+  // left untouched, and updated_at never moves for a derived badge).
+  const firstShared100 = `(SELECT MIN(p.occurred_at) FROM dream_progress p WHERE p.dream_id = dreams.id AND p.value >= 100 AND p.is_private = 0)`;
+  db.exec(`UPDATE dreams SET achieved_at = ${firstShared100} WHERE achieved_at IS NOT ${firstShared100}`);
   return db;
 }
 

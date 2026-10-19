@@ -69,10 +69,13 @@ function PrivateMark() {
  * Compact number cell for the editable column. Keeps its own text while typing,
  * commits on change (after a short pause), on blur and on Enter; an empty field
  * clears the value on blur or Enter. As in a spreadsheet, Enter and the up/down
- * arrows move between rows (they never change the number), a new number replaces
- * the old one until the coach starts typing, and Escape cancels the edit. A value
- * that didn't save keeps its number, is marked on the cell, and is sent again on
- * the next Enter, Tab or blur — even when the number typed is the same.
+ * arrows move between rows, a click or a new number replaces the whole value,
+ * and Escape cancels the edit. It takes digits only (a text field with a number
+ * keyboard, so neither the arrow keys nor the scroll wheel can step the value),
+ * and a number outside the range is never clamped or sent: the cell shows the
+ * range and, when the coach moves on, goes back to its last value. A value that
+ * didn't save keeps its number, is marked on the cell, and is sent again on the
+ * next Enter, Tab or blur — even when the number typed is the same.
  */
 function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cellId, trailing }: {
   value: number | null;
@@ -86,15 +89,13 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   /** Rendered after the input (e.g. the delta vs. the previous session). */
   trailing?: ReactNode;
 }) {
-  const [text, setText] = useState(value == null ? '' : String(value));
+  const show = (v: number | null) => (v == null ? '' : String(v));
+  const [text, setText] = useState(show(value));
   const focused = useRef(false);
   const timer = useRef<number | null>(null);
   const lastSent = useRef<number | null>(value);
   // The value when editing began, so Escape can put it back.
   const atFocus = useRef<number | null>(value);
-  // Nothing typed since the cell was focused (or since Escape): the whole value stays selected,
-  // so a click inside the cell can't drop the caret after it and have the next digits appended.
-  const untouched = useRef(true);
   // The last value sent didn't reach the server: the cell says so, and the same number counts as a change.
   const [failed, setFailed] = useState(false);
   const failedRef = useRef(false);
@@ -106,7 +107,7 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   // Reflect server changes when the coach isn't mid-edit.
   useEffect(() => {
     if (!focused.current) {
-      setText(value == null ? '' : String(value));
+      setText(show(value));
       lastSent.current = value;
       markFailed(false);
     }
@@ -114,13 +115,13 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
 
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
 
+  /** The text holds digits only: a value, a cleared cell (null), or a number outside the range (undefined). */
   const parse = (t: string): number | null | undefined => {
-    const trimmed = t.trim();
-    if (trimmed === '') return null;
-    const n = Number(trimmed);
-    if (!Number.isFinite(n)) return undefined;
-    return Math.max(min, Math.min(max, Math.round(n)));
+    if (t === '') return null;
+    const n = Number(t);
+    return n >= min && n <= max ? n : undefined;
   };
+  const outOfRange = parse(text) === undefined;
 
   /** Sends the value if it changed; says whether it did. */
   const commit = (t: string) => {
@@ -161,66 +162,74 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   };
 
   const onChange = (raw: string) => {
-    untouched.current = false;
-    const parsed = parse(raw);
-    if (parsed === undefined) { setText(raw); return; }
-    const shown = parsed == null ? '' : String(parsed);
-    // Keep what was typed unless it had to be clamped (e.g. "12" → "10").
-    setText(parsed != null && Number(raw) !== parsed ? shown : raw);
-    // An emptied cell is usually about to get a new number, so a pause never deletes the value:
-    // clearing commits on blur or Enter.
-    if (parsed == null) { if (timer.current) { window.clearTimeout(timer.current); timer.current = null; } }
-    else scheduleCommit(shown);
+    // Anything but a digit ("-", "+", "e", ",", a space) is ignored as it's typed.
+    const digits = raw.replace(/\D/g, '');
+    setText(digits);
+    // An emptied cell is usually about to get a new number, so a pause never deletes the value (clearing
+    // commits on blur or Enter), and a number out of range is never sent.
+    if (parse(digits) == null) { if (timer.current) { window.clearTimeout(timer.current); timer.current = null; } }
+    else scheduleCommit(digits);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    // A number field would step its value on the arrow keys; here they move to the next or previous
-    // row, so a coach used to the spreadsheet can't change a value (or mark a dream achieved) by accident.
+    // Enter and the arrow keys move to the next or previous row, as in the spreadsheet.
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
       e.preventDefault();
+      // A number out of range stays in its cell, selected, until it's retyped (or Escape, Tab or a click elsewhere).
+      if (outOfRange) { e.currentTarget.select(); return; }
       commit(text);
+      setText(show(parse(text) ?? null));
       moveBy(e.currentTarget, e.key === 'ArrowUp' || (e.key === 'Enter' && e.shiftKey) ? -1 : 1);
     } else if (e.key === 'Escape') {
       // Cancel the edit, as in a spreadsheet: the cell gets back the value it had when editing began
       // and stays selected. Nothing is sent unless a pause already saved the typed value, in which
       // case the original goes back.
       e.preventDefault();
-      const original = atFocus.current == null ? '' : String(atFocus.current);
+      const original = show(atFocus.current);
       setText(original);
       commit(original);
-      untouched.current = true;
       const el = e.currentTarget;
       window.requestAnimationFrame(() => el.select());
     }
   };
 
+  const onBlur = () => {
+    focused.current = false;
+    // Out of range: back to the last value. Otherwise send what's typed (an empty cell clears here).
+    if (outOfRange) setText(show(lastSent.current));
+    else { commit(text); setText(show(parse(text) ?? null)); }
+  };
+
+  const describedBy = outOfRange || failed ? errorId : undefined;
   return (
-    <span className={`cs-cell-edit${failed ? ' is-failed' : ''}`}>
+    <span className={`cs-cell-edit${failed ? ' is-failed' : ''}${outOfRange ? ' is-out-of-range' : ''}`}>
       <input
-        type="number"
+        type="text"
         inputMode="numeric"
+        autoComplete="off"
         className="cs-input tnum"
-        min={min}
-        max={max}
-        step={1}
         value={text}
         placeholder="–"
         aria-label={label}
-        aria-invalid={failed || undefined}
-        aria-describedby={failed ? errorId : undefined}
+        aria-invalid={failed || outOfRange || undefined}
+        aria-describedby={describedBy}
         data-testid={testId}
         data-cs-cell={cellId}
         data-save-failed={failed || undefined}
-        onFocus={(e) => { focused.current = true; untouched.current = true; atFocus.current = lastSent.current; e.currentTarget.select(); }}
-        onMouseUp={(e) => { if (untouched.current) { e.preventDefault(); e.currentTarget.select(); } }}
-        onBlur={() => { focused.current = false; commit(text); }}
+        data-out-of-range={outOfRange || undefined}
+        onFocus={(e) => { focused.current = true; atFocus.current = lastSent.current; e.currentTarget.select(); }}
+        // Every click selects the whole value, so the next digits replace it rather than being added to it.
+        onMouseUp={(e) => { e.preventDefault(); e.currentTarget.select(); }}
+        onBlur={onBlur}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
       />
       {suffix && <span className="cs-input-suffix" aria-hidden>{suffix}</span>}
-      {failed
-        ? <span className="cs-cell-error" id={errorId} title="This value didn’t save. Press Enter, or move to another cell, to try again." data-testid="grid-cell-error">Not saved</span>
-        : trailing}
+      {outOfRange
+        ? <span className="cs-cell-range" id={errorId} title={`Enter a whole number from ${min} to ${max}.`} data-testid="grid-cell-range">{min}–{max}</span>
+        : failed
+          ? <span className="cs-cell-error" id={errorId} title="This value didn’t save. Press Enter, or move to another cell, to try again." data-testid="grid-cell-error">Not saved</span>
+          : trailing}
     </span>
   );
 }

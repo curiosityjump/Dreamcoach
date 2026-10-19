@@ -1,9 +1,10 @@
-import { createBrowserRouter, RouterProvider } from 'react-router';
+import { createBrowserRouter, RouterProvider, type RouteObject } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiRequestError } from '@/api/client';
 import { AuthProvider } from '@/auth/AuthContext';
 import { ToastProvider } from '@/components/toast';
 import { BareShell, DreamerShell, RoleRedirect, StaffShell } from '@/app/Shell';
+import { AppErrorBoundary, RouteErrorPage } from '@/app/ErrorPage';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { HomePage } from '@/features/dreamer/HomePage';
 import { DreamsPage } from '@/features/dreamer/DreamsPage';
@@ -29,51 +30,61 @@ const queryClient = new QueryClient({
   },
 });
 
+// A page that fails to render shows RouteErrorPage in its place; inside a shell the nav stays, to go elsewhere.
+const pages = (children: RouteObject[]): RouteObject[] => [{ errorElement: <RouteErrorPage />, children }];
+
 const router = createBrowserRouter([
-  { path: '/login', element: <LoginPage /> },
-  { path: '/', element: <RoleRedirect /> },
   {
-    element: <DreamerShell />,
+    errorElement: <RouteErrorPage />,
     children: [
-      { path: '/home', element: <HomePage /> },
-      { path: '/dreams', element: <DreamsPage /> },
-      { path: '/dreams/:dreamId', element: <DreamDetailPage /> },
-      { path: '/actions', element: <ActionsPage /> },
-      { path: '/care', element: <CarePage /> },
-      { path: '/care/:category', element: <CategoryHistoryPage /> },
-      { path: '/journal', element: <JournalPage /> },
-      { path: '/check-in', element: <CheckInPage /> },
-      { path: '/sessions', element: <MySessionsPage /> },
-      { path: '/sessions/:sessionId', element: <MySessionsPage /> },
+      { path: '/login', element: <LoginPage /> },
+      { path: '/', element: <RoleRedirect /> },
+      {
+        element: <DreamerShell />,
+        children: pages([
+          { path: '/home', element: <HomePage /> },
+          { path: '/dreams', element: <DreamsPage /> },
+          { path: '/dreams/:dreamId', element: <DreamDetailPage /> },
+          { path: '/actions', element: <ActionsPage /> },
+          { path: '/care', element: <CarePage /> },
+          { path: '/care/:category', element: <CategoryHistoryPage /> },
+          { path: '/journal', element: <JournalPage /> },
+          { path: '/check-in', element: <CheckInPage /> },
+          { path: '/sessions', element: <MySessionsPage /> },
+          { path: '/sessions/:sessionId', element: <MySessionsPage /> },
+        ]),
+      },
+      {
+        element: <StaffShell />,
+        children: pages([
+          { path: '/coach', element: <CoachDashboardPage /> },
+          { path: '/dreamers/:dreamerId', element: <StaffDreamerPage /> },
+          { path: '/dreamers/:dreamerId/:tab', element: <StaffDreamerPage /> },
+          { path: '/dreamers/:dreamerId/session/:sessionId', element: <SessionWorkspacePage /> },
+          { path: '/director', element: <DirectorOverviewPage /> },
+          { path: '/director/dreamers', element: <DirectorDreamersPage /> },
+          { path: '/director/coaches/:coachId', element: <DirectorCoachPage /> },
+        ]),
+      },
+      {
+        element: <BareShell />,
+        children: pages([{ path: '/dreamers/:dreamerId/session/:sessionId/present', element: <PresentPage /> }]),
+      },
+      { path: '*', element: <NotFoundPage /> },
     ],
   },
-  {
-    element: <StaffShell />,
-    children: [
-      { path: '/coach', element: <CoachDashboardPage /> },
-      { path: '/dreamers/:dreamerId', element: <StaffDreamerPage /> },
-      { path: '/dreamers/:dreamerId/:tab', element: <StaffDreamerPage /> },
-      { path: '/dreamers/:dreamerId/session/:sessionId', element: <SessionWorkspacePage /> },
-      { path: '/director', element: <DirectorOverviewPage /> },
-      { path: '/director/dreamers', element: <DirectorDreamersPage /> },
-      { path: '/director/coaches/:coachId', element: <DirectorCoachPage /> },
-    ],
-  },
-  {
-    element: <BareShell />,
-    children: [{ path: '/dreamers/:dreamerId/session/:sessionId/present', element: <PresentPage /> }],
-  },
-  { path: '*', element: <NotFoundPage /> },
 ]);
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <AuthProvider>
-          <RouterProvider router={router} />
-        </AuthProvider>
-      </ToastProvider>
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <AuthProvider>
+            <RouterProvider router={router} />
+          </AuthProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    </AppErrorBoundary>
   );
 }

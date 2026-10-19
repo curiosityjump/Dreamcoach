@@ -1,6 +1,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { startServer, Client, type TestServer } from './helpers.ts';
+import { openDatabase, type DB } from '../../server/db.ts';
+import { resetAndSeed } from '../../server/seed.ts';
 
 let s: TestServer;
 before(async () => { s = await startServer(); });
@@ -223,6 +228,63 @@ test('dream progress reaching 100% marks the dream achieved, based on shared ent
   assert.ok(after.achievedAt);
 });
 
+test('sharing an older private 100% marks the dream achieved, dated by that entry, whatever came after', async () => {
+  const dreamer = new Client(s.base);
+  await dreamer.login('sam@dreamcoach.demo');
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const dream = (await dreamer.get('/dreamers/me/dreams')).body.find((d: any) => !d.achievedAt);
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86400_000).toISOString();
+  const hundred = (await dreamer.post('/dreamers/me/check-ins', { occurredAt: daysAgo(6), progress: [{ dreamId: dream.id, value: 100, isPrivate: true }] })).body.progress[0];
+  const later = (await dreamer.post('/dreamers/me/check-ins', { occurredAt: daysAgo(3), progress: [{ dreamId: dream.id, value: 40 }] })).body.progress[0];
+  const achievedAt = async () => (await dreamer.get('/dreamers/me/dreams')).body.find((d: any) => d.id === dream.id).achievedAt;
+  assert.equal(await achievedAt(), null);
+  await dreamer.patch(`/dreamers/me/progress/${hundred.id}`, { isPrivate: false });
+  assert.equal(await achievedAt(), hundred.occurredAt, 'achieved since the shared 100%, although a lower value came later');
+  // Moving that entry moves the date; removing it removes the badge.
+  const moved = (await dreamer.patch(`/dreamers/me/progress/${hundred.id}`, { occurredAt: daysAgo(5) })).body;
+  assert.equal(await achievedAt(), moved.occurredAt);
+  for (const p of [later, hundred]) await dreamer.del(`/dreamers/me/progress/${p.id}`);
+  assert.equal(await achievedAt(), null);
+});
+
+test('a dream achieved in a session is dated with it when the session’s date changes', async () => {
+  const coach = new Client(s.base);
+  await coach.login('maya@dreamcoach.demo');
+  const marcus = (await coach.get('/coach/dashboard')).body.caseload.find((c: any) => c.dreamer.name === 'Marcus Bell').dreamer.id;
+  const dreams = async () => (await coach.get(`/dreamers/${marcus}/dreams`)).body as any[];
+  const achieved = (await dreams()).find((d) => d.achievedAt);
+  const session = (await coach.get(`/dreamers/${marcus}/sessions`)).body.find((x: any) => x.occurredAt === achieved.achievedAt);
+  assert.ok(session, 'seeded: the dream was achieved in a coaching session');
+  const earlier = new Date(Date.parse(session.occurredAt) - 86400_000).toISOString();
+  assert.equal((await coach.patch(`/dreamers/${marcus}/sessions/${session.id}`, { occurredAt: earlier })).status, 200);
+  const moved = (await dreams()).find((d) => d.id === achieved.id);
+  assert.equal(moved.achievedAt, earlier);
+  assert.equal(moved.updatedAt, achieved.updatedAt, 'a derived badge is not an edit of the dream');
+  await coach.patch(`/dreamers/${marcus}/sessions/${session.id}`, { occurredAt: session.occurredAt });
+  assert.deepEqual((await dreams()).find((d) => d.id === achieved.id), achieved);
+});
+
+test('a database written by an earlier version has its Achieved badges derived again when it opens', () => {
+  const file = path.join(os.tmpdir(), `dc-achieved-${process.pid}-${Date.now()}.db`);
+  const read = (db: DB) => db.prepare('SELECT id, achieved_at, updated_at FROM dreams ORDER BY id').all() as { id: number; achieved_at: string | null; updated_at: string }[];
+  try {
+    let db = openDatabase(file);
+    resetAndSeed(db);
+    const derived = read(db);
+    const achieved = derived.filter((d) => d.achieved_at);
+    assert.ok(achieved.length > 0);
+    // What the earlier rule could leave behind: a badge lost after a private-and-back round trip, and a stray one.
+    db.prepare('UPDATE dreams SET achieved_at = NULL WHERE id = ?').run(achieved[0]!.id);
+    db.prepare('UPDATE dreams SET achieved_at = ? WHERE id = ?').run(new Date().toISOString(), derived.find((d) => !d.achieved_at)!.id);
+    db.close();
+    db = openDatabase(file);
+    assert.deepEqual(read(db), derived);
+    db.close();
+  } finally {
+    for (const f of [file, `${file}-wal`, `${file}-shm`]) fs.rmSync(f, { force: true });
+  }
+});
+
 test('validation: out-of-range and malformed input is rejected cleanly', async () => {
   const dreamer = new Client(s.base);
   await dreamer.login('owen@dreamcoach.demo');
@@ -400,18 +462,43 @@ test('a journal entry can only be tagged with the dreamer’s own dreams', async
   await dreamer.del(`/dreamers/me/journal/${j.id}`);
 });
 
-test('a dreamer’s note on a coach-recorded value appears in their timeline beside the session', async () => {
+test('a dreamer’s note on a coach-recorded value is listed when it was written, for the dreamer and staff alike', async () => {
   const dreamer = new Client(s.base);
-  await dreamer.login('owen@dreamcoach.demo');
-  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
-  const rating = (await dreamer.get('/dreamers/me/ratings?category=alignment')).body.find((r: any) => r.source === 'session' && !r.note && !r.isPrivate);
+  const auth = await dreamer.login('grace@dreamcoach.demo');
+  const coach = new Client(s.base);
+  await coach.login('priya@dreamcoach.demo');
+  const id = auth.dreamerId;
+  const monthAgo = new Date(Date.now() - 30 * 86400_000).toISOString();
+  const rating = (await dreamer.get('/dreamers/me/ratings?category=alignment')).body.find((r: any) => r.source === 'session' && !r.note && r.occurredAt < monthAgo);
   assert.ok(rating);
   const body = 'What I meant by that number, in my own words.';
-  assert.equal((await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: body, notePrivate: true })).status, 200);
-  const items = (await dreamer.get('/dreamers/me/timeline?limit=1000')).body as any[];
-  const note = items.find((it) => it.kind === 'journal' && it.item.body === body);
-  assert.ok(note, 'the note is listed');
-  assert.equal(note.item.ratingId, rating.id);
-  assert.ok(items.some((it) => it.kind === 'session' && it.item.id === rating.sessionId), 'its session is listed too');
+  const noted = await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: body });
+  assert.equal(noted.status, 200);
+  const writtenAt = noted.body.note.createdAt;
+  // The dreamer's timeline, the coach's "Recent shared activity" and the journal all put it where it counts: now.
+  const placed = (items: any[], at: (it: any) => string, what: string) => {
+    const i = items.findIndex((it) => (it.item ?? it).body === body);
+    assert.ok(i >= 0, `${what} lists the note`);
+    assert.equal(at(items[i]), writtenAt, `${what} dates it when it was written`);
+    assert.ok(items.slice(0, i).every((it) => at(it) >= writtenAt) && items.slice(i + 1).every((it) => at(it) <= writtenAt), `${what} orders it by that date`);
+    return items[i];
+  };
+  for (const [what, items] of [
+    ['the dreamer’s timeline', (await dreamer.get('/dreamers/me/timeline?limit=10')).body],
+    ['the staff timeline', (await coach.get(`/dreamers/${id}/timeline?limit=10`)).body],
+    ['Recent shared activity', (await coach.get(`/dreamers/${id}/overview`)).body.recentActivity],
+  ] as [string, any[]][]) {
+    const it = placed(items, (x) => x.at, what);
+    assert.equal(it.kind, 'journal');
+    assert.equal(it.item.ratingId, rating.id);
+    assert.equal(it.item.sessionId, rating.sessionId, 'still tied to its session value');
+  }
+  const all = (await coach.get(`/dreamers/${id}/timeline?limit=1000`)).body as any[];
+  assert.ok(all.some((it) => it.kind === 'session' && it.item.id === rating.sessionId), 'its session is listed too');
+  const activity = (j: any) => (j.checkInId == null && (j.ratingId != null || j.progressId != null) ? j.createdAt : j.occurredAt);
+  placed((await coach.get(`/dreamers/${id}/journal`)).body, activity, 'the journal');
+  // What feeds "Since last session": entries since a moment before it was written include it.
+  const since = (await coach.get(`/dreamers/${id}/journal?from=${new Date(Date.parse(writtenAt) - 1000).toISOString()}`)).body;
+  assert.deepEqual(since.map((j: any) => j.body), [body]);
   await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { note: null });
 });

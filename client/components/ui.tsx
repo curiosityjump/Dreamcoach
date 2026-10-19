@@ -299,6 +299,9 @@ export function Check({ checked, onChange, label, disabled }: { checked: boolean
 const focusables = (root: HTMLElement) =>
   [...root.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]')].filter((el) => el.tabIndex >= 0 && !el.matches(':disabled') && el.getClientRects().length > 0);
 
+// Open dialogs, innermost last: only the top one answers Escape and keeps Tab inside it.
+const openDialogs: HTMLElement[] = [];
+
 export function Modal({ open, onClose, title, children, footer, size }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'lg' }) {
   const ref = useRef<HTMLDivElement>(null);
   // Callers often pass a new onClose on every render; the effect below must not re-run for that,
@@ -309,7 +312,9 @@ export function Modal({ open, onClose, title, children, footer, size }: { open: 
     const dialog = ref.current;
     if (!open || !dialog) return;
     const opener = document.activeElement instanceof HTMLElement && !dialog.contains(document.activeElement) ? document.activeElement : null;
+    openDialogs.push(dialog);
     const onKey = (e: KeyboardEvent) => {
+      if (openDialogs[openDialogs.length - 1] !== dialog) return;
       if (e.key === 'Escape') onCloseRef.current();
       if (e.key !== 'Tab') return;
       // Keep Tab inside the dialog.
@@ -324,6 +329,8 @@ export function Modal({ open, onClose, title, children, footer, size }: { open: 
     document.body.style.overflow = 'hidden';
     focusables(dialog).find((el) => el.matches('input, textarea, select, button:not(.modal-close)'))?.focus();
     return () => {
+      const i = openDialogs.indexOf(dialog);
+      if (i >= 0) openDialogs.splice(i, 1);
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
       // Give focus back to whatever opened the dialog, unless that is gone or focus has already moved on.
@@ -333,7 +340,9 @@ export function Modal({ open, onClose, title, children, footer, size }: { open: 
   }, [open]);
   if (!open) return null;
   return createPortal(
-    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    // The dialog is portaled, but React still bubbles its events through the component tree: a form submitted in
+    // here must never also submit a form the dialog happens to be rendered inside.
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} onSubmit={(e) => e.stopPropagation()}>
       <div className={`modal${size === 'lg' ? ' modal-lg' : ''}`} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined} ref={ref}>
         <div className="modal-head">
           <h2 style={{ fontSize: 20 }}>{title}</h2>

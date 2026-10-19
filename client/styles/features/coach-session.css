@@ -50,8 +50,7 @@
 
 /* editable cell */
 .cs-cell-edit { display: inline-flex; align-items: center; justify-content: center; gap: 2px; }
-.cs-input { width: 54px; min-height: 36px; height: 36px; padding: 0 6px; text-align: center; font-weight: 600; font-size: 15px; border-radius: 8px; border: 1px solid var(--accent-soft-2); background: var(--surface); color: var(--ink); -moz-appearance: textfield; appearance: textfield; }
-.cs-input::-webkit-outer-spin-button, .cs-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.cs-input { width: 54px; min-height: 36px; height: 36px; padding: 0 6px; text-align: center; font-weight: 600; font-size: 15px; border-radius: 8px; border: 1px solid var(--accent-soft-2); background: var(--surface); color: var(--ink); }
 .cs-input:hover { border-color: var(--accent); }
 .cs-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2); }
 .cs-input::placeholder { color: var(--muted-2); font-weight: 400; }
@@ -61,6 +60,10 @@
 .cs-cell-edit.is-failed .cs-input { border-color: var(--danger); background: var(--danger-soft); }
 .cs-cell-edit.is-failed .cs-input:focus { box-shadow: 0 0 0 3px var(--danger-soft); }
 .cs-cell-error { margin-left: 4px; font-size: 11px; font-weight: 600; line-height: 1.15; color: var(--danger); white-space: nowrap; cursor: help; }
+/* a number outside the range: never sent; the cell shows the range until it's retyped */
+.cs-cell-edit.is-out-of-range .cs-input { border-color: var(--warning); background: var(--warning-soft); }
+.cs-cell-edit.is-out-of-range .cs-input:focus { box-shadow: 0 0 0 3px var(--warning-soft); }
+.cs-cell-range { margin-left: 4px; font-size: 11px; font-weight: 600; line-height: 1.15; color: var(--warning); white-space: nowrap; cursor: help; }
 .cs-editing .cs-cell.cs-cur { padding: 0 6px !important; }
 
 /* compact */
@@ -176,6 +179,7 @@
 .cs-since-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cs-since-head .chip { font-size: 11.5px; padding: 1px 8px; }
 .cs-since-vals { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.cs-since-about { align-items: center; }
 .cs-since-val { display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px; }
 .cs-since-val .chip { font-size: 11.5px; padding: 1px 7px; }
 .cs-since-val b { font-weight: 600; }

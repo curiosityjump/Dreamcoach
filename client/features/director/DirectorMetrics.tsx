@@ -105,7 +105,7 @@ export function summaryStatGroups(s: CoachSummary): { label: string; items: Stat
         { key: 'dream-progress', label: 'Avg dream progress', value: pct(s.avgDreamProgress), sub: 'latest progress across all dreams' },
         { key: 'commitment', label: 'Avg commitment / satisfaction', value: <>{num(s.avgCommitment)} <span className="dir-slash">/</span> {num(s.avgSatisfaction)}</>, sub: 'latest ratings, 0–10' },
         { key: 'care-change', label: 'CARE change since first session', value: <CareChangeValue change={s.careChange} size="lg" />, sub: s.careChange ? `n = ${plural(s.careChange.n, 'dreamer')} with 2+ sessions` : 'needs dreamers with 2+ sessions' },
-        { key: 'follow-through', label: 'Follow-through', value: s.followThrough ? pct(s.followThrough.rate) : '—', sub: s.followThrough ? `of ${plural(s.followThrough.n, 'action')} older than 30 days completed` : 'no actions older than 30 days yet' },
+        { key: 'follow-through', label: 'Follow-through', value: s.followThrough ? pct(s.followThrough.rate) : '—', sub: s.followThrough ? `of ${plural(s.followThrough.n, 'action')} older than 30 days completed` : s.dreamers === 0 ? 'no dreamers assigned' : 'no actions older than 30 days yet' },
       ],
     },
   ];
@@ -113,16 +113,20 @@ export function summaryStatGroups(s: CoachSummary): { label: string; items: Stat
 
 /* ---------- Caveat + definitions ---------- */
 
-export function ComparisonCaveat() {
+/** The visible caveat under every director table. The default compares caseloads; a page about dreamers says its own. */
+export function ComparisonCaveat({ children }: { children?: ReactNode }) {
   return (
     <div className="callout callout-muted dir-caveat" data-testid="director-caveat">
       <IconInfo />
-      <span>Caseloads differ in size, start dates, and starting points. These figures are context for conversations with coaches, not a ranking.</span>
+      <span>{children ?? 'Caseloads differ in size, start dates, and starting points. These figures are context for conversations with coaches, not a ranking.'}</span>
     </div>
   );
 }
 
-const DEFINITIONS: { term: string; def: string }[] = [
+export interface Definition { term: string; def: string }
+
+/** The team and coach figures; a page with other columns passes its own definitions. */
+const DEFINITIONS: Definition[] = [
   { term: 'Sessions run', def: 'Completed coaching sessions, counted for the coach who ran them, even if the dreamer has since moved to another coach.' },
   { term: 'Caseload figures', def: 'Everything else on a coach’s row or page describes their current caseload: the dreamers assigned to them today, with each dreamer’s whole history.' },
   { term: 'Participation (45d)', def: 'Share of active dreamers who had a completed coaching session, with any coach, in the last 45 days.' },
@@ -134,12 +138,12 @@ const DEFINITIONS: { term: string; def: string }[] = [
   { term: 'Month trends', def: 'Entries are counted in the month they were recorded. The CARE and dream-progress lines average the coaching-session entries recorded that month, whoever had a session, so self check-ins never move them. A dashed line marks a month when dreamers joined: their starting values can lower that month’s average although nobody went backwards. The Avg dream progress figure uses each dream’s latest value, so it can differ from the line’s last point.' },
 ];
 
-export function HowCalculated() {
+export function HowCalculated({ definitions = DEFINITIONS }: { definitions?: Definition[] }) {
   return (
     <details className="dir-details" data-testid="director-how-calculated">
       <summary>How these are calculated</summary>
       <dl className="dir-defs">
-        {DEFINITIONS.map((d) => (
+        {definitions.map((d) => (
           <div key={d.term}>
             <dt>{d.term}</dt>
             <dd>{d.def}</dd>
@@ -208,7 +212,8 @@ export function PersonCell({ initials, name, about, status, tone }: { initials: 
       <Avatar initials={initials} tone={tone} />
       <span className="dir-person-text">
         <span className="dir-person-name">{name}{status && <DreamerStatusChip status={status} />}</span>
-        {about && <span className="dir-person-about">{about}</span>}
+        {/* Tables clamp the about line to two lines; the full text stays a hover away. */}
+        {about && <span className="dir-person-about" title={about}>{about}</span>}
       </span>
     </span>
   );

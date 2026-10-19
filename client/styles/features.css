@@ -7,5 +7,11 @@
   :where(.da-filter-chip, .dj-filter-chip, .dj-entry-context, .dj-tl-link, .da-expand, .dc-link, .da-text-btn, .dc-text-btn, .dc-back, .dd-back)::after {
     content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%);
   }
-  .da-select { min-height: 40px; }
 }
+
+/* ---------- Shared action composer: actions that weren't added ---------- */
+/* Each keeps its words under the form with the reason, and can be tried again or dropped. */
+.da-not-added { align-items: center; flex-wrap: wrap; }
+.da-not-added-text { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.da-not-added-text b { color: var(--ink); font-weight: 600; }
+.da-not-added-btns { display: inline-flex; gap: 6px; margin-left: auto; }

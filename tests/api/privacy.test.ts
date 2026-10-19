@@ -65,6 +65,22 @@ test('background requests never keep private entries showing; real activity slid
   await dreamer.post('/auth/privacy/lock');
 });
 
+test('the time left on an unlock is measured on the server’s clock', async () => {
+  const dreamer = new Client(s.base);
+  const auth = await dreamer.login('grace@dreamcoach.demo');
+  assert.equal(auth.privateUnlockedForMs, null);
+  const unlocked = (await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' })).body;
+  assert.ok(unlocked.privateUnlockedForMs > 29.9 * 60_000 && unlocked.privateUnlockedForMs <= 30 * 60_000, `${unlocked.privateUnlockedForMs} ms left`);
+  // Two minutes left; a background check does not extend it and reports what is left right now.
+  s.db.prepare(`UPDATE auth_sessions SET private_unlocked_until = ? WHERE token = ?`).run(new Date(Date.now() + 2 * 60_000).toISOString(), dreamer.cookie.split('=')[1]);
+  const me = await fetch(`${s.base}/api/auth/me`, { headers: { cookie: dreamer.cookie, 'x-dc-idle': String(29 * 60_000) } }).then((r) => r.json() as Promise<any>);
+  assert.ok(me.privateUnlockedForMs > 115_000 && me.privateUnlockedForMs <= 120_000, `${me.privateUnlockedForMs} ms left`);
+  assert.equal(Date.parse(me.privateUnlockedUntil) - Date.now() <= me.privateUnlockedForMs, true);
+  assert.equal((await dreamer.post('/auth/privacy/lock')).body.privateUnlockedForMs, null);
+  const coach = new Client(s.base);
+  assert.equal((await coach.login('maya@dreamcoach.demo')).privateUnlockedForMs, null);
+});
+
 test('staff cannot unlock private entries', async () => {
   const coach = new Client(s.base);
   await coach.login('maya@dreamcoach.demo');
@@ -581,4 +597,39 @@ test('making an entry private and shared again leaves no trace in what staff see
   await dreamer.patch(`/dreamers/me/ratings/${rating.id}`, { isPrivate: false });
   const after = { actions: (await coach.get(`/dreamers/${dreamerId}/actions`)).body, energy: (await coach.get(`/dreamers/${dreamerId}/care/energy`)).body };
   assert.deepEqual(after, before);
+});
+
+test('hiding and re-sharing a 100% leaves the Achieved badge and every staff payload exactly as it was', async () => {
+  const dreamer = new Client(s.base);
+  const auth = await dreamer.login('darnell@dreamcoach.demo');
+  await dreamer.post('/auth/privacy/unlock', { password: 'dream2026' });
+  const coach = new Client(s.base);
+  await coach.login('daniel@dreamcoach.demo');
+  const director = new Client(s.base);
+  await director.login('director@dreamcoach.demo');
+  const id = auth.dreamerId;
+  const dream = (await dreamer.get('/dreamers/me/dreams')).body.find((d: any) => !d.achievedAt);
+  const hoursAgo = (n: number) => new Date(Date.now() - n * 3600_000).toISOString();
+  // Shared history: 100% two hours ago, then a later 95%. The dream stays achieved, dated by the 100%.
+  const hundred = (await dreamer.post('/dreamers/me/check-ins', { occurredAt: hoursAgo(2), progress: [{ dreamId: dream.id, value: 100 }] })).body.progress[0];
+  const later = (await dreamer.post('/dreamers/me/check-ins', { occurredAt: hoursAgo(1), progress: [{ dreamId: dream.id, value: 95 }] })).body.progress[0];
+  const staff = async () => ({
+    dreams: (await coach.get(`/dreamers/${id}/dreams`)).body,
+    overview: (await coach.get(`/dreamers/${id}/overview`)).body,
+    history: (await coach.get(`/dreamers/${id}/dreams/${dream.id}/history`)).body,
+    dashboard: (await coach.get('/coach/dashboard')).body,
+    director: (await director.get('/director/overview')).body,
+  });
+  const before = await staff();
+  assert.equal(before.dreams.find((d: any) => d.id === dream.id).achievedAt, hundred.occurredAt);
+
+  await dreamer.patch(`/dreamers/me/progress/${hundred.id}`, { isPrivate: true });
+  const hidden = await staff();
+  assert.equal(hidden.dreams.find((d: any) => d.id === dream.id).achievedAt, null, 'with the 100% private, staff see no badge');
+  assert.equal(hidden.director.totals.dreamsAchieved, before.director.totals.dreamsAchieved - 1);
+
+  await dreamer.patch(`/dreamers/me/progress/${hundred.id}`, { isPrivate: false });
+  assert.deepEqual(await staff(), before, 'shared again, everything staff see is as it was');
+  for (const p of [later, hundred]) await dreamer.del(`/dreamers/me/progress/${p.id}`);
+  assert.equal((await coach.get(`/dreamers/${id}/dreams`)).body.find((d: any) => d.id === dream.id).achievedAt, null);
 });

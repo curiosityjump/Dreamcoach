@@ -12,17 +12,21 @@ import { useAuth } from '@/auth/AuthContext';
 import { useCategoryHistory, useCreateCheckIn, useDeleteRating, useDreams, useSessions, useUpdateRating } from '@/api/hooks';
 import { ApiRequestError, errorMessage } from '@/api/client';
 import { useToast } from '@/components/toast';
-import { Button, Card, CardHead, CategoryChip, ConfirmDialog, Dropdown, EmptyState, LoadingPage, PageHeader, PrivacyToggle, PrivateChip, RatingInput, SourceChip, TextArea } from '@/components/ui';
+import { Button, Card, CardHead, CategoryChip, ConfirmDialog, Dropdown, EmptyState, LoadingPage, PageHeader, PrivacyToggle, PrivateChip, RatingInput, Skeleton, SourceChip, TextArea } from '@/components/ui';
 import { SourceLegend, TrendChart } from '@/components/charts';
 import { IconArrowLeft, IconArrowRight, IconChart, IconCompass, IconEdit, IconInfo, IconLock, IconMore, IconPen, IconSparkle, IconTrash, IconUnlock } from '@/components/icons';
 import { JournalEntryCard } from '@/features/shared/Timeline';
 import { UnlockDialog } from '@/features/shared/PrivacyControl';
 import { CATEGORY_META, RATING_CATEGORIES, isRatingCategory, type RatingCategory } from '@shared/care';
 import type { CategoryHistory, CoachingSession, JournalEntry, RatingEntry } from '@shared/types';
-import { fmtDate, fmtDateTime, fmtMonthLong, plural } from '@/lib/format';
+import { dayKey, fmtDate, fmtDateTime, fmtMonthLong, plural } from '@/lib/format';
 import { NotePrivateWith, PRIVATE_HIDDEN_MSG, SessionDelta, ValueBadge, byTimeAsc, catVars, coachNameFor, rangeInsight, savedToast, toTrendPoint, useTouch } from './CareShared';
+import { CoveredDraft, KeepDrafts, useCoveredParts, useKeptDraft, useLoadedOnce } from './drafts';
 
 type Item = { kind: 'rating'; at: string; entry: RatingEntry } | { kind: 'reflection'; at: string; entry: JournalEntry };
+
+const NO_ENTRIES: RatingEntry[] = [];
+const NO_REFLECTIONS: JournalEntry[] = [];
 
 /* ---------- Page ---------- */
 
@@ -33,6 +37,8 @@ export function CategoryHistoryPage() {
   const dreams = useDreams('me');
   const sessions = useSessions('me');
   const tabs = useRef<HTMLElement>(null);
+  // Hiding private entries loads the history again; what's being written here stays while it does.
+  const loaded = useLoadedOnce(!!history.data, category);
 
   // On phones the tabs scroll sideways: bring the current one into view.
   useEffect(() => {
@@ -73,12 +79,14 @@ export function CategoryHistoryPage() {
         lead={m.prompt}
       />
 
-      {history.isLoading ? (
-        <LoadingPage label={`Loading your ${m.label.toLowerCase()} history…`} />
-      ) : history.error || !history.data ? (
+      {loaded ? (
+        <KeepDrafts key={category}>
+          <HistoryBody key={category} category={category} history={history.data} dreams={dreams.data ?? []} sessions={[...(sessions.data ?? [])].sort(byTimeAsc)} />
+        </KeepDrafts>
+      ) : history.error ? (
         <div className="callout callout-muted" role="alert"><IconInfo /><span>{errorMessage(history.error)}</span></div>
       ) : (
-        <HistoryBody category={category} history={history.data} dreams={dreams.data ?? []} sessions={[...(sessions.data ?? [])].sort(byTimeAsc)} />
+        <LoadingPage label={`Loading your ${m.label.toLowerCase()} history…`} />
       )}
     </div>
   );
@@ -86,9 +94,12 @@ export function CategoryHistoryPage() {
 
 /* ---------- Body ---------- */
 
-function HistoryBody({ category, history, dreams, sessions }: { category: RatingCategory; history: CategoryHistory; dreams: { id: number; title: string; slot: 1 | 2 | 3 | 4 }[]; sessions: CoachingSession[] }) {
+/** `history` is undefined while it loads again: the Rate now composer stays, the rest waits. */
+function HistoryBody({ category, history, dreams, sessions }: { category: RatingCategory; history: CategoryHistory | undefined; dreams: { id: number; title: string; slot: 1 | 2 | 3 | 4 }[]; sessions: CoachingSession[] }) {
   const m = CATEGORY_META[category];
-  const entries = history.entries;
+  const refreshing = !history;
+  const entries = history?.entries ?? NO_ENTRIES;
+  const reflections = history?.reflections ?? NO_REFLECTIONS;
   const latest = entries[entries.length - 1];
   const previous = entries[entries.length - 2];
   const insight = useMemo(() => rangeInsight(category, entries), [category, entries]);
@@ -101,15 +112,16 @@ function HistoryBody({ category, history, dreams, sessions }: { category: Rating
   const items = useMemo<Item[]>(() => {
     const list: Item[] = [
       ...entries.map((e) => ({ kind: 'rating' as const, at: e.occurredAt, entry: e })),
-      ...history.reflections.map((r) => ({ kind: 'reflection' as const, at: r.occurredAt, entry: r })),
+      ...reflections.map((r) => ({ kind: 'reflection' as const, at: r.occurredAt, entry: r })),
     ];
     return list.sort((a, b) => b.at.localeCompare(a.at) || (a.kind === 'rating' ? -1 : 1));
-  }, [entries, history.reflections]);
+  }, [entries, reflections]);
 
   const months = useMemo(() => {
     const groups: { key: string; label: string; items: Item[] }[] = [];
     for (const it of items) {
-      const key = it.at.slice(0, 7);
+      // The month in local time, as its heading reads (an evening entry on the 30th belongs to that month).
+      const key = dayKey(it.at).slice(0, 7);
       const g = groups[groups.length - 1];
       if (g && g.key === key) g.items.push(it);
       else groups.push({ key, label: fmtMonthLong(it.at), items: [it] });
@@ -124,7 +136,7 @@ function HistoryBody({ category, history, dreams, sessions }: { category: Rating
       <Card className="dc-hero" data-testid="category-hero">
         <div className="dc-hero-main">
           <div className="dc-hero-value">
-            <span className="dc-cat-value tnum" data-testid="category-latest">{latest ? latest.value : '–'}</span>
+            <span className="dc-cat-value tnum" data-testid="category-latest">{latest ? latest.value : refreshing ? '…' : '–'}</span>
             <span className="dc-cat-of">/ 10</span>
             {latest && <SessionDelta entry={latest} sessions={sessions} />}
           </div>
@@ -138,7 +150,7 @@ function HistoryBody({ category, history, dreams, sessions }: { category: Rating
                 </div>
                 {previous && <div className="muted small">Before that: {previous.value} on {fmtDate(previous.occurredAt)}</div>}
               </>
-            ) : (
+            ) : refreshing ? <Skeleton h={14} w={180} /> : (
               <div className="muted small">Nothing recorded for {m.label.toLowerCase()} yet. Your first rating will show here.</div>
             )}
           </div>
@@ -151,8 +163,8 @@ function HistoryBody({ category, history, dreams, sessions }: { category: Rating
       </Card>
 
       <Card className="dc-section" data-testid="category-chart">
-        <CardHead title="Trend" sub={entries.length ? `${plural(entries.length, 'entry', 'entries')} · ${fromSessions} from coaching sessions, ${entries.length - fromSessions} self check-in${entries.length - fromSessions === 1 ? '' : 's'}` : 'Each rating becomes a point here'} />
-        {entries.length ? (
+        <CardHead title="Trend" sub={refreshing ? undefined : entries.length ? `${plural(entries.length, 'entry', 'entries')} · ${fromSessions} from coaching sessions, ${entries.length - fromSessions} self check-in${entries.length - fromSessions === 1 ? '' : 's'}` : 'Each rating becomes a point here'} />
+        {refreshing ? <Skeleton h={260} /> : entries.length ? (
           <>
             <TrendChart points={points} max={10} color={m.color} height={260} />
             <div className="spread dc-chart-foot">
@@ -171,7 +183,9 @@ function HistoryBody({ category, history, dreams, sessions }: { category: Rating
           <h2 id="dc-entries-head" className="dc-section-title">Entries</h2>
           {items.length > 0 && <span className="muted small">Newest first</span>}
         </div>
-        {items.length === 0 ? (
+        {refreshing ? (
+          <Card><div className="stack" aria-busy><Skeleton h={22} w="70%" /><Skeleton h={22} w="55%" /><Skeleton h={22} w="62%" /></div></Card>
+        ) : items.length === 0 ? (
           <Card>
             <EmptyState icon={<IconPen />} title="Your story here starts with one rating" action={<Button variant="primary" onClick={() => setComposing(true)}>Rate now</Button>}>
               Numbers and words together: every rating can carry a note, and reflections written at check-in time appear alongside.
@@ -213,14 +227,16 @@ function RateNow({ category, latest, onDone }: { category: RatingCategory; lates
   const [priv, setPriv] = useState(false);
   const [notePriv, setNotePriv] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const text = note.trim();
+  // A private rating (or a private note) stays here, covered, while private entries are hidden.
+  const covered = useCoveredParts(priv && (value != null || text) ? ['all'] : notePriv && text ? ['note'] : []);
 
   const save = () => {
     if (value == null || create.isPending) return;
-    const text = note.trim();
     const anyPrivate = priv || (!!text && notePriv);
     create.mutate({ ratings: [{ category, value, isPrivate: priv, ...(text ? { note: text, notePrivate: notePriv || priv } : {}) }] }, {
       onSuccess: () => {
-        const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, `${m.label} saved as private — only you can see it.`, priv ? undefined : `${m.label} saved: ${value}. Your private note is hidden right now.`);
+        const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, priv ? `${m.label} saved as private — only you can see it.` : `${m.label} saved: ${value}. Your note is private — only you can see it.`, priv ? undefined : `${m.label} saved: ${value}. Your private note is hidden right now.`);
         toast(msg, kind);
         onDone();
       },
@@ -232,16 +248,20 @@ function RateNow({ category, latest, onDone }: { category: RatingCategory; lates
     <div className="dc-ratenow" data-testid="category-ratenow">
       <div className="spread">
         <div className="dc-ratenow-prompt">{m.prompt}</div>
-        {latest && value == null && (
+        {latest && value == null && !covered.has('all') && (
           <button type="button" className="dc-text-btn" onClick={() => setValue(latest.value)} data-testid="category-ratenow-keep">Same as last ({latest.value})</button>
         )}
       </div>
-      <RatingInput value={value} onChange={setValue} category={category} label={`${m.label} rating`} />
-      <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="What’s behind this number? (optional)" aria-label="Note" rows={2} maxLength={4000} disabled={create.isPending} data-testid="category-ratenow-note" />
-      <div className="row-wrap dc-privacy-row">
-        <span data-testid="category-ratenow-privacy"><PrivacyToggle size="sm" value={priv} onChange={setPriv} labels={['Rating shared with coach', 'Rating private']} /></span>
-        {note.trim() && <span data-testid="category-ratenow-note-privacy">{priv ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} />}</span>}
-      </div>
+      {covered.has('all') ? <CoveredDraft testId="category-ratenow-covered" /> : (
+        <>
+          <RatingInput value={value} onChange={setValue} category={category} label={`${m.label} rating`} />
+          {covered.has('note') ? <CoveredDraft testId="category-ratenow-covered-note" /> : <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="What’s behind this number? (optional)" aria-label="Note" rows={2} maxLength={4000} disabled={create.isPending} data-testid="category-ratenow-note" />}
+          <div className="row-wrap dc-privacy-row">
+            <span data-testid="category-ratenow-privacy"><PrivacyToggle size="sm" value={priv} onChange={setPriv} labels={['Rating shared with coach', 'Rating private']} /></span>
+            {text && !covered.has('note') && <span data-testid="category-ratenow-note-privacy">{priv ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} />}</span>}
+          </div>
+        </>
+      )}
       {error && <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>}
       <div className="dc-pending-actions">
         <Button variant="ghost" onClick={onDone} disabled={create.isPending}>Cancel</Button>
@@ -255,12 +275,26 @@ function RateNow({ category, latest, onDone }: { category: RatingCategory; lates
 
 type EditError = { message: string; hiddenNote: boolean };
 
+/** What the editor holds. `seenNote` is the note it started from (one hidden right now can't be in it). */
+type EntryDraft = { value: number | null; note: string; priv: boolean; notePriv: boolean; seenNote: RatingEntry['note'] };
+const draftOf = (e: RatingEntry): EntryDraft => ({ value: e.value, note: e.note?.body ?? '', priv: e.isPrivate, notePriv: e.note?.isPrivate ?? false, seenNote: e.note });
+/** Private, or holding a private note's words. */
+const draftPrivate = (d: EntryDraft) => d.priv || (d.notePriv && d.note.trim().length > 0) || !!d.seenNote?.isPrivate;
+
 function EntryRow({ entry, cellTaken }: { entry: RatingEntry; cellTaken: boolean }) {
   const { auth, unlockPrivate } = useAuth();
   const { toast } = useToast();
   const update = useUpdateRating('me');
   const remove = useDeleteRating('me');
-  const [editing, setEditing] = useState(false);
+  // The editor's draft is kept by the page, so it is still here after the list loads again (hiding private entries).
+  const { draft, setDraft, patchDraft, covered } = useKeptDraft<EntryDraft>(`rating-${entry.id}`, draftPrivate);
+  const editing = draft !== null;
+  // Private entries were shown while editing, so a note that was hidden is here now: start from it (and its
+  // privacy), keeping anything typed meanwhile below it. Saving can then never overwrite a note unseen.
+  if (draft && !covered && entry.note?.id !== draft.seenNote?.id) {
+    const typed = draft.note.trim() !== (draft.seenNote?.body ?? '') ? draft.note.trim() : '';
+    setDraft({ ...draft, seenNote: entry.note, note: [entry.note?.body, typed].filter(Boolean).join('\n\n'), notePriv: entry.note?.isPrivate ?? false });
+  }
   const [editError, setEditError] = useState<EditError | null>(null);
   const [unlocking, setUnlocking] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -294,13 +328,13 @@ function EntryRow({ entry, cellTaken }: { entry: RatingEntry; cellTaken: boolean
         const nowPrivate = body.isPrivate === true || body.notePrivate === true;
         const [msg, kind] = savedToast(auth, nowPrivate, 'Entry updated.', 'Entry updated — the private parts are only visible to you.');
         toast(msg, kind);
-        setEditing(false);
+        setDraft(null);
       },
       // Shown in the editor, which keeps what was typed; a note hidden right now can be shown from there.
       onError: (e) => setEditError({ message: errorMessage(e), hiddenNote: isConflict(e) }),
     });
   };
-  const startEdit = () => { setEditError(null); setEditing(true); };
+  const startEdit = () => { setEditError(null); setDraft(draftOf(entry)); };
   const makePrivate = () => patch({ isPrivate: true }, auth?.privateUnlocked ? 'Now private — only you can see this rating.' : PRIVATE_HIDDEN_MSG, 'private', () => setConfirmHide(false));
   const share = () => patch({ isPrivate: false }, 'Rating shared with your coach.');
   const noteMakePrivate = () => patch({ notePrivate: true }, auth?.privateUnlocked ? 'Note is now private — the rating stays as it was.' : PRIVATE_HIDDEN_MSG, 'private');
@@ -318,10 +352,13 @@ function EntryRow({ entry, cellTaken }: { entry: RatingEntry; cellTaken: boolean
         {editing ? (
           <EntryEditor
             entry={entry}
+            draft={draft}
+            onChange={patchDraft}
+            covered={covered}
             pending={update.isPending}
             error={shownError}
             onShowPrivate={shownError?.hiddenNote ? () => setUnlocking(true) : undefined}
-            onCancel={() => setEditing(false)}
+            onCancel={() => setDraft(null)}
             onSave={saveEdit}
           />
         ) : (
@@ -404,8 +441,12 @@ const isConflict = (e: unknown) => e instanceof ApiRequestError && e.code === 'c
 type EntryEdit = { value?: number; note?: string | null; isPrivate?: boolean; notePrivate?: boolean };
 
 /** Self entries: value, note and privacy. Session entries: the dreamer's own note only (privacy has its own warning in the menu). */
-function EntryEditor({ entry, pending, error, onShowPrivate, onSave, onCancel }: {
+function EntryEditor({ entry, draft, onChange, covered, pending, error, onShowPrivate, onSave, onCancel }: {
   entry: RatingEntry;
+  draft: EntryDraft;
+  onChange: (patch: Partial<EntryDraft>) => void;
+  /** The draft was private when private entries went out of view: it waits, covered, until they're shown again. */
+  covered: boolean;
   pending: boolean;
   error: EditError | null;
   /** Set when saving found a note that is hidden right now: offers to show private entries. */
@@ -414,19 +455,11 @@ function EntryEditor({ entry, pending, error, onShowPrivate, onSave, onCancel }:
   onCancel: () => void;
 }) {
   const own = entry.source === 'self';
-  const [value, setValue] = useState<number | null>(entry.value);
-  const [note, setNote] = useState(entry.note?.body ?? '');
-  const [priv, setPriv] = useState(entry.isPrivate);
-  const [notePriv, setNotePriv] = useState(entry.note?.isPrivate ?? false);
-  // Private entries were shown while editing, so a note that was hidden is here now: start from it (and its
-  // privacy), keeping anything typed meanwhile below it. Saving can then never overwrite a note unseen.
-  const [seenNote, setSeenNote] = useState(entry.note);
-  if (entry.note?.id !== seenNote?.id) {
-    const typed = note.trim() !== (seenNote?.body ?? '') ? note.trim() : '';
-    setSeenNote(entry.note);
-    setNote([entry.note?.body, typed].filter(Boolean).join('\n\n'));
-    setNotePriv(entry.note?.isPrivate ?? false);
-  }
+  const { value, note, priv, notePriv } = draft;
+  const setValue = (v: number | null) => onChange({ value: v });
+  const setNote = (v: string) => onChange({ note: v });
+  const setPriv = (v: boolean) => onChange({ priv: v });
+  const setNotePriv = (v: boolean) => onChange({ notePriv: v });
   const text = note.trim();
   const original = entry.note?.body ?? '';
   const dirty = value !== entry.value || text !== original || priv !== entry.isPrivate || (!!text && !priv && notePriv !== (entry.note?.isPrivate ?? false));
@@ -450,15 +483,19 @@ function EntryEditor({ entry, pending, error, onShowPrivate, onSave, onCancel }:
         <SourceChip source={entry.source} coachName={coachNameFor(entry)} />
         <span className="muted small">{fmtDateTime(entry.occurredAt)}</span>
       </div>
-      {own
-        ? <RatingInput value={value} onChange={setValue} category={entry.category} compact />
-        : <div className="muted small">{entry.sessionId == null ? `The ${entry.value} was recorded in a coaching session that was later removed.` : `The ${entry.value} was recorded in your coaching session; the value itself is changed in a session.`} You can add your own note to it.</div>}
-      <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="A note for this rating (optional)" aria-label="Note" rows={2} maxLength={4000} disabled={pending} data-testid="category-entry-edit-note" />
-      {(own || text) && (
-        <div className="row-wrap dc-privacy-row">
-          {own && <span data-testid="category-entry-edit-privacy"><PrivacyToggle size="sm" value={priv} onChange={setPriv} labels={['Rating shared with coach', 'Rating private']} /></span>}
-          {text && <span data-testid="category-entry-edit-note-privacy">{priv ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} />}</span>}
-        </div>
+      {covered ? <CoveredDraft testId="category-entry-edit-covered" /> : (
+        <>
+          {own
+            ? <RatingInput value={value} onChange={setValue} category={entry.category} compact />
+            : <div className="muted small">{entry.sessionId == null ? `The ${entry.value} was recorded in a coaching session that was later removed.` : `The ${entry.value} was recorded in your coaching session; the value itself is changed in a session.`} You can add your own note to it.</div>}
+          <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="A note for this rating (optional)" aria-label="Note" rows={2} maxLength={4000} disabled={pending} data-testid="category-entry-edit-note" />
+          {(own || text) && (
+            <div className="row-wrap dc-privacy-row">
+              {own && <span data-testid="category-entry-edit-privacy"><PrivacyToggle size="sm" value={priv} onChange={setPriv} labels={['Rating shared with coach', 'Rating private']} /></span>}
+              {text && <span data-testid="category-entry-edit-note-privacy">{priv ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} />}</span>}
+            </div>
+          )}
+        </>
       )}
       {error && (
         <div className={`callout ${error.hiddenNote ? 'callout-private' : 'callout-muted'}`} role="alert" data-testid="category-entry-edit-error">

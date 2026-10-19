@@ -35,6 +35,11 @@ export interface AuthState {
   privateUnlocked: boolean;
   /** ISO timestamp when the unlock expires if no activity (dreamers only). */
   privateUnlockedUntil: string | null;
+  /**
+   * Milliseconds left on the unlock as the server answered, measured on the server's clock — time the browser's
+   * timers from this, never from privateUnlockedUntil against its own clock. Null while private entries are hidden.
+   */
+  privateUnlockedForMs: number | null;
   /** The dreamer profile when the user is a dreamer. */
   dreamerId: number | null;
   /** True when a coach/director has at least one dreamer assigned (director may coach). */

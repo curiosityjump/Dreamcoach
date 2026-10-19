@@ -169,3 +169,20 @@ See the brief in `docs/BRIEF.md` for the full product vision. Page-by-page notes
   comparisons.
 - `DirectorDreamersPage` — searchable/sortable table of all dreamers → dreamer page.
 - `DirectorCoachPage` — one coach: summary, caseload, trends.
+
+## Drafts and private entries (dreamer pages)
+
+Hiding private entries — by hand, by the 30-minute re-hide or from another tab —
+resets the `['dreamer']` queries, and it must never cost the dreamer what they were
+typing. `client/features/dreamer/drafts.tsx` holds the conventions:
+
+- Gate a page's skeleton on `useLoadedOnce(...)`, not `isLoading`, so forms stay
+  mounted while data reloads.
+- Wrap row editors in `KeepDrafts` / `useKeptDraft` so an open edit survives its
+  row reloading.
+- Cover a draft whose privacy switch is on with `useCovered` / `CoveredDraft`
+  while private entries are hidden; it can still be saved, and its words come back
+  when private entries are shown.
+- Dialogs are portaled; `Modal` stops form submits at its root and only the
+  topmost dialog answers Escape and Tab.
+

@@ -1,7 +1,7 @@
 # Verification
 
 How each requirement in the brief was verified. "API test" = `tests/api/*.test.ts`
-(53 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
+(59 tests against an in-memory, freshly seeded database). "E2E" = the Playwright
 journey in `tests/e2e/journey.spec.ts` (6 serial steps, fresh database on :3100).
 "Manual" = exercised in Chromium with screenshots in `docs/screenshots/`.
 
@@ -12,7 +12,7 @@ Run everything: `npm run typecheck && npm run test:api && npm run test:e2e`.
 | Requirement | How it works | Verified by |
 |---|---|---|
 | Own login and personal dashboard | Session cookie auth; `/home` with dreams, CARE, actions, coaching, recent activity | E2E 2, manual |
-| Four dreams with description, current + historical progress, related actions/reflections | `dreams` table (4 slots, program-defined labels); `/dreams`, `/dreams/:id` with chart, entries, actions, reflections | Manual; API test (dreams, achieved) |
+| Four dreams with description, current + historical progress, related actions/reflections | `dreams` table (4 slots, program-defined labels); `/dreams`, `/dreams/:id` with chart, entries, actions, reflections | Manual; API tests (dreams; achieved: a fact about shared history — hiding and re-sharing a 100% changes nothing staff see, an older shared 100% still counts) |
 | Progress 0–100%, updatable outside sessions, optional note, history over time | Progress dialog → `POST /check-ins` with `progress[]`; history list + trend chart | Manual; API test ("dream progress reaching 100%") |
 | Action items: add, edit, complete, archive, review, link to dream/CARE, mark private | Shared `ActionList`/`ActionComposer` on `/actions`, Home, dream detail, coach views | E2E 2–3 (add + complete), API test (status transitions, privacy), manual (edit, set aside, restore, delete) |
 | No punitive mechanics | No due dates / overdue; "Set aside" wording; restore/reopen | Design review |
@@ -106,7 +106,7 @@ Run everything: `npm run typecheck && npm run test:api && npm run test:e2e`.
 | CARE and dream-progress changes | Trajectories with noise, dips and recoveries |
 | Active, completed, archived actions | ~200 actions across states |
 | Self check-ins between sessions | ~170 check-ins |
-| Public and private ratings; public ratings with private notes; private actions and journal entries | ~150–175 private rows incl. personal guaranteed examples for Alicia, Darnell, Grace |
+| Public and private ratings; public ratings with private notes; private actions and journal entries | ~140 private rows incl. personal guaranteed examples for Alicia, Darnell, Grace |
 | Trend charts with enough history | 9 months |
 | Aggregated Director metrics | Yes |
 

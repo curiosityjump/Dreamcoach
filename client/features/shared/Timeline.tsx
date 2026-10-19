@@ -18,6 +18,7 @@ import { staffDreamerPath } from '@/app/routes';
 import { Button, CategoryChip, Chip, ConfirmDialog, Dropdown, EmptyState, PrivacyToggle, PrivateChip, SourceChip, TextArea } from '@/components/ui';
 import { IconArchive, IconCheck, IconClock, IconEdit, IconInfo, IconLock, IconMessage, IconMore, IconPen, IconPlus, IconStar, IconTrash, IconUnlock } from '@/components/icons';
 import { dayHeading, dayKey, firstName, fmtDateTime, fmtTime } from '@/lib/format';
+import { CoveredDraft, useKeptDraft } from '@/features/dreamer/drafts';
 
 export type TimelineMode = 'dreamer' | 'staff';
 type DreamRef = Pick<Dream, 'id' | 'title' | 'slot'>;
@@ -166,6 +167,9 @@ function NoteBlock({ note, mode, parentPrivate, parent }: { note: RatingEntry['n
   );
 }
 
+/** Who recorded a session value ("Session · Maya Thompson"); one whose session was later removed is just "Coaching session". */
+const coachNameOf = (e: RatingEntry | ProgressEntry) => (e.source === 'session' && e.sessionId != null ? e.recordedBy.name : undefined);
+
 function RatingRow({ entry: r, mode, compact, showDate }: { entry: RatingEntry } & RowCtx) {
   const m = CATEGORY_META[r.category];
   const isDreamer = mode === 'dreamer';
@@ -173,7 +177,7 @@ function RatingRow({ entry: r, mode, compact, showDate }: { entry: RatingEntry }
     <Row kind="rating" dot={<span className="dj-tl-swatch" />} dotStyle={{ '--dj-color': m.color, '--dj-tint': m.tint } as CSSProperties}>
       <div className="dj-tl-head">
         <span className="dj-tl-text">Rated <b>{m.label}</b> <span className="dj-tl-value tnum" data-testid="timeline-rating-value">{r.value}</span></span>
-        <SourceChip source={r.source} coachName={!compact && r.source === 'session' ? r.recordedBy.name : undefined} />
+        <SourceChip source={r.source} coachName={!compact ? coachNameOf(r) : undefined} />
         {isDreamer && r.isPrivate && <PrivateChip compact={compact} />}
         <span className="dj-tl-end">
           <When at={r.occurredAt} showDate={showDate} />
@@ -192,7 +196,7 @@ function ProgressRow({ entry: p, dreamTitle, mode, compact, showDate }: { entry:
     <Row kind="progress" dot={<IconStar />} dotClass="dj-dot-gold">
       <div className="dj-tl-head">
         <span className="dj-tl-text">Updated {title} to <span className="dj-tl-value tnum">{p.value}%</span></span>
-        <SourceChip source={p.source} coachName={!compact && p.source === 'session' ? p.recordedBy.name : undefined} />
+        <SourceChip source={p.source} coachName={!compact ? coachNameOf(p) : undefined} />
         {isDreamer && p.isPrivate && <PrivateChip compact={compact} />}
         <span className="dj-tl-end"><When at={p.occurredAt} showDate={showDate} /></span>
       </div>
@@ -313,13 +317,18 @@ export interface JournalEntryCardProps {
 
 const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
 
+/** What the inline editor holds (kept by a dreamer page through a list reload; see `useKeptDraft`). */
+type JournalDraft = { body: string; isPrivate: boolean; dreamId: number | null; category: RatingCategory | null };
+const journalDraftPrivate = (d: JournalDraft) => d.isPrivate;
+
 /** One reflection: body, tags (dream/category), source, privacy chip; in dreamer mode: edit, toggle privacy, delete. */
 export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, compact, dateFormat = 'full' }: JournalEntryCardProps) {
   const { auth } = useAuth();
   const { toast } = useToast();
   const update = useUpdateJournal(dreamerRef);
   const remove = useDeleteJournal(dreamerRef);
-  const [editing, setEditing] = useState(false);
+  const { draft, setDraft, patchDraft, covered } = useKeptDraft<JournalDraft>(`journal-${entry.id}`, journalDraftPrivate);
+  const editing = draft !== null;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isDreamer = mode === 'dreamer';
 
@@ -364,11 +373,13 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
   const onSave = (changes: { body?: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null }) => {
     const turningPrivate = changes.isPrivate === true && !shown.isPrivate;
     const message = turningPrivate ? (auth?.privateUnlocked ? 'Saved as private — only you can see this.' : PRIVATE_HIDDEN_MSG) : changes.isPrivate === false && shown.isPrivate ? 'Saved and shared with your coach.' : 'Saved.';
-    patch(changes, message, turningPrivate ? 'private' : 'success', () => setEditing(false));
+    patch(changes, message, turningPrivate ? 'private' : 'success', () => setDraft(null));
   };
 
+  // A dreamer's note on a value their coach recorded is listed when it was written, so it shows that time too.
+  const writtenAt = shown.sessionId != null && (shown.ratingId != null || shown.progressId != null) && shown.author.role === 'dreamer' ? shown.createdAt : shown.occurredAt;
   const when = !hideDate && (
-    <time className="dj-entry-when" dateTime={shown.occurredAt} data-testid="journal-entry-when">{dateFormat === 'time' ? fmtTime(shown.occurredAt) : fmtDateTime(shown.occurredAt)}</time>
+    <time className="dj-entry-when" dateTime={writtenAt} data-testid="journal-entry-when">{dateFormat === 'time' ? fmtTime(writtenAt) : fmtDateTime(writtenAt)}</time>
   );
 
   return (
@@ -381,7 +392,7 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
     >
       <div className="dj-entry-main">
         {editing ? (
-          <JournalEditForm entry={shown} dreams={dreams} attached={attached} privateParent={privateWithParent ? parentNoun : null} pending={update.isPending} onSave={onSave} onCancel={() => setEditing(false)} />
+          <JournalEditForm entry={shown} draft={draft} onChange={patchDraft} covered={covered} dreams={dreams} attached={attached} privateParent={privateWithParent ? parentNoun : null} pending={update.isPending} onSave={onSave} onCancel={() => setDraft(null)} />
         ) : (
           <>
             <div className="dj-entry-body" data-testid="journal-entry-body">{shown.body}</div>
@@ -412,7 +423,7 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
               </Button>
             )}
           >
-            <button type="button" className="menu-item" onClick={() => setEditing(true)} data-testid="journal-entry-edit"><IconEdit /> Edit</button>
+            <button type="button" className="menu-item" onClick={() => setDraft({ body: shown.body, isPrivate: shown.isPrivate, dreamId: shown.dreamId, category: shown.category })} data-testid="journal-entry-edit"><IconEdit /> Edit</button>
             {!privateWithParent && (shown.isPrivate
               ? <button type="button" className="menu-item" onClick={share} data-testid="journal-entry-share"><IconUnlock /> Share with coach</button>
               : <button type="button" className="menu-item" onClick={makePrivate} data-testid="journal-entry-make-private"><IconLock /> Make private</button>)}
@@ -444,8 +455,12 @@ export function JournalEntryCard({ entry, dreamerRef, mode, dreams, hideDate, co
 
 /* ---------- Inline edit form ---------- */
 
-function JournalEditForm({ entry, dreams, attached, privateParent, pending, onSave, onCancel }: {
+function JournalEditForm({ entry, draft, onChange, covered, dreams, attached, privateParent, pending, onSave, onCancel }: {
   entry: JournalEntry;
+  draft: JournalDraft;
+  onChange: (patch: Partial<JournalDraft>) => void;
+  /** The draft was private when private entries went out of view: it waits, covered, until they're shown again. */
+  covered: boolean;
   dreams?: DreamRef[];
   /** Notes attached to a rating/progress entry keep their context; only body and privacy can change. */
   attached: boolean;
@@ -455,10 +470,11 @@ function JournalEditForm({ entry, dreams, attached, privateParent, pending, onSa
   onSave: (changes: { body?: string; isPrivate?: boolean; dreamId?: number | null; category?: RatingCategory | null }) => void;
   onCancel: () => void;
 }) {
-  const [body, setBody] = useState(entry.body);
-  const [isPrivate, setIsPrivate] = useState(entry.isPrivate);
-  const [dreamId, setDreamId] = useState<number | null>(entry.dreamId);
-  const [category, setCategory] = useState<RatingCategory | null>(entry.category);
+  const { body, isPrivate, dreamId, category } = draft;
+  const setBody = (v: string) => onChange({ body: v });
+  const setIsPrivate = (v: boolean) => onChange({ isPrivate: v });
+  const setDreamId = (v: number | null) => onChange({ dreamId: v });
+  const setCategory = (v: RatingCategory | null) => onChange({ category: v });
   const [error, setError] = useState<string | null>(null);
 
   const trimmed = body.trim();
@@ -478,25 +494,29 @@ function JournalEditForm({ entry, dreams, attached, privateParent, pending, onSa
     onSave(changes);
   };
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
+    // Keys pressed in a dialog opened from here (showing private entries) aren't this form's.
+    if (!e.currentTarget.contains(e.target as Node)) return;
     if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
   };
 
   return (
     <form className="dj-edit" onSubmit={submit} onKeyDown={onKey} data-testid="journal-entry-edit-form" aria-busy={pending || undefined}>
-      <TextArea
-        value={body}
-        onChange={(e) => { setBody(e.target.value); if (error) setError(null); }}
-        autoFocus
-        onFocus={(e) => { const el = e.currentTarget; el.setSelectionRange(el.value.length, el.value.length); }}
-        rows={3}
-        maxLength={8000}
-        disabled={pending}
-        aria-label="Edit reflection"
-        data-testid="journal-entry-edit-body"
-      />
+      {covered ? <CoveredDraft testId="journal-entry-edit-covered" /> : (
+        <TextArea
+          value={body}
+          onChange={(e) => { setBody(e.target.value); if (error) setError(null); }}
+          autoFocus
+          onFocus={(e) => { const el = e.currentTarget; el.setSelectionRange(el.value.length, el.value.length); }}
+          rows={3}
+          maxLength={8000}
+          disabled={pending}
+          aria-label="Edit reflection"
+          data-testid="journal-entry-edit-body"
+        />
+      )}
       <div className="dj-edit-options">
-        {!attached && (
+        {!attached && !covered && (
           <>
             <select
               className={`dj-select dj-select-dream${dreamId != null ? ' is-set' : ''}`}
@@ -524,7 +544,7 @@ function JournalEditForm({ entry, dreams, attached, privateParent, pending, onSa
           </>
         )}
         {/* Under a private parent: a note whose own switch is shared follows it; one marked private stays private either way. */}
-        {privateParent
+        {covered ? null : privateParent
           ? entry.isPrivate
             ? <Chip className="chip-private" title={`It stays private if you share the ${privateParent}; its own switch comes back then.`} data-testid="journal-entry-edit-privacy-with"><IconLock /> Private note</Chip>
             : <Chip className="chip-private" title={`Share the ${privateParent} to share this note too.`} data-testid="journal-entry-edit-privacy-with"><IconLock /> Private with its {privateParent}</Chip>

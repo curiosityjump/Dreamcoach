@@ -92,6 +92,9 @@
 .dir-table th.num .dir-th { align-items: flex-end; }
 .dir-th-sub { font-size: 10.5px; font-weight: 500; text-transform: none; letter-spacing: 0.01em; color: var(--muted); }
 .dir-table th.sortable .dir-th { flex-direction: row; align-items: center; gap: 4px; }
+/* A sortable header's label and its small second line stack beside the sort arrow. */
+.dir-th-label { display: inline-flex; flex-direction: column; gap: 1px; }
+.dir-table th.num .dir-th-label { align-items: flex-end; }
 .dir-sort-btn { width: 100%; min-height: 28px; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer; }
 .dir-sort-btn:hover { color: var(--ink); }
 .dir-table th.num .dir-sort-btn { justify-content: flex-end; }
@@ -111,7 +114,8 @@
 .dir-person-about { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .dir-table .dir-person { gap: 10px; }
 .dir-table .dir-person-name { white-space: nowrap; }
-.dir-table .dir-person-about { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Role and tenure wrap to a second line in the narrow name column; anything longer is clamped (the full text is its title). */
+.dir-table .dir-person-about { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 
 .dir-care { display: inline-flex; align-items: center; gap: 10px; }
 .dir-care-avg { font-family: var(--font-display); font-size: 20px; font-weight: 500; line-height: 1; color: var(--ink); min-width: 28px; }
@@ -224,6 +228,9 @@
 .dir-table { font-size: 13.5px; }
 .dir-table th, .dir-table td { padding-left: 8px; padding-right: 8px; }
 .dir-dreamers-table .dir-dreams-cell { width: 128px; }
+/* Room for a role and tenure on two lines; the Change header's second line wraps rather than widening its column. */
+.dir-dreamers-table td:first-child { min-width: 200px; }
+.dir-dreamers-table th.num .dir-th-label { max-width: 8em; }
 .dir-dreamers-table .dir-dreams, .dir-caseload-table .dir-dreams { min-width: 112px; }
 .dir-dreamers-table .dir-care-avg { font-size: 18px; }
 .dir-sticky-col { width: 48px; }

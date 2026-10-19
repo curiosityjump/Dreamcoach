@@ -21,12 +21,13 @@ import { DirectorTrendGrid } from './DirectorCharts';
 function CoachHeader({ summary, isSelf }: { summary: CoachSummary; isSelf: boolean }) {
   const { coach } = summary;
   const isDirector = coach.role === 'director';
+  const hasCaseload = summary.dreamers > 0;
   return (
     <div className="dir-coach-head" data-testid="director-coach-header">
       <div className="dir-coach-head-main">
         <Avatar initials={coach.initials} size="lg" tone={isDirector ? 'plum' : 'gold'} />
         <div className="dir-coach-head-text">
-          <div className="eyebrow">{isDirector ? 'Director · coaching directly' : 'Dream Coach'}</div>
+          <div className="eyebrow">{isDirector ? (hasCaseload ? 'Director · coaching directly' : 'Director') : 'Dream Coach'}</div>
           <h1 className="dir-coach-name">
             {coach.name}
             {isSelf && <Chip className="chip-muted">You</Chip>}
@@ -38,8 +39,9 @@ function CoachHeader({ summary, isSelf }: { summary: CoachSummary; isSelf: boole
         </div>
       </div>
       <div className="dir-coach-head-actions">
-        <Link to={`/director/dreamers?coach=${coach.id}`} className="btn btn-secondary" data-testid="director-coach-dreamers-link"><IconUsers /> Caseload in All dreamers</Link>
-        {isSelf && summary.dreamers > 0 && <Link to="/coach" className="btn btn-primary" data-testid="director-coach-my-coaching"><IconGrid /> My coaching</Link>}
+        {/* With nobody assigned there is no caseload to filter by; the empty caseload card links to All dreamers instead. */}
+        {hasCaseload && <Link to={`/director/dreamers?coach=${coach.id}`} className="btn btn-secondary" data-testid="director-coach-dreamers-link"><IconUsers /> Caseload in All dreamers</Link>}
+        {isSelf && hasCaseload && <Link to="/coach" className="btn btn-primary" data-testid="director-coach-my-coaching"><IconGrid /> My coaching</Link>}
       </div>
     </div>
   );
@@ -177,8 +179,17 @@ export function DirectorCoachPage() {
 
       <section className="dir-section" aria-labelledby="dir-coach-trends-heading">
         <div className="dir-section-head">
-          <h2 id="dir-coach-trends-heading">Trends for {first}’s dreamers</h2>
-          <span className="dir-section-sub">Month by month across this caseload. Coaching sessions and self check-ins stay side by side so both kinds of activity are visible.</span>
+          {summary.dreamers > 0 ? (
+            <>
+              <h2 id="dir-coach-trends-heading">Trends for {first}’s dreamers</h2>
+              <span className="dir-section-sub">Month by month across this caseload. Coaching sessions and self check-ins stay side by side so both kinds of activity are visible.</span>
+            </>
+          ) : (
+            <>
+              <h2 id="dir-coach-trends-heading">Trends</h2>
+              <span className="dir-section-sub">The sessions {first} ran, month by month. The other charts follow the dreamers assigned to {first}.</span>
+            </>
+          )}
         </div>
         <DirectorTrendGrid months={months} scope="caseload" sessionsBy={first} caseloadSize={summary.dreamers} testPrefix="director-coach" />
       </section>

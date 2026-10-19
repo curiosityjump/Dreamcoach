@@ -119,6 +119,8 @@ a.dj-chip-dream:hover { text-decoration: none; border-color: var(--border-strong
 .dj-select.is-set { color: var(--ink); background-color: var(--dj-tint, var(--surface-3)); border-color: var(--dj-color, var(--border-strong)); }
 .dj-select-dream { max-width: 240px; }
 .dj-select-dream.is-set { background-color: var(--gold-soft); border-color: var(--gold); }
+/* Touch: a select can't take an invisible ::after hit area, so it grows to the 40px the other controls reach. */
+@media (pointer: coarse) { .dj-select { min-height: 40px; } }
 
 /* ---------- Page (/journal) ---------- */
 .dj-page .page-header { margin-bottom: 18px; }
@@ -166,6 +168,11 @@ a.dj-chip-dream:hover { text-decoration: none; border-color: var(--border-strong
   background: transparent; color: var(--accent); font-size: 13px; font-weight: 500; white-space: nowrap;
 }
 .dj-text-btn:hover { background: var(--accent-soft); }
+/* Touch: "Clear" and a timeline row's dream link get the kit's invisible 40px hit area. */
+@media (pointer: coarse) {
+  .dj-text-btn, .dj-tl-dream { position: relative; }
+  .dj-text-btn::after, .dj-tl-dream::after { content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 40px); height: max(100%, 40px); transform: translate(-50%, -50%); }
+}
 
 .dj-day { margin-bottom: 22px; }
 .dj-day:last-child { margin-bottom: 0; }
