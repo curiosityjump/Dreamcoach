@@ -162,8 +162,10 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
   };
 
   const onChange = (raw: string) => {
-    // Anything but a digit ("-", "+", "e", ",", a space) is ignored as it's typed.
+    // Anything but a digit ("-", "+", "e", ",", a space) is ignored as it's typed. A lone non-digit that
+    // replaced the selected value (if beforeinput didn't stop it) leaves the value alone rather than clearing it.
     const digits = raw.replace(/\D/g, '');
+    if (raw !== '' && digits === '') return;
     setText(digits);
     // An emptied cell is usually about to get a new number, so a pause never deletes the value (clearing
     // commits on blur or Enter), and a number out of range is never sent.
@@ -221,6 +223,8 @@ function GridNumberInput({ value, min, max, onCommit, label, suffix, testId, cel
         // Every click selects the whole value, so the next digits replace it rather than being added to it.
         onMouseUp={(e) => { e.preventDefault(); e.currentTarget.select(); }}
         onBlur={onBlur}
+        // Stop a non-digit before the browser applies it, so it can't replace the selected value.
+        onBeforeInput={(e) => { const typed = (e.nativeEvent as InputEvent).data; if (typed && /\D/.test(typed)) e.preventDefault(); }}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
       />

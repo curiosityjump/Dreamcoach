@@ -101,6 +101,7 @@ function BaselineDelta({ value, base, suffix = '' }: { value: number; base: { va
 
 function OverviewTab({ id, overview }: { id: number; overview: DreamerOverview }) {
   const { snapshot, recentActivity } = overview;
+  const listState = useLocation().state as DreamerListState | null;
   const sessions = useSessions(id);
   const allSessions = sessions.data ?? [];
   const completed = useMemo(() => (sessions.data ?? []).filter((s) => s.status === 'completed'), [sessions.data]);
@@ -215,7 +216,7 @@ function OverviewTab({ id, overview }: { id: number; overview: DreamerOverview }
           <CardHead
             title="Recent shared activity"
             sub="Ratings, progress updates, reflections, actions and sessions"
-            actions={<Link to={staffDreamerPath(id, 'reflections')} className="cv-link" data-testid="overview-all-reflections">All reflections</Link>}
+            actions={<Link to={staffDreamerPath(id, 'reflections')} state={listState} className="cv-link" data-testid="overview-all-reflections">All reflections</Link>}
           />
           <div data-testid="overview-activity">
             <TimelineFeed items={recentActivity} dreamerRef={id} mode="staff" compact limit={10} dreams={snapshot.dreams} emptyTitle="Nothing yet" emptyBody="Ratings, progress updates, reflections and actions will appear here as they happen." />
@@ -699,7 +700,7 @@ export function StaffDreamerPage() {
 
       <nav className="tabs cv-tabs" aria-label="Dreamer sections">
         {TABS.map((t) => (
-          <Link key={t} to={staffDreamerPath(id, t === 'overview' ? undefined : t)} className={`tab${t === tab ? ' active' : ''}`} aria-current={t === tab ? 'page' : undefined} data-testid={`staff-tab-${t}`}>
+          <Link key={t} to={staffDreamerPath(id, t === 'overview' ? undefined : t)} state={listState} className={`tab${t === tab ? ' active' : ''}`} aria-current={t === tab ? 'page' : undefined} data-testid={`staff-tab-${t}`}>
             {TAB_LABEL[t]}
           </Link>
         ))}
