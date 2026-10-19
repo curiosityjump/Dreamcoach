@@ -41,25 +41,15 @@ function assertOwnDream(db: DB, scope: Scope, dreamId: number | null | undefined
   if (!db.prepare('SELECT 1 FROM dreams WHERE id = ? AND dreamer_id = ?').get(dreamId, scope.dreamerId)) throw new HttpError(400, 'Unknown dream.', 'invalid');
 }
 
-function markAchieved(db: DB, dreamId: number, value: number, at: string) {
-  const dream = db.prepare('SELECT achieved_at FROM dreams WHERE id = ?').get(dreamId) as { achieved_at: string | null };
-  if (value >= 100 && !dream.achieved_at) db.prepare('UPDATE dreams SET achieved_at = ?, updated_at = ? WHERE id = ?').run(at, at, dreamId);
-  if (value < 100 && dream.achieved_at) {
-    // Only un-achieve if there is no other visible 100% entry.
-    const other = db.prepare('SELECT 1 FROM dream_progress WHERE dream_id = ? AND value >= 100 AND is_private = 0 LIMIT 1').get(dreamId);
-    if (!other) db.prepare('UPDATE dreams SET achieved_at = NULL, updated_at = ? WHERE id = ?').run(at, dreamId);
-  }
-}
-
-/** Dreams reach "achieved" based on shared (non-private) progress so staff views stay consistent. */
+/**
+ * "Achieved" is a fact about the shared history (DECISIONS #10): any shared progress entry at 100%, dated by the
+ * earliest one. It is derived from the rows, never from the latest write, and it is a derived badge rather than
+ * an edit of the dream, so it leaves updated_at alone and is written only when it changes. Hiding and re-sharing
+ * an entry therefore leaves the dream exactly as it was.
+ */
 function recomputeAchieved(db: DB, dreamId: number) {
-  const at = nowIso();
-  const latest = db
-    .prepare('SELECT value, occurred_at FROM dream_progress WHERE dream_id = ? AND is_private = 0 ORDER BY occurred_at DESC, created_at DESC, id DESC LIMIT 1')
-    .get(dreamId) as { value: number; occurred_at: string } | undefined;
-  if (latest) markAchieved(db, dreamId, latest.value, latest.occurred_at);
-  // Touch the dream only when the badge actually changes, so a private-only write leaves no trace.
-  else db.prepare('UPDATE dreams SET achieved_at = NULL, updated_at = ? WHERE id = ? AND achieved_at IS NOT NULL').run(at, dreamId);
+  const { at } = db.prepare('SELECT MIN(occurred_at) AS at FROM dream_progress WHERE dream_id = ? AND value >= 100 AND is_private = 0').get(dreamId) as { at: string | null };
+  db.prepare('UPDATE dreams SET achieved_at = ? WHERE id = ? AND achieved_at IS NOT ?').run(at, dreamId, at);
 }
 
 /* ---------- Dreams ---------- */
@@ -139,16 +129,20 @@ function upsertAttachedNote(
 
 /**
  * Keeps the note of a rating/progress row about to be deleted, as a standalone journal entry with the
- * same words, privacy, tags, date and author. Used for staff deletes (staff writes never destroy a
+ * same words, privacy, tags and author. Used for staff deletes (staff writes never destroy a
  * dreamer's note) and, with `onlyPrivate`, for the dreamer's deletes in hidden mode (a private note they
- * can't see is never removed blindly).
+ * can't see is never removed blindly). It keeps the date it already counted on: a note on a session value
+ * took the session's date but counted when it was written, so it now stands on that moment (created_at),
+ * and clearing a value never moves the dreamer's activity back in time.
  */
 function detachNote(db: DB, parent: { ratingId: number; category: RatingCategory } | { progressId: number; dreamId: number }, onlyPrivate = false) {
   const p = 'ratingId' in parent ? { col: 'rating_id', id: parent.ratingId, category: parent.category, dreamId: null } : { col: 'progress_id', id: parent.progressId, category: null, dreamId: parent.dreamId };
   const byDreamer = q.WRITTEN_BY_DREAMER('journal_entries');
   db.prepare(
     // The dreamer's own words now stand alone as one of their reflections, no longer part of the session.
+    // (SQLite evaluates every SET expression against the row as it was, so ACTIVITY_AT reads it still attached.)
     `UPDATE journal_entries SET ${p.col} = NULL, check_in_id = NULL, category = COALESCE(category, ?), dream_id = COALESCE(dream_id, ?),
+       occurred_at = ${q.ACTIVITY_AT('journal_entries')},
        source = CASE WHEN ${byDreamer} THEN 'self' ELSE source END,
        session_id = CASE WHEN ${byDreamer} THEN NULL ELSE session_id END
      WHERE ${p.col} = ?${onlyPrivate ? ' AND is_private = 1' : ''}`,
@@ -542,6 +536,9 @@ export function updateSession(
       db.prepare('UPDATE ratings SET occurred_at = ? WHERE session_id = ?').run(occurredAt, sessionId);
       db.prepare('UPDATE dream_progress SET occurred_at = ? WHERE session_id = ?').run(occurredAt, sessionId);
       db.prepare('UPDATE journal_entries SET occurred_at = ? WHERE session_id = ? AND (rating_id IS NOT NULL OR progress_id IS NOT NULL)').run(occurredAt, sessionId);
+      // A dream achieved in this session is dated with it.
+      const moved = db.prepare('SELECT DISTINCT dream_id FROM dream_progress WHERE session_id = ?').all(sessionId) as { dream_id: number }[];
+      for (const { dream_id } of moved) recomputeAchieved(db, dream_id);
     }
   })();
   return q.getSession(db, scope, sessionId)!;

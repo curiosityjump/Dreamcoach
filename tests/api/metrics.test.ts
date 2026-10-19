@@ -197,6 +197,32 @@ test('a note on a session value is a reflection dated when it was written, for L
   assert.deepEqual(await snap(), before);
 });
 
+test('a note kept when staff clear its value still counts when it was written', async () => {
+  const coach = await staff('maya@dreamcoach.demo');
+  const director = await staff('director@dreamcoach.demo');
+  const dreamer = new Client(s.base);
+  const auth = await dreamer.login('tamsin@dreamcoach.demo');
+  const id = auth.dreamerId;
+  const activity = async () => {
+    const snap = (await coach.get(`/dreamers/${id}/overview`)).body.snapshot;
+    return { last: snap.lastSelfActivity, journal30: snap.journalEntries30d, engaged: (await director.get('/director/overview')).body.totals.engagedBetweenSessions30d };
+  };
+  const old = (await dreamer.get('/dreamers/me/ratings?category=energy')).body.find((r: any) => r.source === 'session' && !r.note && r.occurredAt < minutesAgo(40 * 24 * 60));
+  assert.ok(old);
+  const body = 'Reading this back now, that month was harder than I said.';
+  const noted = await dreamer.patch(`/dreamers/me/ratings/${old.id}`, { note: body });
+  const before = await activity();
+  assert.deepEqual(before.last, { at: noted.body.note.createdAt, kind: 'reflection' });
+  // The coach clears that old cell: the note becomes a standalone reflection, dated when it was written.
+  assert.equal((await coach.put(`/dreamers/${id}/sessions/${old.sessionId}/ratings`, { category: 'energy', value: null })).status, 200);
+  assert.deepEqual(await activity(), before, 'Last self activity, Notes & reflections and Engaged stay where they were');
+  const kept = (await dreamer.get('/dreamers/me/journal?standalone=1')).body.find((j: any) => j.body === body);
+  assert.ok(kept && kept.ratingId === null && kept.sessionId === null);
+  assert.equal(kept.occurredAt, kept.createdAt);
+  await coach.put(`/dreamers/${id}/sessions/${old.sessionId}/ratings`, { category: 'energy', value: old.value });
+  await dreamer.del(`/dreamers/me/journal/${kept.id}`);
+});
+
 test('the team overview counts dreamers with no coach', async () => {
   const director = await staff('director@dreamcoach.demo');
   const overview = async () => (await director.get('/director/overview')).body;

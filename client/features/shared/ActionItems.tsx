@@ -44,6 +44,18 @@ export interface ActionListProps {
   groupOf?: (action: ActionItem) => ActionStatus;
   /** With filter 'all': group headings other than the status names. */
   groupLabels?: Partial<Record<ActionStatus, string>>;
+  /** Told when an inline edit gets changes that aren't saved yet (and with null once they're saved or dropped). */
+  onEditChange?: (actionId: number, edit: OpenActionEdit | null) => void;
+}
+
+/** An inline edit with unsaved changes, so a page can ask about it before it would be lost (e.g. completing a session). */
+export interface OpenActionEdit {
+  /** The action's title before the edit. */
+  title: string;
+  /** Saves the edit; resolves false if it didn't save (the form stays open and says why). */
+  save: () => Promise<boolean>;
+  /** Closes the form without saving. */
+  discard: () => void;
 }
 
 export interface ActionComposerProps {
@@ -65,10 +77,14 @@ export interface ActionComposerProps {
 }
 
 export interface ActionComposerHandle {
-  /** Adds what's typed; resolves false if the save failed (the text and the error stay in the form). */
+  /** Adds what's typed; resolves false if the save failed (it's then listed under the form as not added). */
   submit: () => Promise<boolean>;
   /** Clears the form. */
   discard: () => void;
+  /** An action is on its way or wasn't added. */
+  hasUnsaved: () => boolean;
+  /** Waits for every action on its way, then tries again any that weren't added; resolves with the titles still not added. */
+  settle: () => Promise<string[]>;
 }
 
 /* ---------- Shared helpers ---------- */
@@ -154,6 +170,9 @@ function LinkSelects({ dreams, labels, dreamId, category, onDreamId, onCategory,
 
 /* ---------- Composer ---------- */
 
+type ComposerDraft = { title: string; details: string; showDetails: boolean; dreamId: number | null; category: CareCategory | null; isPrivate: boolean };
+type NotAdded = { key: number; draft: ComposerDraft; error: string };
+
 /** The "Add an action" form (title, optional details, dream/category link, privacy in dreamer mode). */
 export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDreamId, defaultCategory, onDone, onCancel, autoFocus, onDraftChange, ref }: ActionComposerProps) {
   const { auth } = useAuth();
@@ -170,9 +189,15 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
   const [dreamId, setDreamId] = useState<number | null>(defaultDreamId ?? null);
   const [category, setCategory] = useState<CareCategory | null>(defaultCategory ?? null);
   const [isPrivate, setIsPrivate] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   // Saves still on their way: several can be, since the next action can be typed straight away.
   const [saving, setSaving] = useState(0);
+  const inflight = useRef(new Set<Promise<boolean>>());
+  // Actions whose save failed. The next one is often typed by then, so each keeps its words here, says
+  // why, and can be tried again or dropped.
+  const [notAdded, setNotAddedState] = useState<NotAdded[]>([]);
+  const notAddedRef = useRef<NotAdded[]>([]);
+  const setNotAdded = (update: (list: NotAdded[]) => NotAdded[]) => { notAddedRef.current = update(notAddedRef.current); setNotAddedState(notAddedRef.current); };
+  const failures = useRef(0);
   // In a session the new row appears right under the composer, so a toast (over the next field the coach
   // types into) would only get in the way; screen readers hear it from here instead.
   const quiet = mode === 'staff' && sessionId != null;
@@ -185,7 +210,7 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
   onDraftRef.current = onDraftChange;
   useEffect(() => { onDraftRef.current?.(title); }, [title]);
 
-  const fill = (d: { title: string; details: string; showDetails: boolean; dreamId: number | null; category: CareCategory | null; isPrivate: boolean }) => {
+  const fill = (d: ComposerDraft) => {
     setTitle(d.title);
     setDetails(d.details);
     setShowDetails(d.showDetails);
@@ -196,40 +221,49 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
 
   const clear = () => fill({ title: '', details: '', showDetails: false, dreamId: defaultDreamId ?? null, category: defaultCategory ?? null, isPrivate: false });
 
-  /** Saves what's typed; resolves whether it went through. */
-  const save = (): Promise<boolean> => {
-    if (!canSubmit) return Promise.resolve(true);
-    // The form clears at once, so whatever is typed next starts the next action instead of being lost
-    // while this one saves. If the save fails, the text comes back unless something new is there by then.
-    const draft = { title, details, showDetails, dreamId, category, isPrivate };
-    setError(null);
-    clear();
+  /** Saves one action; resolves whether it went through. If not, it's kept as not added. */
+  const send = (draft: ComposerDraft): Promise<boolean> => {
+    const name = draft.title.trim();
     setSaving((n) => n + 1);
-    return create
+    const p = create
       .mutateAsync({
-        title: trimmed,
-        details: details.trim() || undefined,
-        dreamId,
-        category,
+        title: name,
+        details: draft.details.trim() || undefined,
+        dreamId: draft.dreamId,
+        category: draft.category,
         sessionId: sessionId ?? undefined,
-        ...(mode === 'dreamer' ? { isPrivate } : {}),
+        ...(mode === 'dreamer' ? { isPrivate: draft.isPrivate } : {}),
       })
       .then(
         (action) => {
-          if (mode === 'dreamer' && isPrivate) toast(auth?.privateUnlocked ? 'Added as a private action — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
-          else if (quiet) setAnnounce(`Added “${trimmed}”.`);
+          if (mode === 'dreamer' && draft.isPrivate) toast(auth?.privateUnlocked ? 'Added as a private action — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
+          else if (quiet) setAnnounce(`Added “${name}”.`);
           else toast('Action added.');
           onDone?.(action);
           return true;
         },
         (err) => {
-          setError(errorMessage(err));
-          if (!titleRef.current?.value) fill(draft);
+          setNotAdded((list) => [...list, { key: ++failures.current, draft, error: errorMessage(err) }]);
           return false;
         },
       )
-      .finally(() => setSaving((n) => n - 1));
+      .finally(() => { inflight.current.delete(p); setSaving((n) => n - 1); });
+    inflight.current.add(p);
+    return p;
   };
+
+  /** Saves what's typed; resolves whether it went through. */
+  const save = (): Promise<boolean> => {
+    if (!canSubmit) return Promise.resolve(true);
+    // The form clears at once, so whatever is typed next starts the next action instead of being lost
+    // while this one saves.
+    const draft = { title, details, showDetails, dreamId, category, isPrivate };
+    clear();
+    return send(draft);
+  };
+
+  const retry = (item: NotAdded) => { setNotAdded((list) => list.filter((x) => x !== item)); return send(item.draft); };
+  const drop = (item: NotAdded) => setNotAdded((list) => list.filter((x) => x !== item));
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -239,7 +273,16 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
     titleRef.current?.focus();
   };
 
-  useImperativeHandle(ref, () => ({ submit: save, discard: () => { setError(null); clear(); } }));
+  useImperativeHandle(ref, () => ({
+    submit: save,
+    discard: clear,
+    hasUnsaved: () => inflight.current.size > 0 || notAddedRef.current.length > 0,
+    settle: async () => {
+      await Promise.all([...inflight.current]);
+      await Promise.all(notAddedRef.current.map(retry));
+      return notAddedRef.current.map((x) => x.draft.title.trim());
+    },
+  }));
 
   const onDetailsKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
@@ -297,9 +340,17 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
           </Button>
         )}
       </div>
-      {error && (
-        <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>
-      )}
+      {notAdded.map((item) => (
+        <div key={item.key} className="callout callout-muted da-not-added" role="alert" data-testid="action-not-added">
+          <IconInfo />
+          {/* A private one keeps its words out of sight while private entries are hidden; Retry still adds it as private. */}
+          <span className="da-not-added-text">Not added: {mode === 'dreamer' && item.draft.isPrivate && !auth?.privateUnlocked ? 'a private action' : <b>“{item.draft.title.trim()}”</b>} — {item.error}</span>
+          <span className="da-not-added-btns">
+            <Button type="button" variant="secondary" size="sm" onClick={() => void retry(item)} data-testid="action-not-added-retry">Retry</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => drop(item)} data-testid="action-not-added-discard">Discard</Button>
+          </span>
+        </div>
+      ))}
       {quiet && <span className="sr-only" role="status">{announce}</span>}
     </form>
   );
@@ -308,7 +359,7 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
 /* ---------- List ---------- */
 
 /** Full-featured list: complete/reopen, edit (title, details, dream, category), set aside/restore, privacy (dreamer mode), delete (dreamer mode). */
-export function ActionList({ dreamerRef, actions, dreams, mode, sessionId, filter = 'active', showAdd, compact, emptyTitle, emptyBody, groupOf, groupLabels }: ActionListProps) {
+export function ActionList({ dreamerRef, actions, dreams, mode, sessionId, filter = 'active', showAdd, compact, emptyTitle, emptyBody, groupOf, groupLabels, onEditChange }: ActionListProps) {
   const sorted = useMemo(() => sortDreams(dreams), [dreams]);
   const labels = useDreamLabels(dreamerRef, dreams);
 
@@ -362,7 +413,7 @@ export function ActionList({ dreamerRef, actions, dreams, mode, sessionId, filte
             )}
             <ul className="da-rows">
               {g.items.map((a) => (
-                <ActionRow key={a.id} action={a} dreamerRef={dreamerRef} mode={mode} dreams={sorted} labels={labels} compact={!!compact} onStatusChanged={onStatusChanged} />
+                <ActionRow key={a.id} action={a} dreamerRef={dreamerRef} mode={mode} dreams={sorted} labels={labels} compact={!!compact} onStatusChanged={onStatusChanged} onEditChange={onEditChange} />
               ))}
             </ul>
           </section>
@@ -376,7 +427,7 @@ export function ActionList({ dreamerRef, actions, dreams, mode, sessionId, filte
 
 type RowControl = 'check' | 'menu';
 
-function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatusChanged }: {
+function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatusChanged, onEditChange }: {
   action: ActionItem;
   dreamerRef: DreamerRef;
   mode: ActionMode;
@@ -385,6 +436,7 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatus
   compact: boolean;
   /** A status change went through (from the check or the menu), so the row may move. */
   onStatusChanged: (id: number, control: RowControl) => void;
+  onEditChange?: (actionId: number, edit: OpenActionEdit | null) => void;
 }) {
   const { auth } = useAuth();
   const { toast } = useToast();
@@ -418,6 +470,14 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatus
       onSuccess: () => { toast(message, kind); after?.(); },
       onError: (e) => toast(errorMessage(e), 'error'),
     });
+
+  const saveEdit = (body: EditBody) =>
+    update.mutateAsync({ actionId: action.id, ...body }).then(
+      () => { toast('Saved.'); setEditing(false); return true; },
+      (e: unknown) => { toast(errorMessage(e), 'error'); return false; },
+    );
+  // The page hears about an edit with changes not yet saved, under this action's id.
+  const onEditOpen = useCallback((edit: OpenActionEdit | null) => onEditChange?.(action.id, edit), [onEditChange, action.id]);
 
   const setStatus = (status: ActionStatus, message: string, kind: 'success' | 'info', control: RowControl) =>
     patch({ status }, message, kind, () => onStatusChanged(action.id, control));
@@ -461,7 +521,8 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatus
             labels={labels}
             pending={update.isPending}
             onCancel={() => setEditing(false)}
-            onSave={(body) => patch(body, 'Saved.', 'success', () => setEditing(false))}
+            onSave={saveEdit}
+            onOpenChange={onEditChange ? onEditOpen : undefined}
           />
         ) : (
           <>
@@ -540,13 +601,17 @@ function ActionRow({ action, dreamerRef, mode, dreams, labels, compact, onStatus
 
 /* ---------- Inline edit form ---------- */
 
-function ActionEditForm({ action, dreams, labels, pending, onSave, onCancel }: {
+type EditBody = { title: string; details: string; dreamId: number | null; category: CareCategory | null };
+
+function ActionEditForm({ action, dreams, labels, pending, onSave, onCancel, onOpenChange }: {
   action: ActionItem;
   dreams: DreamRef[];
   labels: Map<number, DreamLabel>;
   pending: boolean;
-  onSave: (body: { title: string; details: string; dreamId: number | null; category: CareCategory | null }) => void;
+  onSave: (body: EditBody) => Promise<boolean>;
   onCancel: () => void;
+  /** Told while the form has changes that aren't saved yet (null once it has none, or closes). */
+  onOpenChange?: (edit: OpenActionEdit | null) => void;
 }) {
   const id = useId();
   const [title, setTitle] = useState(action.title);
@@ -559,12 +624,25 @@ function ActionEditForm({ action, dreams, labels, pending, onSave, onCancel }: {
   const trimmed = title.trim();
   const dirty = trimmed !== action.title || details.trim() !== action.details || dreamId !== action.dreamId || category !== action.category;
   const canSave = trimmed.length > 0 && !pending;
+  const body = (): EditBody => ({ title: trimmed, details: details.trim(), dreamId, category });
+
+  // A page can save or drop an edit it would otherwise lose (e.g. completing a session with this form open).
+  const latest = useRef({ body, onSave, onCancel, hasTitle: trimmed.length > 0 });
+  latest.current = { body, onSave, onCancel, hasTitle: trimmed.length > 0 };
+  useEffect(() => {
+    onOpenChange?.(dirty ? {
+      title: action.title,
+      save: () => (latest.current.hasTitle ? latest.current.onSave(latest.current.body()) : Promise.resolve(false)),
+      discard: () => latest.current.onCancel(),
+    } : null);
+  }, [dirty, onOpenChange, action.title]);
+  useEffect(() => () => onOpenChange?.(null), [onOpenChange]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
     if (!dirty) { onCancel(); return; }
-    onSave({ title: trimmed, details: details.trim(), dreamId, category });
+    void onSave(body());
   };
   const onKey = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key === 'Escape') { e.preventDefault(); onCancel(); }

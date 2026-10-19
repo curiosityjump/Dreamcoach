@@ -258,8 +258,8 @@ function SessionDetail({ sid, sessions, dreams, programName }: { sid: number; se
                 filter="all"
                 compact
                 showAdd={false}
-                emptyTitle="No actions were chosen in this session"
-                emptyBody="Not every conversation needs a to-do. Anything you add later lives under Actions."
+                emptyTitle={open ? 'No actions chosen yet' : 'No actions were chosen in this session'}
+                emptyBody={open ? `Actions you and ${firstName(session.coach.name)} choose today will appear here as they’re added.` : 'Not every conversation needs a to-do. Anything you add later lives under Actions.'}
               />
             )}
           </Card>

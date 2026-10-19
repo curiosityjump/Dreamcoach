@@ -171,12 +171,12 @@ function CaseloadTable({ rows, sort, onSort }: { rows: CaseloadEntry[]; sort: { 
         </thead>
         <tbody>
           {rows.map((e) => (
+            // The whole row opens the dreamer for a mouse; on the keyboard the row's "Open" link does, so each
+            // dreamer is two Tab stops (Open, then the session button), not three.
             <tr
               key={e.dreamer.id}
               className="clickable cv-row"
               onClick={() => nav(staffDreamerPath(e.dreamer.id))}
-              onKeyDown={(ev) => { if (ev.key === 'Enter' && ev.target === ev.currentTarget) nav(staffDreamerPath(e.dreamer.id)); }}
-              tabIndex={0}
               data-testid="caseload-row"
               data-dreamer-id={e.dreamer.id}
             >

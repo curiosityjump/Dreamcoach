@@ -8,7 +8,7 @@ import { Link, useParams } from 'react-router';
 import { useAuth } from '@/auth/AuthContext';
 import { useCreateJournal, useDeleteProgress, useDreamHistory, useDreams, useOverview, useSessions, useUpdateProgress } from '@/api/hooks';
 import { ApiRequestError, errorMessage } from '@/api/client';
-import { Bar, Button, Card, CardHead, ConfirmDialog, Delta, Dropdown, EmptyState, Field, LoadingPage, Modal, PercentInput, PrivacyToggle, PrivateChip, Segmented, SourceChip, TextArea } from '@/components/ui';
+import { Bar, Button, Card, CardHead, ConfirmDialog, Delta, Dropdown, EmptyState, Field, LoadingPage, Modal, PercentInput, PrivacyToggle, PrivateChip, Segmented, Skeleton, SourceChip, TextArea } from '@/components/ui';
 import { IconArrowLeft, IconChevronLeft, IconChevronRight, IconCompass, IconEdit, IconInfo, IconLock, IconMore, IconPen, IconPlus, IconTarget, IconTrash, IconUnlock } from '@/components/icons';
 import { SourceLegend, TrendChart, type TrendPoint } from '@/components/charts';
 import { useToast } from '@/components/toast';
@@ -16,10 +16,15 @@ import { fmtDate, fmtDateTime, firstName, plural, relativeTime } from '@/lib/for
 import { ActionComposer, ActionList } from '@/features/shared/ActionItems';
 import { JournalEntryCard } from '@/features/shared/Timeline';
 import { UnlockDialog } from '@/features/shared/PrivacyControl';
-import type { Dream, DreamHistory, ProgressEntry } from '@shared/types';
+import type { ActionItem, Dream, DreamHistory, JournalEntry, ProgressEntry } from '@shared/types';
 import { DREAM_COLOR, DreamsProgressDialog, privacyToast } from './DreamsProgressDialog';
 import { DreamsEditForm } from './DreamsEditDialog';
 import { AchievedChip, SessionDelta, dreamBaseline } from './HomePage';
+import { CoveredDraft, KeepDrafts, useCovered, useKeptDraft, useLastKnown, useLoadedOnce } from './drafts';
+
+const NO_ENTRIES: ProgressEntry[] = [];
+const NO_ACTIONS: ActionItem[] = [];
+const NO_REFLECTIONS: JournalEntry[] = [];
 
 export function DreamDetailPage() {
   const params = useParams();
@@ -28,6 +33,11 @@ export function DreamDetailPage() {
   const history = useDreamHistory('me', validId ? dreamId : null);
   const dreams = useDreams('me');
   const overview = useOverview('me');
+  // Hiding private entries loads all of this again. The page stays meanwhile (its forms keep what's typed),
+  // showing the dream by its title and description, which are never private.
+  const loaded = useLoadedOnce(!!history.data, dreamId);
+  const dream = useLastKnown(history.data?.dream, dreamId);
+  const allDreams = useLastKnown(dreams.data);
 
   if (!validId || (history.isError && history.error instanceof ApiRequestError && history.error.status === 404)) {
     return (
@@ -38,8 +48,8 @@ export function DreamDetailPage() {
       </div>
     );
   }
-  if (history.isPending) return <LoadingPage label="Opening your dream…" />;
-  if (history.isError) {
+  if (!loaded || !dream) {
+    if (!history.isError) return <LoadingPage label="Opening your dream…" />;
     return (
       <div className="page page-narrow">
         <Link to="/dreams" className="dd-back"><IconArrowLeft /> All dreams</Link>
@@ -48,13 +58,24 @@ export function DreamDetailPage() {
     );
   }
 
-  const all = dreams.data ?? [];
-  const guidance = overview.data?.dreamer.program.slotGuidance[history.data.dream.slot - 1];
-  return <DreamDetail history={history.data} dreams={all} guidance={guidance} />;
+  const guidance = overview.data?.dreamer.program.slotGuidance[dream.slot - 1];
+  return (
+    <KeepDrafts key={dreamId}>
+      <DreamDetail key={dreamId} history={history.data} dream={dream} dreams={allDreams ?? []} guidance={guidance} />
+    </KeepDrafts>
+  );
 }
 
-function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dreams: Dream[]; guidance?: string }) {
-  const { dream, entries, actions, reflections } = history;
+/**
+ * `history` is undefined while it loads again; `dream` is then the last one loaded, used only for what is never
+ * private (title, description, slot, achieved).
+ */
+function DreamDetail({ history, dream: known, dreams, guidance }: { history: DreamHistory | undefined; dream: Dream; dreams: Dream[]; guidance?: string }) {
+  const refreshing = !history;
+  const dream = history?.dream ?? known;
+  const entries = history?.entries ?? NO_ENTRIES;
+  const actions = history?.actions ?? NO_ACTIONS;
+  const reflections = history?.reflections ?? NO_REFLECTIONS;
   const [editing, setEditing] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [actionFilter, setActionFilter] = useState<'active' | 'completed' | 'all'>('active');
@@ -115,53 +136,59 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
         )}
       </header>
 
-      <Card className="dd-hero" data-testid="dream-hero">
-        <div className="dd-hero-main">
-          <div className="dd-hero-numbers">
-            <span className="dd-hero-value tnum" data-testid="dream-hero-value">{dream.progress == null ? '—' : `${dream.progress}%`}</span>
-            <div className="dd-hero-sub">
-              {dream.progress == null ? (
-                <span className="muted small">Nothing recorded yet</span>
-              ) : base ? (
-                <SessionDelta value={dream.progress} base={base} suffix=" pts" />
-              ) : entries.length === 1 ? (
-                <span className="muted small">First update</span>
-              ) : null}
-              {dream.progressIsPrivate && <span data-testid="dream-hero-private"><PrivateChip /></span>}
+      <Card className="dd-hero" data-testid="dream-hero" aria-busy={refreshing || undefined}>
+        {refreshing ? (
+          <div className="stack"><Skeleton h={60} w={150} /><Skeleton h={12} /><Skeleton h={14} w="60%" /></div>
+        ) : (
+          <>
+            <div className="dd-hero-main">
+              <div className="dd-hero-numbers">
+                <span className="dd-hero-value tnum" data-testid="dream-hero-value">{dream.progress == null ? '—' : `${dream.progress}%`}</span>
+                <div className="dd-hero-sub">
+                  {dream.progress == null ? (
+                    <span className="muted small">Nothing recorded yet</span>
+                  ) : base ? (
+                    <SessionDelta value={dream.progress} base={base} suffix=" pts" />
+                  ) : entries.length === 1 ? (
+                    <span className="muted small">First update</span>
+                  ) : null}
+                  {dream.progressIsPrivate && <span data-testid="dream-hero-private"><PrivateChip /></span>}
+                </div>
+              </div>
+              <div className="dd-hero-cta">
+                <Button variant="primary" size="lg" onClick={() => setUpdating(true)} data-testid="dream-hero-update"><IconTarget /> Update progress</Button>
+              </div>
             </div>
-          </div>
-          <div className="dd-hero-cta">
-            <Button variant="primary" size="lg" onClick={() => setUpdating(true)} data-testid="dream-hero-update"><IconTarget /> Update progress</Button>
-          </div>
-        </div>
-        <Bar value={dream.progress} color={DREAM_COLOR} large label={`${dream.title} progress`} />
-        <div className="dd-meta muted small">
-          {latest ? (
-            <>
-              <span>Last updated {fmtDate(latest.occurredAt)} ({relativeTime(latest.occurredAt)})</span>
-              <span>{latest.source === 'session' ? `Recorded in a coaching session with ${firstName(latest.recordedBy.name)}` : 'From a self check-in'}</span>
-            </>
-          ) : (
-            <span>Record your first update to start this dream’s story.</span>
-          )}
-          <span>{activeCount === 0 ? 'No active actions' : plural(activeCount, 'active action')}</span>
-        </div>
-        {achieved && <p className="dd-achieved-note">Achieved on {fmtDate(dream.achievedAt!, { month: 'long', day: 'numeric' })}. You made this one real — it stays here as a reminder of what you can do.</p>}
+            <Bar value={dream.progress} color={DREAM_COLOR} large label={`${dream.title} progress`} />
+            <div className="dd-meta muted small">
+              {latest ? (
+                <>
+                  <span>Last updated {fmtDate(latest.occurredAt)} ({relativeTime(latest.occurredAt)})</span>
+                  <span>{latest.source === 'self' ? 'From a self check-in' : latest.sessionId == null ? 'Recorded in a coaching session that was later removed' : `Recorded in a coaching session with ${firstName(latest.recordedBy.name)}`}</span>
+                </>
+              ) : (
+                <span>Record your first update to start this dream’s story.</span>
+              )}
+              <span>{activeCount === 0 ? 'No active actions' : plural(activeCount, 'active action')}</span>
+            </div>
+            {achieved && <p className="dd-achieved-note">Achieved on {fmtDate(dream.achievedAt!, { month: 'long', day: 'numeric' })}. You made this one real — it stays here as a reminder of what you can do.</p>}
+          </>
+        )}
       </Card>
 
       <div className="dd-detail-grid">
         <div className="stack dd-col">
           <Card data-testid="dream-chart">
-            <CardHead title="Progress over time" sub={entries.length ? `${plural(entries.length, 'update')} · solid dots are coaching sessions, hollow dots are your own check-ins` : 'Your updates will draw a line here'} />
+            <CardHead title="Progress over time" sub={refreshing ? undefined : entries.length ? `${plural(entries.length, 'update')} · solid dots are coaching sessions, hollow dots are your own check-ins` : 'Your updates will draw a line here'} />
             <div className="dd-chart-wrap">
-              <TrendChart points={points} max={100} unit="%" color={DREAM_COLOR} height={240} emptyLabel="No progress recorded yet" />
+              {refreshing ? <Skeleton h={240} /> : <TrendChart points={points} max={100} unit="%" color={DREAM_COLOR} height={240} emptyLabel="No progress recorded yet" />}
             </div>
             {entries.length > 0 && <div style={{ marginTop: 10 }}><SourceLegend color={DREAM_COLOR} /></div>}
           </Card>
 
           <Card data-testid="dream-history">
             <CardHead title="Progress history" sub={entries.length ? 'Newest first. Notes travel with the update they belong to.' : undefined} />
-            {newestFirst.length === 0 ? (
+            {refreshing ? <ListSkeleton /> : newestFirst.length === 0 ? (
               <EmptyState icon={<IconTarget />} title="No progress recorded yet" action={<Button variant="primary" onClick={() => setUpdating(true)} data-testid="dream-history-first">Record your first update</Button>}>
                 Every update you or your coach record will appear here, with its notes.
               </EmptyState>
@@ -176,10 +203,10 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
         </div>
 
         <div className="stack dd-col">
-          <Card data-testid="dream-actions">
+          <Card className="dd-actions-card" data-testid="dream-actions">
             <CardHead
               title="Actions for this dream"
-              sub={actions.length ? `${activeCount} active · ${completedCount} completed` : 'Small steps that move this dream'}
+              sub={refreshing ? undefined : actions.length ? `${activeCount} active · ${completedCount} completed` : 'Small steps that move this dream'}
               actions={
                 <Segmented
                   value={actionFilter}
@@ -201,7 +228,7 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
               ) : (
                 <Button variant="secondary" size="sm" onClick={() => setComposing(true)} data-testid="dream-add-action"><IconPlus /> Add an action for this dream</Button>
               )}
-              <ActionList
+              {refreshing ? <ListSkeleton /> : <ActionList
                 dreamerRef="me"
                 actions={actions}
                 dreams={dreamRefs}
@@ -209,14 +236,14 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
                 filter={actionFilter}
                 emptyTitle={actionFilter === 'active' ? 'No active actions' : actionFilter === 'completed' ? 'Nothing completed yet' : 'No actions yet'}
                 emptyBody={actionFilter === 'active' ? 'Add a small next step for this dream — something you could do this week.' : actionFilter === 'completed' ? 'Completed actions linked to this dream will gather here.' : 'Actions you link to this dream will show up here.'}
-              />
+              />}
             </div>
           </Card>
 
           <Card data-testid="dream-reflections">
-            <CardHead title="Reflections about this dream" sub={reflections.length ? plural(reflections.length, 'reflection') : 'Thoughts, worries, wins — tagged with this dream'} />
+            <CardHead title="Reflections about this dream" sub={refreshing ? undefined : reflections.length ? plural(reflections.length, 'reflection') : 'Thoughts, worries, wins — tagged with this dream'} />
             <ReflectionComposer dreamId={dream.id} />
-            {reflections.length === 0 ? (
+            {refreshing ? <ListSkeleton /> : reflections.length === 0 ? (
               <EmptyState icon={<IconPen />} title="Nothing written yet">Reflections you tag with this dream will gather here — alongside the numbers, your words.</EmptyState>
             ) : (
               <div className="stack dd-reflections">
@@ -246,9 +273,13 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
         </nav>
       )}
 
-      <DreamsProgressDialog dream={dream} open={updating} onClose={() => setUpdating(false)} />
+      <DreamsProgressDialog dream={dream} refreshing={refreshing} open={updating} onClose={() => setUpdating(false)} />
     </div>
   );
+}
+
+function ListSkeleton() {
+  return <div className="stack" aria-busy><Skeleton h={22} w="70%" /><Skeleton h={22} w="55%" /></div>;
 }
 
 /* ---------- Progress history row ---------- */
@@ -256,8 +287,15 @@ function DreamDetail({ history, dreams, guidance }: { history: DreamHistory; dre
 /** A 409 the dreamer can act on (a hidden note, a value that can't be shared back) reads as information, not an alarm. */
 const isConflict = (e: unknown) => e instanceof ApiRequestError && e.code === 'conflict';
 
-/** What the dreamer had in the editor when they chose to show private entries from it: it comes back afterwards. */
-type EditDraft = { value: number; note: string; notePrivate: boolean; hiddenNote: boolean; seenNote: ProgressEntry['note'] };
+/**
+ * What the editor holds, kept by the page while it is open (through a list reload, or showing private entries from
+ * it). `seenNote` is the note it started from; `hiddenNote`: saving found a note hidden right now; `merged`: a note
+ * that came into view since was put above what was typed.
+ */
+type EditDraft = { value: number; note: string; notePrivate: boolean; hiddenNote: boolean; seenNote: ProgressEntry['note']; merged: boolean };
+const editDraftOf = (e: ProgressEntry): EditDraft => ({ value: e.value, note: e.note?.body ?? '', notePrivate: e.note?.isPrivate ?? false, hiddenNote: false, seenNote: e.note, merged: false });
+/** A private note, or a draft holding a private note's words. */
+const editDraftPrivate = (d: EditDraft) => (d.notePrivate && d.note.trim().length > 0) || !!d.seenNote?.isPrivate;
 
 function ProgressRow({ entry, previous, cellTaken }: { entry: ProgressEntry; previous: ProgressEntry | null; cellTaken: boolean }) {
   const { auth, unlockPrivate } = useAuth();
@@ -266,9 +304,16 @@ function ProgressRow({ entry, previous, cellTaken }: { entry: ProgressEntry; pre
   const remove = useDeleteProgress('me');
   const [confirmHide, setConfirmHide] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [editingNote, setEditingNote] = useState(false);
-  const [draft, setDraft] = useState<EditDraft | null>(null);
+  const { draft, setDraft, patchDraft, covered } = useKeptDraft<EditDraft>(`progress-${entry.id}`, editDraftPrivate);
   const [unlocking, setUnlocking] = useState(false);
+  const editingNote = draft !== null && !unlocking;
+  // Private entries were shown from the editor, so a note that was hidden is in view now: start from it (and its
+  // privacy), keeping anything typed below it. Saving can then never write over a note unseen. A note going out of
+  // view while the draft isn't covered takes its text with it, since it may hold its words.
+  if (draft && !covered && entry.note?.id !== draft.seenNote?.id) {
+    const typed = entry.note && draft.note.trim() !== (draft.seenNote?.body ?? '') ? draft.note.trim() : '';
+    setDraft({ ...draft, seenNote: entry.note, note: [entry.note?.body, typed].filter(Boolean).join('\n\n'), notePrivate: entry.note?.isPrivate ?? false, merged: !!typed });
+  }
   const isSession = entry.source === 'session';
   // A private session value whose session was later deleted: it belongs to no session any more.
   const detached = isSession && entry.sessionId == null;
@@ -304,11 +349,11 @@ function ProgressRow({ entry, previous, cellTaken }: { entry: ProgressEntry; pre
       toast(errorMessage(e), 'error');
     }
   };
-  // The editor asked to show private entries (a note is hidden under it). It makes way for the password dialog and
-  // then opens again with what was typed, which goes below the note once it is in view (or stays as it was on Cancel).
-  const askUnlock = (d: EditDraft) => { setDraft(d); setEditingNote(false); setUnlocking(true); };
-  const onUnlockClosed = () => { setUnlocking(false); setEditingNote(true); };
-  const closeEditor = () => { setEditingNote(false); setDraft(null); };
+  // The editor asked to show private entries (a note is hidden under it, or its draft is covered). It makes way for
+  // the password dialog and then opens again with what was typed (below the note once it is in view).
+  const askUnlock = () => setUnlocking(true);
+  const onUnlockClosed = () => setUnlocking(false);
+  const closeEditor = () => setDraft(null);
 
   const recorded = detached
     ? `in a coaching session with ${entry.recordedBy.name} that was later removed`
@@ -347,7 +392,7 @@ function ProgressRow({ entry, previous, cellTaken }: { entry: ProgressEntry; pre
             {entry.isPrivate ? <><IconUnlock /> Share update with coach</> : <><IconLock /> Make update private</>}
           </button>
         )}
-        <button type="button" className="menu-item" onClick={() => setEditingNote(true)} data-testid="progress-entry-edit">
+        <button type="button" className="menu-item" onClick={() => setDraft(editDraftOf(entry))} data-testid="progress-entry-edit">
           <IconEdit /> {entry.note ? (isSession ? 'Edit note' : 'Edit value or note') : isSession ? 'Add a note' : 'Edit value or add a note'}
         </button>
         {entry.note && !entry.isPrivate && (
@@ -377,7 +422,7 @@ function ProgressRow({ entry, previous, cellTaken }: { entry: ProgressEntry; pre
         onClose={() => setConfirmHide(false)}
         onConfirm={() => { setConfirmHide(false); void setPrivacy(true); }}
         title="Make this session value private?"
-        body={`This ${entry.value}% was recorded in a coaching session with ${entry.recordedBy.name}. Making it private removes it from your coach’s views — their charts, the session grid and your shared history. You can share it again at any time.`}
+        body={`This ${entry.value}% was recorded in a coaching session with ${entry.recordedBy.name}. Making it private removes it from your coach’s views — their charts, the session grid and your shared history. You can share it again later, unless your coach records a new value for that session in the meantime.`}
         confirmLabel="Make private"
         loading={update.isPending}
       />
@@ -391,37 +436,34 @@ function ProgressRow({ entry, previous, cellTaken }: { entry: ProgressEntry; pre
         danger
         loading={remove.isPending}
       />
-      {editingNote && <EntryEditDialog entry={entry} draft={draft} onClose={closeEditor} onShowPrivate={askUnlock} />}
+      {editingNote && <EntryEditDialog entry={entry} draft={draft} onChange={patchDraft} covered={covered} onClose={closeEditor} onShowPrivate={askUnlock} />}
       <UnlockDialog open={unlocking} onClose={onUnlockClosed} onUnlock={unlockPrivate} />
     </div>
   );
 }
 
-/** Edit an entry: value (own self check-ins only) and the attached note with its privacy. */
-function EntryEditDialog({ entry, draft, onClose, onShowPrivate }: { entry: ProgressEntry; draft: EditDraft | null; onClose: () => void; onShowPrivate: (draft: EditDraft) => void }) {
+/** Edit an entry: value (own self check-ins only) and the attached note with its privacy. The draft is the row's. */
+function EntryEditDialog({ entry, draft, onChange, covered, onClose, onShowPrivate }: {
+  entry: ProgressEntry;
+  draft: EditDraft;
+  onChange: (patch: Partial<EditDraft>) => void;
+  /** The draft held a private note when private entries went out of view: it waits, covered, until they're shown. */
+  covered: boolean;
+  onClose: () => void;
+  onShowPrivate: () => void;
+}) {
   const { auth } = useAuth();
   const { toast } = useToast();
   const update = useUpdateProgress('me');
   const isSession = entry.source === 'session';
   const unlocked = !!auth?.privateUnlocked;
-  const [value, setValue] = useState(draft?.value ?? entry.value);
-  const [note, setNote] = useState(draft?.note ?? entry.note?.body ?? '');
-  const [notePrivate, setNotePrivate] = useState(draft?.notePrivate ?? entry.note?.isPrivate ?? false);
+  // With private entries hidden, a note the dreamer can't see may already sit under this entry (`hiddenNote`).
+  const { value, note, notePrivate, hiddenNote, merged } = draft;
+  const setValue = (v: number) => onChange({ value: v });
+  const setNote = (v: string) => onChange({ note: v });
+  const setNotePrivate = (v: boolean) => onChange({ notePrivate: v });
+  const setHiddenNote = (v: boolean) => onChange({ hiddenNote: v });
   const [error, setError] = useState<string | null>(null);
-  // With private entries hidden, a note the dreamer can't see may already sit under this entry.
-  const [hiddenNote, setHiddenNote] = useState(draft?.hiddenNote ?? false);
-  // Private entries were shown from here, so a note that was hidden is in view now: start from it (and its privacy),
-  // keeping anything typed below it. Saving can then never write over a note unseen. A note going out of view
-  // (private entries hidden meanwhile) takes the text with it, since it may hold its words.
-  const [seenNote, setSeenNote] = useState(draft ? draft.seenNote : entry.note);
-  const [kept, setKept] = useState(false);
-  if (entry.note?.id !== seenNote?.id) {
-    const typed = entry.note && note.trim() !== (seenNote?.body ?? '') ? note.trim() : '';
-    setSeenNote(entry.note);
-    setNote([entry.note?.body, typed].filter(Boolean).join('\n\n'));
-    setNotePrivate(entry.note?.isPrivate ?? false);
-    setKept(!!typed);
-  }
   const hasNote = note.trim().length > 0;
 
   const save = async () => {
@@ -478,11 +520,13 @@ function EntryEditDialog({ entry, draft, onClose, onShowPrivate }: { entry: Prog
             <PercentInput value={value} onChange={setValue} color={DREAM_COLOR} label="Progress" />
           </Field>
         )}
-        <Field label="Note" htmlFor={`dd-entry-note-${entry.id}`} hint={entry.note ? 'Clear the text to remove the note.' : undefined}>
-          <TextArea id={`dd-entry-note-${entry.id}`} value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="What was behind this number?" data-testid="entry-edit-note" />
-        </Field>
-        {kept && <div className="muted tiny" data-testid="entry-edit-kept">Your private note is back, with what you typed below it.</div>}
-        {hasNote && !entry.isPrivate && (
+        {covered ? <CoveredDraft onShowPrivate={onShowPrivate} testId="entry-edit-covered" /> : (
+          <Field label="Note" htmlFor={`dd-entry-note-${entry.id}`} hint={entry.note ? 'Clear the text to remove the note.' : undefined}>
+            <TextArea id={`dd-entry-note-${entry.id}`} value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="What was behind this number?" data-testid="entry-edit-note" />
+          </Field>
+        )}
+        {merged && !covered && <div className="muted tiny" data-testid="entry-edit-kept">Your private note is back, with what you typed below it.</div>}
+        {hasNote && !covered && !entry.isPrivate && (
           <div className="spread dd-privacy-row">
             <span className="small">Your note</span>
             <span data-testid="entry-edit-note-private"><PrivacyToggle value={notePrivate} onChange={setNotePrivate} /></span>
@@ -494,7 +538,7 @@ function EntryEditDialog({ entry, draft, onClose, onShowPrivate }: { entry: Prog
             <IconLock />
             <div className="dd-hidden-note-body">
               <span>This update already has a note that is hidden right now. Show private entries to see it and edit it here — what you typed stays.</span>
-              <Button variant="secondary" size="sm" onClick={() => onShowPrivate({ value, note, notePrivate, hiddenNote: true, seenNote })} data-testid="entry-edit-show-private"><IconUnlock /> Show private entries</Button>
+              <Button variant="secondary" size="sm" onClick={onShowPrivate} data-testid="entry-edit-show-private"><IconUnlock /> Show private entries</Button>
             </div>
           </div>
         )}
@@ -517,6 +561,8 @@ function ReflectionComposer({ dreamId }: { dreamId: number }) {
   const box = useRef<HTMLTextAreaElement>(null);
   const hasText = body.trim().length > 0;
   const expanded = focused || hasText;
+  // A private reflection being written stays here, covered, while private entries are hidden.
+  const covered = useCovered(isPrivate && hasText);
 
   // Fold away and let go of focus (the buttons below keep it in the text box while pressed).
   const reset = () => { setBody(''); setIsPrivate(false); setFocused(false); box.current?.blur(); };
@@ -537,20 +583,22 @@ function ReflectionComposer({ dreamId }: { dreamId: number }) {
 
   return (
     <div className={`dd-reflect${expanded ? ' expanded' : ''}`} onBlur={onBlur} data-testid="reflection-composer">
-      <TextArea
-        ref={box}
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        onFocus={() => setFocused(true)}
-        rows={expanded ? 3 : 1}
-        placeholder="Write about this dream…"
-        aria-label="Write about this dream"
-        data-testid="reflection-body"
-      />
+      {covered ? <CoveredDraft testId="reflection-covered" /> : (
+        <TextArea
+          ref={box}
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          onFocus={() => setFocused(true)}
+          rows={expanded ? 3 : 1}
+          placeholder="Write about this dream…"
+          aria-label="Write about this dream"
+          data-testid="reflection-body"
+        />
+      )}
       {expanded && (
         // Pressing a control here keeps focus in the text box (some browsers never focus a pressed button).
         <div className="spread dd-reflect-foot fade-in" onMouseDown={(e) => e.preventDefault()}>
-          <span data-testid="reflection-private"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>
+          {covered ? <span /> : <span data-testid="reflection-private"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>}
           <div className="row">
             <Button variant="ghost" size="sm" onClick={reset} disabled={create.isPending}>Cancel</Button>
             <Button variant="primary" size="sm" onClick={() => void save()} disabled={!hasText} loading={create.isPending} data-testid="reflection-save">Save reflection</Button>

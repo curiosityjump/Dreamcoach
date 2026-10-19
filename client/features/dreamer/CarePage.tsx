@@ -18,11 +18,13 @@ import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, type CareCategory, 
 import type { CheckInInput, CoachingSession, LatestRating, RatingEntry, Snapshot } from '@shared/types';
 import { fmtDate, plural, relativeTime } from '@/lib/format';
 import { NotePrivateWith, SessionDelta, byTimeAsc, catVars, latestLine, savedToast, toTrendPoint, useNarrow, useTouch } from './CareShared';
+import { CoveredDraft, useCovered, useCoveredParts, useLoadedOnce } from './drafts';
 
 type Pending = Partial<Record<CareCategory, number>>;
 type Range = '3m' | '6m' | 'all';
 
 const RANGE_DAYS: Record<Range, number | null> = { '3m': 92, '6m': 183, all: null };
+const NO_LATEST: Snapshot['latest'] = {};
 
 /* ---------- Page ---------- */
 
@@ -31,8 +33,10 @@ export function CarePage() {
   const ratings = useRatings('me');
   const sessions = useSessions('me');
 
-  if (overview.isLoading) return <LoadingPage label="Opening your wheel…" />;
-  if (overview.error || !overview.data) {
+  // Hiding private entries loads the overview again; the wheel and the quick cards keep what's being rated meanwhile.
+  const loaded = useLoadedOnce(!!overview.data);
+  if (!loaded) {
+    if (overview.isLoading) return <LoadingPage label="Opening your wheel…" />;
     return (
       <div className="page">
         <PageHeader eyebrow="CARE" title="Wheel of Life" />
@@ -41,8 +45,9 @@ export function CarePage() {
     );
   }
 
-  const snapshot = overview.data.snapshot;
-  const coachName = overview.data.dreamer.coach?.name ?? null;
+  const snapshot = overview.data?.snapshot;
+  const latest = snapshot?.latest ?? NO_LATEST;
+  const coachName = overview.data?.dreamer.coach?.name ?? null;
   const allSessions = [...(sessions.data ?? [])].sort(byTimeAsc);
   const lastSession = allSessions.filter((s) => s.status === 'completed').pop() ?? null;
 
@@ -55,13 +60,13 @@ export function CarePage() {
         actions={<Link to="/check-in" className="btn btn-primary" data-testid="care-full-checkin"><IconSparkle /> Full check-in</Link>}
       />
 
-      <WheelSection snapshot={snapshot} lastSession={lastSession} />
+      <WheelSection latest={latest} lastSession={lastSession} />
 
       <section className="dc-section" aria-labelledby="dc-areas-head">
         <h2 id="dc-areas-head" className="dc-section-title">The four areas</h2>
         <div className="grid grid-4 dc-cards">
           {CARE_CATEGORIES.map((c) => (
-            <CategoryCard key={c} category={c} latest={snapshot.latest[c]} sessions={allSessions} ratings={ratings.data} loading={ratings.isLoading} />
+            <CategoryCard key={c} category={c} latest={latest[c]} refreshing={!snapshot} sessions={allSessions} ratings={ratings.data} loading={ratings.isLoading} />
           ))}
         </div>
       </section>
@@ -71,7 +76,7 @@ export function CarePage() {
         <p className="muted small dc-section-sub">Two program ratings, usually set together with {coachName ? coachName.split(' ')[0] : 'your coach'} in a session. Pick a number and save it to record where you are today.</p>
         <div className="grid grid-2 dc-cards">
           {PROGRAM_CATEGORIES.map((c) => (
-            <QuickRatingCard key={c} category={c} latest={snapshot.latest[c]} sessions={allSessions} />
+            <QuickRatingCard key={c} category={c} latest={latest[c]} refreshing={!snapshot} sessions={allSessions} />
           ))}
         </div>
       </section>
@@ -83,7 +88,7 @@ export function CarePage() {
 
 /* ---------- Wheel + pending check-in ---------- */
 
-function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSession: CoachingSession | null }) {
+function WheelSection({ latest, lastSession }: { latest: Snapshot['latest']; lastSession: CoachingSession | null }) {
   const { auth } = useAuth();
   const { toast } = useToast();
   const create = useCreateCheckIn('me');
@@ -109,14 +114,15 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
     return () => io.disconnect();
   }, [panelActions]);
 
-  const latest = snapshot.latest;
-  const latestValues = useMemo<WheelValues>(() => Object.fromEntries(CARE_CATEGORIES.map((c) => [c, latest[c]?.value ?? null])) as WheelValues, [latest]);
-  const wheelValues = useMemo<WheelValues>(() => ({ ...latestValues, ...pending }), [latestValues, pending]);
-
   /** Areas rated on the wheel and not saved yet. Picking the same number as before still counts (with a note, say). */
   const rated = CARE_CATEGORIES.filter((c) => pending[c] != null);
+  // Ratings (or notes) that were private when private entries went out of view stay pending, covered, until shown again.
+  const covered = useCoveredParts(rated.flatMap((c) => (priv[c] ? [c] : notePriv[c] && notes[c]?.trim() ? [`${c}-note`] : [])));
+  const latestValues = useMemo<WheelValues>(() => Object.fromEntries(CARE_CATEGORIES.map((c) => [c, latest[c]?.value ?? null])) as WheelValues, [latest]);
+  const wheelValues = useMemo<WheelValues>(() => ({ ...latestValues, ...Object.fromEntries(Object.entries(pending).filter(([c]) => !covered.has(c))) }), [latestValues, pending, covered]);
+
   const same = (c: CareCategory) => pending[c] === latestValues[c];
-  const only = rated.length === 1 ? rated[0]! : null;
+  const only = rated.length === 1 && !covered.has(rated[0]!) ? rated[0]! : null;
   const changeSummary = only
     ? `${CATEGORY_META[only].label} ${same(only) ? `${pending[only]}, same as before` : `${latestValues[only] != null ? `${latestValues[only]} → ` : ''}${pending[only]}`}`
     : `${plural(rated.length, 'area')} rated`;
@@ -218,6 +224,17 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
                 const m = CATEGORY_META[c];
                 const prev = latestValues[c];
                 const note = notes[c] ?? '';
+                if (covered.has(c)) {
+                  return (
+                    <div key={c} className="dc-pending-item" style={catVars(c)} data-testid={`care-pending-${c}`}>
+                      <div className="spread">
+                        <CategoryChip category={c} />
+                        <button type="button" className="dc-text-btn" onClick={() => undo(c)} data-testid={`care-pending-undo-${c}`}>Remove</button>
+                      </div>
+                      <CoveredDraft testId={`care-pending-covered-${c}`} />
+                    </div>
+                  );
+                }
                 return (
                   <div key={c} className="dc-pending-item" style={catVars(c)} data-testid={`care-pending-${c}`}>
                     <div className="spread">
@@ -228,19 +245,21 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
                       <button type="button" className="dc-text-btn" onClick={() => undo(c)} data-testid={`care-pending-undo-${c}`}>{prev != null && !same(c) ? `Keep at ${prev}` : 'Remove'}</button>
                     </div>
                     <RatingInput value={pending[c] ?? null} onChange={(v) => { if (v != null) setValue(c, v); }} category={c} compact />
-                    <TextArea
-                      value={note}
-                      onChange={(e) => setNotes((n) => ({ ...n, [c]: e.target.value }))}
-                      placeholder={`A note about your ${m.label.toLowerCase()} (optional)`}
-                      aria-label={`${m.label} note`}
-                      rows={2}
-                      maxLength={4000}
-                      disabled={create.isPending}
-                      data-testid={`care-pending-note-${c}`}
-                    />
+                    {covered.has(`${c}-note`) ? <CoveredDraft testId={`care-pending-covered-note-${c}`} /> : (
+                      <TextArea
+                        value={note}
+                        onChange={(e) => setNotes((n) => ({ ...n, [c]: e.target.value }))}
+                        placeholder={`A note about your ${m.label.toLowerCase()} (optional)`}
+                        aria-label={`${m.label} note`}
+                        rows={2}
+                        maxLength={4000}
+                        disabled={create.isPending}
+                        data-testid={`care-pending-note-${c}`}
+                      />
+                    )}
                     <div className="row-wrap dc-privacy-row">
                       <span data-testid={`care-pending-privacy-${c}`}><PrivacyToggle size="sm" value={!!priv[c]} onChange={(v) => setPriv((p) => ({ ...p, [c]: v }))} labels={['Rating shared with coach', 'Rating private']} /></span>
-                      {note.trim() && (
+                      {note.trim() && !covered.has(`${c}-note`) && (
                         <span data-testid={`care-pending-note-privacy-${c}`}>
                           {priv[c] ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={!!notePriv[c]} onChange={(v) => setNotePriv((p) => ({ ...p, [c]: v }))} labels={['Note shared with coach', 'Note private']} />}
                         </span>
@@ -278,7 +297,7 @@ function WheelSection({ snapshot, lastSession }: { snapshot: Snapshot; lastSessi
 
 /* ---------- Category cards ---------- */
 
-function CategoryCard({ category, latest, sessions, ratings, loading }: { category: CareCategory; latest: LatestRating | undefined; sessions: CoachingSession[]; ratings: RatingEntry[] | undefined; loading: boolean }) {
+function CategoryCard({ category, latest, refreshing, sessions, ratings, loading }: { category: CareCategory; latest: LatestRating | undefined; refreshing: boolean; sessions: CoachingSession[]; ratings: RatingEntry[] | undefined; loading: boolean }) {
   const m = CATEGORY_META[category];
   const values = useMemo(() => (ratings ?? []).filter((r) => r.category === category).sort(byTimeAsc).slice(-10).map((r) => r.value), [ratings, category]);
   return (
@@ -288,13 +307,13 @@ function CategoryCard({ category, latest, sessions, ratings, loading }: { catego
         {latest && <SourceChip source={latest.source} />}
       </div>
       <div className="dc-cat-value-row">
-        <span className="dc-cat-value tnum" data-testid={`care-card-value-${category}`}>{latest ? latest.value : '–'}</span>
+        <span className="dc-cat-value tnum" data-testid={`care-card-value-${category}`}>{latest ? latest.value : refreshing ? '…' : '–'}</span>
         <span className="dc-cat-of">/ 10</span>
         {latest && <SessionDelta entry={latest} sessions={sessions} />}
         {latest?.isPrivate && <span className="dc-cat-private" data-testid={`care-card-private-${category}`}><PrivateChip /></span>}
       </div>
       <div className="dc-cat-meta muted small">
-        {latest ? `${latest.source === 'session' ? 'Session' : 'Self check-in'} · ${relativeTime(latest.occurredAt)}` : 'Not rated yet'}
+        {latest ? `${latest.source === 'session' ? 'Session' : 'Self check-in'} · ${relativeTime(latest.occurredAt)}` : refreshing ? '\u00a0' : 'Not rated yet'}
       </div>
       <div className="dc-cat-spark" aria-label={values.length >= 2 ? `Last ${values.length} ${m.label} ratings` : undefined}>
         {loading ? <Spinner /> : values.length >= 2 ? <Sparkline values={values} color={m.color} width={120} height={28} max={10} /> : <span className="muted tiny">{values.length === 1 ? 'One entry so far' : 'No entries yet'}</span>}
@@ -307,7 +326,7 @@ function CategoryCard({ category, latest, sessions, ratings, loading }: { catego
 }
 
 /** Commitment / Satisfaction: picking a number starts a draft; nothing is recorded until Save. */
-function QuickRatingCard({ category, latest, sessions }: { category: ProgramCategory; latest: LatestRating | undefined; sessions: CoachingSession[] }) {
+function QuickRatingCard({ category, latest, refreshing, sessions }: { category: ProgramCategory; latest: LatestRating | undefined; refreshing: boolean; sessions: CoachingSession[] }) {
   const { auth } = useAuth();
   const { toast } = useToast();
   const create = useCreateCheckIn('me');
@@ -318,6 +337,9 @@ function QuickRatingCard({ category, latest, sessions }: { category: ProgramCate
   const [notePriv, setNotePriv] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const text = note.trim();
+  // A private draft (or private note) stays here, covered, while private entries are hidden.
+  const covered = useCovered(value != null && priv);
+  const noteCovered = useCovered(value != null && !priv && notePriv && !!text);
 
   const pick = (v: number | null) => { if (v != null) { setError(null); setValue(v); } };
   const reset = () => { setValue(null); setNote(''); setPriv(false); setNotePriv(false); setError(null); };
@@ -327,7 +349,7 @@ function QuickRatingCard({ category, latest, sessions }: { category: ProgramCate
     const anyPrivate = priv || (!!text && notePriv);
     create.mutate({ ratings: [{ category, value, isPrivate: priv, ...(text ? { note: text, notePrivate: notePriv || priv } : {}) }] }, {
       onSuccess: () => {
-        const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, `${m.label} saved as private — only you can see it.`, priv ? undefined : `${m.label} saved: ${value}. Your private note is hidden right now.`);
+        const [msg, kind] = savedToast(auth, anyPrivate, `${m.label} saved: ${value}.`, priv ? `${m.label} saved as private — only you can see it.` : `${m.label} saved: ${value}. Your note is private — only you can see it.`, priv ? undefined : `${m.label} saved: ${value}. Your private note is hidden right now.`);
         toast(msg, kind);
         reset();
       },
@@ -343,25 +365,29 @@ function QuickRatingCard({ category, latest, sessions }: { category: ProgramCate
       </div>
       <p className="dc-quick-prompt">{m.prompt}</p>
       <div className="dc-cat-value-row">
-        <span className="dc-cat-value tnum" data-testid={`care-quick-value-${category}`}>{latest ? latest.value : '–'}</span>
+        <span className="dc-cat-value tnum" data-testid={`care-quick-value-${category}`}>{latest ? latest.value : refreshing ? '…' : '–'}</span>
         <span className="dc-cat-of">/ 10</span>
         {latest && <SessionDelta entry={latest} sessions={sessions} />}
         {latest?.isPrivate && <span className="dc-cat-private" data-testid={`care-quick-private-${category}`}><PrivateChip /></span>}
-        <span className="muted small dc-quick-when">{latest ? latestLine(latest) : 'Not rated yet'}</span>
+        <span className="muted small dc-quick-when">{latest ? latestLine(latest) : refreshing ? '' : 'Not rated yet'}</span>
       </div>
       <div className={`dc-quick-input${create.isPending ? ' is-busy' : ''}`} aria-busy={create.isPending || undefined} data-testid={`care-quick-input-${category}`}>
-        <RatingInput value={value ?? latest?.value ?? null} onChange={pick} category={category} compact label={`Rate your ${m.label.toLowerCase()} today`} disabled={create.isPending} />
+        <RatingInput value={(covered ? null : value) ?? latest?.value ?? null} onChange={pick} category={category} compact label={`Rate your ${m.label.toLowerCase()} today`} disabled={create.isPending || covered} />
       </div>
       {value == null ? (
         <div className="muted tiny">Pick a number for today — you can add a note before you save it.</div>
       ) : (
         <div className="dc-quick-draft" data-testid={`care-quick-draft-${category}`}>
-          <div className="small tnum">{latest ? `${latest.value} → ` : ''}<b>{value}</b> <span className="muted">· not saved yet</span></div>
-          <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="What’s behind this number? (optional)" aria-label={`${m.label} note`} rows={2} maxLength={4000} disabled={create.isPending} data-testid={`care-quick-note-${category}`} />
-          <div className="row-wrap dc-privacy-row">
-            <span data-testid={`care-quick-privacy-${category}`}><PrivacyToggle size="sm" value={priv} onChange={setPriv} labels={['Rating shared with coach', 'Rating private']} /></span>
-            {text && <span data-testid={`care-quick-note-privacy-${category}`}>{priv ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} />}</span>}
-          </div>
+          {covered ? <CoveredDraft testId={`care-quick-covered-${category}`} /> : (
+            <>
+              <div className="small tnum">{latest ? `${latest.value} → ` : ''}<b>{value}</b> <span className="muted">· not saved yet</span></div>
+              {noteCovered ? <CoveredDraft testId={`care-quick-covered-note-${category}`} /> : <TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="What’s behind this number? (optional)" aria-label={`${m.label} note`} rows={2} maxLength={4000} disabled={create.isPending} data-testid={`care-quick-note-${category}`} />}
+              <div className="row-wrap dc-privacy-row">
+                <span data-testid={`care-quick-privacy-${category}`}><PrivacyToggle size="sm" value={priv} onChange={setPriv} labels={['Rating shared with coach', 'Rating private']} /></span>
+                {text && !noteCovered && <span data-testid={`care-quick-note-privacy-${category}`}>{priv ? <NotePrivateWith parent="rating" /> : <PrivacyToggle size="sm" value={notePriv} onChange={setNotePriv} labels={['Note shared with coach', 'Note private']} />}</span>}
+              </div>
+            </>
+          )}
           {error && <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>}
           <div className="dc-pending-actions">
             <Button variant="ghost" onClick={reset} disabled={create.isPending} data-testid={`care-quick-cancel-${category}`}>Cancel</Button>

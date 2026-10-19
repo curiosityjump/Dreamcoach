@@ -20,6 +20,7 @@ import { Button, Card, EmptyState, PageHeader, PrivacyToggle, Segmented, Skeleto
 import { IconInfo, IconLock, IconPen, IconSearch, IconStar, IconUnlock } from '@/components/icons';
 import { JournalEntryCard, TimelineFeed } from '@/features/shared/Timeline';
 import { dayHeading, dayKey, firstName, plural } from '@/lib/format';
+import { CoveredDraft, KeepDrafts, useCovered, useLastKnown } from './drafts';
 
 type View = 'reflections' | 'everything';
 type DreamRef = Pick<Dream, 'id' | 'title' | 'slot'>;
@@ -101,7 +102,12 @@ function itemMatches(it: TimelineItem, f: Filters, dreams: DreamRef[], q: string
 
 /* ---------- Page ---------- */
 
+/** Entry editors keep their drafts in the page while the lists load again (hiding private entries). */
 export function JournalPage() {
+  return <KeepDrafts><Journal /></KeepDrafts>;
+}
+
+function Journal() {
   const { auth } = useAuth();
   const [params, setParams] = useSearchParams();
   const composeParam = params.get('compose') === '1';
@@ -110,7 +116,9 @@ export function JournalPage() {
   const timeline = useTimeline('me');
   const dreams = useDreams('me');
   const overview = useOverview('me');
-  const dreamRefs: DreamRef[] = useMemo(() => (dreams.data ?? []).map((d) => ({ id: d.id, title: d.title, slot: d.slot })).sort((a, b) => a.slot - b.slot), [dreams.data]);
+  // Dream titles (never private) stay while the dreams load again, so the composer's tag keeps its choices.
+  const knownDreams = useLastKnown(dreams.data);
+  const dreamRefs: DreamRef[] = useMemo(() => (knownDreams ?? []).map((d) => ({ id: d.id, title: d.title, slot: d.slot })).sort((a, b) => a.slot - b.slot), [knownDreams]);
   const coachName = overview.data?.dreamer.coach?.name ?? null;
 
   const [view, setView] = useState<View>('reflections');
@@ -359,6 +367,8 @@ function Composer({ dreams, coachName, expanded, autoFocus, onOpen, onClose, can
 
   const trimmed = body.trim();
   const canSubmit = trimmed.length > 0 && !create.isPending;
+  // A private reflection being written stays here, covered, while private entries are hidden.
+  const covered = useCovered(isPrivate && trimmed.length > 0);
 
   const reset = () => { setBody(''); setDreamId(null); setCategory(null); setIsPrivate(false); setError(null); };
 
@@ -401,55 +411,63 @@ function Composer({ dreams, coachName, expanded, autoFocus, onOpen, onClose, can
   return (
     <Card className="dj-composer-card">
       <form className="dj-composer" onSubmit={submit} data-testid="journal-composer" aria-busy={create.isPending || undefined}>
-        <TextArea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onKeyDown={onKey}
-          placeholder="What’s on your mind?"
-          aria-label="New reflection"
-          rows={4}
-          maxLength={8000}
-          autoFocus={autoFocus}
-          disabled={create.isPending}
-          data-testid="journal-body-input"
-        />
-        <div className="dj-composer-options">
-          <select
-            className={`dj-select dj-select-dream${dreamId != null ? ' is-set' : ''}`}
-            value={dreamId ?? ''}
-            onChange={(e) => setDreamId(e.target.value ? Number(e.target.value) : null)}
-            disabled={create.isPending || dreams.length === 0}
-            aria-label="Tag a dream"
-            data-testid="journal-dream-select"
-          >
-            <option value="">Tag a dream</option>
-            {dreams.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
-          </select>
-          <select
-            className={`dj-select${category ? ' is-set' : ''}`}
-            value={category ?? ''}
-            onChange={(e) => setCategory(isCareCategory(e.target.value) ? e.target.value : null)}
+        {covered ? <CoveredDraft testId="journal-composer-covered" /> : (
+          <TextArea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="What’s on your mind?"
+            aria-label="New reflection"
+            rows={4}
+            maxLength={8000}
+            autoFocus={autoFocus}
             disabled={create.isPending}
-            aria-label="Tag a CARE area"
-            style={category ? ({ '--dj-color': CATEGORY_META[category].color, '--dj-tint': CATEGORY_META[category].tint } as CSSProperties) : undefined}
-            data-testid="journal-category-select"
-          >
-            <option value="">CARE area</option>
-            {CARE_CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_META[c].label}</option>)}
-          </select>
-          <span data-testid="journal-privacy-toggle"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>
+            data-testid="journal-body-input"
+          />
+        )}
+        <div className="dj-composer-options">
+          {!covered && (
+            <>
+              <select
+                className={`dj-select dj-select-dream${dreamId != null ? ' is-set' : ''}`}
+                value={dreamId ?? ''}
+                onChange={(e) => setDreamId(e.target.value ? Number(e.target.value) : null)}
+                disabled={create.isPending || dreams.length === 0}
+                aria-label="Tag a dream"
+                data-testid="journal-dream-select"
+              >
+                <option value="">Tag a dream</option>
+                {dreams.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+              </select>
+              <select
+                className={`dj-select${category ? ' is-set' : ''}`}
+                value={category ?? ''}
+                onChange={(e) => setCategory(isCareCategory(e.target.value) ? e.target.value : null)}
+                disabled={create.isPending}
+                aria-label="Tag a CARE area"
+                style={category ? ({ '--dj-color': CATEGORY_META[category].color, '--dj-tint': CATEGORY_META[category].tint } as CSSProperties) : undefined}
+                data-testid="journal-category-select"
+              >
+                <option value="">CARE area</option>
+                {CARE_CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_META[c].label}</option>)}
+              </select>
+              <span data-testid="journal-privacy-toggle"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>
+            </>
+          )}
           <div className="dj-composer-actions">
             {canClose && <Button type="button" variant="ghost" onClick={cancel} disabled={create.isPending} data-testid="journal-cancel">Cancel</Button>}
             <Button type="submit" variant="primary" disabled={!canSubmit} loading={create.isPending} data-testid="journal-save">Save</Button>
           </div>
         </div>
-        <p className="dj-composer-hint muted tiny" data-testid="journal-composer-hint">
-          {isPrivate ? <IconLock /> : <IconUnlock />}
-          <span>
-            {isPrivate ? 'Only you can see this reflection.' : `${who === 'your coach' ? 'Your coach' : who} can read this — switch to Private to keep it to yourself.`}
-            <span className="hide-mobile"> · Cmd/Ctrl + Enter saves.</span>
-          </span>
-        </p>
+        {!covered && (
+          <p className="dj-composer-hint muted tiny" data-testid="journal-composer-hint">
+            {isPrivate ? <IconLock /> : <IconUnlock />}
+            <span>
+              {isPrivate ? 'Only you can see this reflection.' : `${who === 'your coach' ? 'Your coach' : who} can read this — switch to Private to keep it to yourself.`}
+              <span className="hide-mobile"> · Cmd/Ctrl + Enter saves.</span>
+            </span>
+          </p>
+        )}
         {error && <div className="callout callout-muted" role="alert"><IconInfo /><span>{error}</span></div>}
       </form>
     </Card>

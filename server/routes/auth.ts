@@ -25,6 +25,8 @@ function authState(db: DB, v: Viewer): AuthState {
     user: v.user,
     privateUnlocked: v.privateUnlocked,
     privateUnlockedUntil: v.privateUnlockedUntil,
+    // Relative, so the browser can time the re-hide without trusting its own clock to agree with ours.
+    privateUnlockedForMs: v.privateUnlockedUntil ? Math.max(0, Date.parse(v.privateUnlockedUntil) - Date.now()) : null,
     dreamerId: v.dreamerId,
     coachesDreamers: !!coaches,
   };

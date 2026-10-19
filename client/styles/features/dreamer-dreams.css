@@ -69,6 +69,9 @@
 .dd-detail-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
 .dd-col { min-width: 0; }
 @media (max-width: 960px) { .dd-detail-grid { grid-template-columns: 1fr; } }
+/* "Actions for this dream": on narrow cards the filter moves under the title rather than squeezing it. */
+.dd-actions-card .card-head { flex-wrap: wrap; }
+.dd-actions-card .segmented button { white-space: nowrap; }
 
 /* Chart: the shared TrendChart tucks its y-axis tightly for "10"; give "100%" labels room. */
 .dd-chart-wrap { padding-left: 14px; }

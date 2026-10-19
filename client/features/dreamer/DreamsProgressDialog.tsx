@@ -10,7 +10,9 @@ import { errorMessage } from '@/api/client';
 import { Button, Delta, Field, Modal, PercentInput, PrivacyToggle, TextArea } from '@/components/ui';
 import { IconLock, IconSparkle } from '@/components/icons';
 import { useToast } from '@/components/toast';
+import { UnlockDialog } from '@/features/shared/PrivacyControl';
 import type { Dream } from '@shared/types';
+import { CoveredDraft, useCoveredParts } from './drafts';
 
 export const DREAM_COLOR = 'var(--gold)';
 
@@ -23,13 +25,14 @@ export function privacyToast(toast: (m: string, k?: 'success' | 'error' | 'info'
   toast(unlocked ? privateMessage : partlyHidden ?? 'Saved as private — private entries are currently hidden.', 'private');
 }
 
-export function DreamsProgressDialog({ dream, open, onClose, onSaved }: { dream: Dream; open: boolean; onClose: () => void; onSaved?: (value: number) => void }) {
+/** `refreshing`: the dream is loading again (private entries were just hidden), so what it last held isn't shown. */
+export function DreamsProgressDialog({ dream, refreshing = false, open, onClose, onSaved }: { dream: Dream; refreshing?: boolean; open: boolean; onClose: () => void; onSaved?: (value: number) => void }) {
   if (!open) return null;
-  return <ProgressDialogInner dream={dream} onClose={onClose} onSaved={onSaved} />;
+  return <ProgressDialogInner dream={dream} refreshing={refreshing} onClose={onClose} onSaved={onSaved} />;
 }
 
-function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClose: () => void; onSaved?: (value: number) => void }) {
-  const { auth } = useAuth();
+function ProgressDialogInner({ dream, refreshing, onClose, onSaved }: { dream: Dream; refreshing: boolean; onClose: () => void; onSaved?: (value: number) => void }) {
+  const { auth, unlockPrivate } = useAuth();
   const { toast } = useToast();
   const create = useCreateCheckIn('me');
   const [value, setValue] = useState<number>(dream.progress ?? 0);
@@ -37,8 +40,11 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
   const [isPrivate, setIsPrivate] = useState(false);
   const [notePrivate, setNotePrivate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
   const hasNote = note.trim().length > 0;
-  const delta = dream.progress == null ? null : value - dream.progress;
+  // A private update (or a private note) stays here, covered, while private entries are hidden.
+  const covered = useCoveredParts(isPrivate ? ['all'] : hasNote && notePrivate ? ['note'] : []);
+  const delta = refreshing || dream.progress == null ? null : value - dream.progress;
   // "Achieved" comes from shared progress only, so only a shared 100% can mark the dream achieved.
   const reachesHundred = value >= 100 && !dream.achievedAt;
 
@@ -48,8 +54,9 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
       await create.mutateAsync({ progress: [{ dreamId: dream.id, value, isPrivate, note: hasNote ? note.trim() : undefined, notePrivate: hasNote ? notePrivate || isPrivate : undefined }] });
       const anyPrivate = isPrivate || (hasNote && notePrivate);
       const shared = value >= 100 ? 'Progress saved — this dream is achieved. Take a moment to celebrate.' : 'Progress updated.';
+      // Say what is private: the update itself, or only its note (the coach sees the number then).
       const privateMessage = value < 100
-        ? 'Saved as private.'
+        ? isPrivate ? 'Saved as private — only you can see this update.' : 'Progress updated. Your note is private — only you can see it.'
         : isPrivate
           ? 'Saved as private — a 100% only you can see. Your dream is marked achieved when a shared update reaches 100%.'
           : 'Saved — your note is private, and this dream is achieved. Celebrate it.';
@@ -60,6 +67,9 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
       setError(errorMessage(e));
     }
   };
+
+  // Showing private entries from a covered draft: the password dialog takes this one's place, then it comes back.
+  if (asking) return <UnlockDialog open onClose={() => setAsking(false)} onUnlock={unlockPrivate} />;
 
   return (
     <Modal
@@ -78,43 +88,49 @@ function ProgressDialogInner({ dream, onClose, onSaved }: { dream: Dream; onClos
           <div className="eyebrow dd-eyebrow">{dream.slotLabel}</div>
           <h3 className="dd-dialog-title">{dream.title}</h3>
         </div>
-        <Field label="How far along are you?" hint={dream.progress == null ? 'This is the first progress you record for this dream.' : `Last recorded at ${dream.progress}%${dream.progressIsPrivate ? ' (private)' : ''}.`}>
-          <div className="dd-pct-row">
-            <PercentInput value={value} onChange={setValue} color={DREAM_COLOR} label="Progress" />
-          </div>
-          <div className="row dd-pct-summary">
-            <span className="dd-pct-big tnum" data-testid="progress-dialog-value">{value}%</span>
-            {delta != null && delta !== 0 && <Delta value={delta} digits={0} suffix=" pts" />}
-            {delta === 0 && <span className="muted small">Same as last time — that’s fine too.</span>}
-          </div>
-        </Field>
-        {reachesHundred && (isPrivate ? (
-          <div className="callout callout-private" data-testid="progress-dialog-celebrate">
-            <IconLock />
-            <span>A private 100% is yours alone — only you will see it. Your dream is marked achieved when a shared update reaches 100%.</span>
-          </div>
-        ) : (
-          <div className="callout callout-gold" data-testid="progress-dialog-celebrate">
-            <IconSparkle />
-            <span>100% means this dream is achieved. Saving will mark it so — worth celebrating.</span>
-          </div>
-        ))}
-        <Field label="Add a note (optional)" htmlFor="dd-progress-note" hint="What moved, what you learned, what is next.">
-          <TextArea id="dd-progress-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What’s behind this number?" rows={3} data-testid="progress-note" />
-        </Field>
-        <div className="dd-privacy-rows">
-          <div className="spread dd-privacy-row">
-            <span className="small">This progress update</span>
-            <span data-testid="progress-private"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} /></span>
-          </div>
-          {hasNote && !isPrivate && (
-            <div className="spread dd-privacy-row fade-in">
-              <span className="small">Your note</span>
-              <span data-testid="progress-note-private"><PrivacyToggle value={notePrivate} onChange={setNotePrivate} /></span>
+        {covered.has('all') ? <CoveredDraft onShowPrivate={() => setAsking(true)} testId="progress-dialog-covered" /> : (
+          <>
+            <Field label="How far along are you?" hint={refreshing ? undefined : dream.progress == null ? 'This is the first progress you record for this dream.' : `Last recorded at ${dream.progress}%${dream.progressIsPrivate ? ' (private)' : ''}.`}>
+              <div className="dd-pct-row">
+                <PercentInput value={value} onChange={setValue} color={DREAM_COLOR} label="Progress" />
+              </div>
+              <div className="row dd-pct-summary">
+                <span className="dd-pct-big tnum" data-testid="progress-dialog-value">{value}%</span>
+                {delta != null && delta !== 0 && <Delta value={delta} digits={0} suffix=" pts" />}
+                {delta === 0 && <span className="muted small">Same as last time — that’s fine too.</span>}
+              </div>
+            </Field>
+            {reachesHundred && (isPrivate ? (
+              <div className="callout callout-private" data-testid="progress-dialog-celebrate">
+                <IconLock />
+                <span>A private 100% is yours alone — only you will see it. Your dream is marked achieved when a shared update reaches 100%.</span>
+              </div>
+            ) : (
+              <div className="callout callout-gold" data-testid="progress-dialog-celebrate">
+                <IconSparkle />
+                <span>100% means this dream is achieved. Saving will mark it so — worth celebrating.</span>
+              </div>
+            ))}
+            {covered.has('note') ? <CoveredDraft onShowPrivate={() => setAsking(true)} testId="progress-dialog-covered-note" /> : (
+              <Field label="Add a note (optional)" htmlFor="dd-progress-note" hint="What moved, what you learned, what is next.">
+                <TextArea id="dd-progress-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What’s behind this number?" rows={3} data-testid="progress-note" />
+              </Field>
+            )}
+            <div className="dd-privacy-rows">
+              <div className="spread dd-privacy-row">
+                <span className="small">This progress update</span>
+                <span data-testid="progress-private"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} /></span>
+              </div>
+              {hasNote && !isPrivate && !covered.has('note') && (
+                <div className="spread dd-privacy-row fade-in">
+                  <span className="small">Your note</span>
+                  <span data-testid="progress-note-private"><PrivacyToggle value={notePrivate} onChange={setNotePrivate} /></span>
+                </div>
+              )}
+              {isPrivate && <div className="muted tiny">Private updates stay out of your coach’s views entirely.{hasNote ? ' Your note travels with the update, so it is private too.' : ''}</div>}
             </div>
-          )}
-          {isPrivate && <div className="muted tiny">Private updates stay out of your coach’s views entirely.{hasNote ? ' Your note travels with the update, so it is private too.' : ''}</div>}
-        </div>
+          </>
+        )}
         {error && <div className="callout callout-muted" role="alert">{error}</div>}
       </div>
     </Modal>

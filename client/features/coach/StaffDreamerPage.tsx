@@ -23,6 +23,7 @@ import { ActionList } from '@/features/shared/ActionItems';
 import { JournalEntryCard, TimelineFeed } from '@/features/shared/Timeline';
 import { SessionGridView } from '@/features/coach/SessionGridView';
 import { StatusChip } from '@/features/coach/CoachDashboardPage';
+import { activityAt } from '@/features/coach/journalActivity';
 import { IconArrowLeft, IconCheck, IconCompass, IconEdit, IconInfo, IconMessage, IconPen, IconPlay, IconStar, IconUsers, IconWheel } from '@/components/icons';
 import { dayHeading, dayKey, fmtDate, fmtDateTime, plural, relativeTime } from '@/lib/format';
 import { sessionBaseline } from '@/lib/sessionDelta';
@@ -570,19 +571,21 @@ function ReflectionsTab({ id, dreams }: { id: number; dreams: Dream[] }) {
   const entries = journal.data ?? [];
   const dreamsWith = bySlot(dreams).filter((d) => entries.some((e) => e.dreamId === d.id));
   const catsWith = RATING_CATEGORIES.filter((c) => entries.some((e) => e.category === c));
+  // Listed by when the dreamer wrote them: a note on a session value sits where it was written, not at the session.
   const visible = useMemo(() => {
     const v = filter.kind === 'all' ? entries : filter.kind === 'dream' ? entries.filter((e) => e.dreamId === filter.dreamId) : entries.filter((e) => e.category === filter.category);
-    return newestFirst(v);
+    return [...v].sort((a, b) => Date.parse(activityAt(b)) - Date.parse(activityAt(a)));
   }, [entries, filter]);
   const page = useMemo(() => visible.slice(0, shown), [visible, shown]);
   const remaining = visible.length - page.length;
   const days = useMemo(() => {
     const out: { key: string; at: string; items: JournalEntry[] }[] = [];
     for (const e of page) {
-      const key = dayKey(e.occurredAt);
+      const at = activityAt(e);
+      const key = dayKey(at);
       const last = out[out.length - 1];
       if (last && last.key === key) last.items.push(e);
-      else out.push({ key, at: e.occurredAt, items: [e] });
+      else out.push({ key, at, items: [e] });
     }
     return out;
   }, [page]);

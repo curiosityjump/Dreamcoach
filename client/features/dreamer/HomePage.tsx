@@ -15,8 +15,9 @@ import { ActionComposer, ActionList } from '@/features/shared/ActionItems';
 import { TimelineFeed } from '@/features/shared/Timeline';
 import { CARE_CATEGORIES, CATEGORY_META, type CareCategory } from '@shared/care';
 import type { CoachingSession, Dream, DreamerOverview, LatestRating, Snapshot } from '@shared/types';
-import { firstName, fmtDate, fmtDateLong, plural, relativeTime } from '@/lib/format';
+import { dayKey, firstName, fmtDate, fmtDateLong, plural, relativeTime } from '@/lib/format';
 import { sessionBaseline } from '@/lib/sessionDelta';
+import { KeepDrafts, useLastKnown, useLoadedOnce } from './drafts';
 
 /* ---------- Small helpers ---------- */
 
@@ -51,12 +52,13 @@ function latestSummary(latest: Snapshot['latest'], coachName: string | null): st
   const entries = CARE_CATEGORIES.map((c) => latest[c]).filter((x): x is LatestRating => !!x);
   if (!entries.length) return null;
   const newest = entries.reduce((a, b) => (a.occurredAt > b.occurredAt ? a : b));
-  const sameMoment = entries.every((e) => e.source === newest.source && e.occurredAt.slice(0, 10) === newest.occurredAt.slice(0, 10));
   const when = whenPhrase(newest.occurredAt);
-  if (sameMoment) {
-    return newest.source === 'session' ? `From your session${coachName ? ` with ${firstName(coachName)}` : ''} ${when}` : `From your self check-in ${when}`;
-  }
-  return `A mix of session and self check-in values · most recent ${when}`;
+  if (entries.some((e) => e.source !== newest.source)) return `A mix of session and self check-in values · most recent ${when}`;
+  // One source: one session or check-in when they all fall on the same (local) day, several otherwise.
+  const oneDay = entries.every((e) => dayKey(e.occurredAt) === dayKey(newest.occurredAt));
+  const coach = coachName ? ` with ${firstName(coachName)}` : '';
+  if (newest.source === 'session') return oneDay ? `From your session${coach} ${when}` : `From your sessions${coach} · most recent ${when}`;
+  return oneDay ? `From your self check-in ${when}` : `From your self check-ins · most recent ${when}`;
 }
 
 const sourceLabel = (r: LatestRating) => `${r.source === 'session' ? 'Session' : 'Self check-in'} · ${fmtDate(r.occurredAt)}`;
@@ -93,9 +95,13 @@ export function SessionDelta({ value, base, suffix }: { value: number; base: Bas
 export function HomePage() {
   const { auth } = useAuth();
   const overview = useOverview('me');
+  // Hiding private entries loads the overview again. The page stays meanwhile, so an action being added keeps what's
+  // typed: the greeting and the coaching card (never private) show what was there, the rest waits for fresh data.
+  const loaded = useLoadedOnce(!!overview.data);
+  const known = useLastKnown(overview.data);
 
-  if (overview.isLoading) return <LoadingPage label="Opening your space…" />;
-  if (overview.error || !overview.data) {
+  if (!loaded || !known) {
+    if (overview.isLoading) return <LoadingPage label="Opening your space…" />;
     return (
       <div className="page">
         <PageHeader eyebrow="Home" title="Something went wrong" />
@@ -104,8 +110,8 @@ export function HomePage() {
     );
   }
 
-  const data = overview.data;
-  const { dreamer, snapshot } = data;
+  const fresh = overview.data;
+  const { dreamer, snapshot } = known;
   const name = firstName(auth?.user.name ?? dreamer.name);
   const coachName = dreamer.coach?.name ?? null;
 
@@ -130,20 +136,27 @@ export function HomePage() {
         }
       />
 
-      <div className="dh-grid">
-        <div className="dh-col">
-          <DreamsCard dreams={snapshot.dreams} />
-          <ActionsCard dreams={snapshot.dreams} />
+      <KeepDrafts>
+        <div className="dh-grid">
+          <div className="dh-col">
+            {fresh ? <DreamsCard dreams={fresh.snapshot.dreams} /> : <CardSkeleton />}
+            <ActionsCard dreams={snapshot.dreams} />
+          </div>
+          <div className="dh-col">
+            {fresh ? <CareCard snapshot={fresh.snapshot} coachName={coachName} /> : <CardSkeleton />}
+            <CoachingCard snapshot={snapshot} coachName={coachName} />
+          </div>
         </div>
-        <div className="dh-col">
-          <CareCard snapshot={snapshot} coachName={coachName} />
-          <CoachingCard snapshot={snapshot} coachName={coachName} />
-        </div>
-      </div>
 
-      <RecentCard overview={data} />
+        {fresh ? <RecentCard overview={fresh} /> : <CardSkeleton />}
+      </KeepDrafts>
     </div>
   );
+}
+
+/** A card waiting for its data to load again. */
+function CardSkeleton() {
+  return <Card aria-busy><div className="stack"><Skeleton h={18} w="40%" /><Skeleton h={14} /><Skeleton h={14} w="80%" /><Skeleton h={14} w="60%" /></div></Card>;
 }
 
 /* ---------- Your dreams ---------- */
@@ -268,7 +281,9 @@ function ActionsCard({ dreams }: { dreams: Dream[] }) {
   const [composing, setComposing] = useState(false);
   const active = actions.data ?? [];
   const shown = active.slice(0, HOME_ACTION_LIMIT);
-  const isEmpty = !actions.isLoading && !actions.error && active.length === 0;
+  // While the list loads again (hiding private entries) an empty list stays empty, and its composer stays put.
+  const wasEmpty = useLastKnown(actions.data ? actions.data.length === 0 : undefined);
+  const isEmpty = !actions.error && (actions.data ? active.length === 0 : !!wasEmpty);
 
   return (
     <Card data-testid="home-actions">
@@ -286,26 +301,29 @@ function ActionsCard({ dreams }: { dreams: Dream[] }) {
           </>
         }
       />
-      {composing && !isEmpty && (
+      {/* Stays open if the list empties meanwhile (its Cancel closes it), so what's typed is never dropped. */}
+      {composing && (
         <div className="dh-composer" data-testid="home-composer">
           <ActionComposer dreamerRef="me" dreams={dreams} mode="dreamer" autoFocus onDone={() => setComposing(false)} onCancel={() => setComposing(false)} />
         </div>
       )}
-      {actions.isLoading ? (
-        <div className="stack" aria-busy>
-          <Skeleton h={22} /><Skeleton h={22} w="80%" /><Skeleton h={22} w="60%" />
-        </div>
-      ) : actions.error ? (
+      {actions.error && !actions.data ? (
         <div className="callout callout-muted" role="alert"><IconInfo /><span>{errorMessage(actions.error)}</span></div>
       ) : isEmpty ? (
         <>
           <EmptyState icon={<IconList />} title="Nothing on your list right now">
             Add a small step toward one of your dreams — or something you and your coach talked about.
           </EmptyState>
-          <div className="dh-composer" data-testid="home-composer">
-            <ActionComposer dreamerRef="me" dreams={dreams} mode="dreamer" />
-          </div>
+          {!composing && (
+            <div className="dh-composer" data-testid="home-composer">
+              <ActionComposer dreamerRef="me" dreams={dreams} mode="dreamer" />
+            </div>
+          )}
         </>
+      ) : !actions.data ? (
+        <div className="stack" aria-busy>
+          <Skeleton h={22} /><Skeleton h={22} w="80%" /><Skeleton h={22} w="60%" />
+        </div>
       ) : (
         <>
           <ActionList dreamerRef="me" actions={shown} dreams={dreams} mode="dreamer" filter="active" compact showAdd={false} />

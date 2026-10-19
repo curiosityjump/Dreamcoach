@@ -12,6 +12,7 @@ import { Card, CardHead, PageHeader, Segmented, Skeleton } from '@/components/ui
 import { IconInfo, IconX } from '@/components/icons';
 import { ActionComposer, ActionList } from '@/features/shared/ActionItems';
 import { plural } from '@/lib/format';
+import { KeepDrafts, useLastKnown, useLoadedOnce } from './drafts';
 
 type Tab = ActionStatus;
 
@@ -30,8 +31,13 @@ export function ActionsPage() {
   const [dreamFilter, setDreamFilter] = useState<number | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CareCategory | null>(null);
 
+  // Hiding private entries loads the actions again. The composer (and what's typed in it) stays meanwhile, and so
+  // do the dream filters, which only need the dreams' titles.
+  const loaded = useLoadedOnce(!!actions.data);
+  const refreshing = !actions.data;
+  const knownDreams = useLastKnown(dreams.data);
   const all: ActionItem[] = actions.data ?? [];
-  const dreamList = useMemo(() => [...(dreams.data ?? [])].sort((a, b) => a.slot - b.slot), [dreams.data]);
+  const dreamList = useMemo(() => [...(knownDreams ?? [])].sort((a, b) => a.slot - b.slot), [knownDreams]);
 
   const counts = useMemo(() => {
     const c: Record<Tab, number> = { active: 0, completed: 0, archived: 0 };
@@ -55,12 +61,12 @@ export function ActionsPage() {
     <div className="page page-narrow da-page" data-testid="actions-page">
       <PageHeader eyebrow="Actions" title="Actions" lead="Small steps you’ve chosen. They’re yours to keep, change, or set aside." />
 
-      {actions.isPending ? (
+      {!loaded && actions.isPending ? (
         <div className="stack" aria-busy data-testid="actions-loading">
           <Skeleton h={36} w={300} />
           <Card><div className="stack"><Skeleton h={22} w="70%" /><Skeleton h={22} w="55%" /><Skeleton h={22} w="62%" /></div></Card>
         </div>
-      ) : actions.isError ? (
+      ) : !loaded || (refreshing && actions.isError) ? (
         <div className="callout callout-muted" role="alert" data-testid="actions-error"><IconInfo /><span>{errorMessage(actions.error)}</span></div>
       ) : (
         <>
@@ -72,13 +78,15 @@ export function ActionsPage() {
                 ariaLabel="Show actions by status"
                 options={(['active', 'completed', 'archived'] as Tab[]).map((t) => ({
                   value: t,
-                  label: <span data-testid={`actions-tab-${t}`}>{TAB_LABEL[t]} <span className="da-count tnum">{counts[t]}</span></span>,
+                  label: <span data-testid={`actions-tab-${t}`}>{TAB_LABEL[t]} {!refreshing && <span className="da-count tnum">{counts[t]}</span>}</span>,
                 }))}
               />
             </div>
-            <p className="da-stats tnum" data-testid="actions-stats">
-              {counts.completed} completed so far · {counts.active} active{counts.archived > 0 ? ` · ${counts.archived} set aside` : ''}
-            </p>
+            {!refreshing && (
+              <p className="da-stats tnum" data-testid="actions-stats">
+                {counts.completed} completed so far · {counts.active} active{counts.archived > 0 ? ` · ${counts.archived} set aside` : ''}
+              </p>
+            )}
           </div>
 
           {(dreamList.length > 0 || all.length > 0) && (
@@ -133,22 +141,28 @@ export function ActionsPage() {
             </Card>
           )}
 
-          <Card data-testid="actions-list-card">
-            {filtering && inTab > 0 && (
-              <p className="da-filter-summary muted small" data-testid="actions-filter-summary">
-                {plural(inTab, 'action')} {tab === 'archived' ? 'set aside' : tab} {dreamFilter != null ? `for “${dreamList.find((d) => d.id === dreamFilter)?.title ?? 'this dream'}”` : ''}{dreamFilter != null && categoryFilter ? ' and ' : ''}{categoryFilter ? `in ${CATEGORY_META[categoryFilter].label}` : ''}
-              </p>
-            )}
-            <ActionList
-              dreamerRef="me"
-              actions={filtered}
-              dreams={dreamList}
-              mode="dreamer"
-              filter={tab}
-              emptyTitle={empty.title}
-              emptyBody={empty.body}
-            />
-          </Card>
+          <KeepDrafts>
+            <Card data-testid="actions-list-card">
+              {filtering && inTab > 0 && (
+                <p className="da-filter-summary muted small" data-testid="actions-filter-summary">
+                  {plural(inTab, 'action')} {tab === 'archived' ? 'set aside' : tab} {dreamFilter != null ? `for “${dreamList.find((d) => d.id === dreamFilter)?.title ?? 'this dream'}”` : ''}{dreamFilter != null && categoryFilter ? ' and ' : ''}{categoryFilter ? `in ${CATEGORY_META[categoryFilter].label}` : ''}
+                </p>
+              )}
+              {refreshing ? (
+                <div className="stack" aria-busy><Skeleton h={22} w="70%" /><Skeleton h={22} w="55%" /><Skeleton h={22} w="62%" /></div>
+              ) : (
+                <ActionList
+                  dreamerRef="me"
+                  actions={filtered}
+                  dreams={dreamList}
+                  mode="dreamer"
+                  filter={tab}
+                  emptyTitle={empty.title}
+                  emptyBody={empty.body}
+                />
+              )}
+            </Card>
+          </KeepDrafts>
         </>
       )}
     </div>

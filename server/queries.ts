@@ -241,6 +241,8 @@ export const WRITTEN_BY_DREAMER = (alias = 'j') => `${alias}.author_id = (SELECT
  */
 export const ACTIVITY_AT = (alias = 'j') =>
   `(CASE WHEN ${alias}.check_in_id IS NULL AND (${alias}.rating_id IS NOT NULL OR ${alias}.progress_id IS NOT NULL) THEN ${alias}.created_at ELSE ${alias}.occurred_at END)`;
+/** ACTIVITY_AT for a mapped entry: where it is listed among the dreamer's activity. */
+export const activityAt = (j: JournalEntry): string => (j.checkInId == null && (j.ratingId != null || j.progressId != null) ? j.createdAt : j.occurredAt);
 
 /** Same-moment ratings (one check-in) keep CARE order, since ids carry no order. */
 const CATEGORY_ORDER = `CASE x.category ${RATING_CATEGORIES.map((c, i) => `WHEN '${c}' THEN ${i}`).join(' ')} END`;
@@ -405,17 +407,18 @@ export function listJournal(
   scope: Scope,
   opts: { from?: string; to?: string; dreamId?: number; category?: RatingCategory; standaloneOnly?: boolean; checkInId?: number; sessionId?: number } = {},
 ): JournalEntry[] {
-  // A note attached to a rating/progress entry is only visible if its parent is visible too.
+  // A note attached to a rating/progress entry is only visible if its parent is visible too. Entries are dated,
+  // filtered and ordered by when they count as the dreamer's activity (a note on a session value: when written).
   const where: string[] = ['j.dreamer_id = ?', JOURNAL_VISIBLE('j')];
   const params: unknown[] = [scope.dreamerId, INC(scope), INC(scope), INC(scope)];
-  if (opts.from) { where.push('j.occurred_at >= ?'); params.push(opts.from); }
-  if (opts.to) { where.push('j.occurred_at <= ?'); params.push(opts.to); }
+  if (opts.from) { where.push(`${ACTIVITY_AT('j')} >= ?`); params.push(opts.from); }
+  if (opts.to) { where.push(`${ACTIVITY_AT('j')} <= ?`); params.push(opts.to); }
   if (opts.dreamId != null) { where.push('j.dream_id = ?'); params.push(opts.dreamId); }
   if (opts.category) { where.push('j.category = ?'); params.push(opts.category); }
   if (opts.standaloneOnly) where.push('j.rating_id IS NULL AND j.progress_id IS NULL');
   if (opts.checkInId != null) { where.push('j.check_in_id = ?'); params.push(opts.checkInId); }
   if (opts.sessionId != null) { where.push('j.session_id = ?'); params.push(opts.sessionId); }
-  const rows = db.prepare(`${JOURNAL_SELECT} WHERE ${where.join(' AND ')} ORDER BY j.occurred_at DESC, j.id DESC`).all(...params) as JournalRow[];
+  const rows = db.prepare(`${JOURNAL_SELECT} WHERE ${where.join(' AND ')} ORDER BY ${ACTIVITY_AT('j')} DESC, j.occurred_at DESC, j.id DESC`).all(...params) as JournalRow[];
   return rows.map((r) => mapJournal(r, scope));
 }
 
@@ -599,11 +602,12 @@ export function getTimeline(db: DB, scope: Scope, opts: { limit?: number; from?:
     items.push({ kind: 'progress', at: p.occurredAt, item: p, dreamTitle: dreams.get(p.dreamId) ?? 'Dream' });
   }
   // Attached notes travel with their parent entries; only standalone reflections appear on their own —
-  // except notes on values a coach recorded, whose parent is folded into its session item, so they sit beside it.
+  // except the dreamer's notes on values a coach recorded, whose parent is folded into its session item: those
+  // are reflections of theirs, listed when they were written (as for Last self activity).
   for (const j of listJournal(db, scope, { from: opts.from, to: opts.to })) {
     const standalone = j.ratingId == null && j.progressId == null;
     const onSessionValue = j.sessionId != null && (j.ratingId != null || j.progressId != null);
-    if (standalone || onSessionValue) items.push({ kind: 'journal', at: j.occurredAt, item: j });
+    if (standalone || onSessionValue) items.push({ kind: 'journal', at: activityAt(j), item: j });
   }
   for (const a of listActions(db, scope, 'all')) {
     const push = (at: string, event: 'created' | 'completed' | 'archived') => {
