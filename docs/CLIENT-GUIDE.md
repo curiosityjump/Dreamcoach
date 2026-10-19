@@ -187,6 +187,16 @@ typing. `client/features/dreamer/drafts.tsx` holds the conventions:
   calls `uncover()` (or `uncover(parts)` for the parts it discarded). A part is
   never uncovered just because it stopped being private — it may still hold the
   same private words.
+- A composer never unmounts because of what its list shows, a filter or tab
+  change, Show/Hide private or a successful Add. `ActionComposer`'s `onDone`
+  receives `(action, typing)`; forms that close after an Add use
+  `useCloseAfterAdd`, which waits 1.5 s and stays open while the next entry is
+  being typed.
+- An untouched progress draft (progress dialog, check-in dream card) has no number
+  of its own: it follows the dream's currently visible progress, so hiding or
+  showing private entries re-baselines it, and a value taken from a private update
+  can't be saved as shared until the dreamer changes it or makes the update
+  private.
 - Dialogs are portaled; `Modal` stops form submits at its root and only the
   topmost dialog answers Escape and Tab.
 

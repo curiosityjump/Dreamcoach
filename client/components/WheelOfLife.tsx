@@ -2,7 +2,8 @@
  * The CARE Wheel of Life. Four quadrants (Contribution, Alignment, Relationships,
  * Energy), each filled to its 0–10 rating. Optionally interactive: click/drag inside
  * a quadrant sets its rating (on touch: tap, or drag sideways, so swiping up or down
- * still scrolls the page), and each quadrant is a keyboard slider. An optional
+ * still scrolls the page), and each quadrant is a keyboard slider. `locked` quadrants take no rating (their
+ * draft is out of sight); a press or key there calls `onLocked` instead. An optional
  * `compare` set draws a hollow outline so two points in time can be compared at a glance.
  */
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
@@ -16,6 +17,7 @@ const ORDER: CareCategory[] = ['contribution', 'alignment', 'relationships', 'en
 const START: Record<CareCategory, number> = { contribution: 0, alignment: 90, relationships: 180, energy: 270 };
 // How far a touch may wander and still count as a tap.
 const TAP_SLOP = 10;
+const NONE: readonly CareCategory[] = [];
 
 function polar(cx: number, cy: number, r: number, deg: number) {
   const a = ((deg - 90) * Math.PI) / 180;
@@ -41,11 +43,15 @@ export function WheelOfLife({
   showAreas = false,
   compareLabel,
   valueLabel,
+  locked = NONE,
+  onLocked,
 }: {
   values: WheelValues;
   compare?: WheelValues | null;
   size?: number;
   onChange?: (category: CareCategory, value: number) => void;
+  locked?: readonly CareCategory[];
+  onLocked?: (category: CareCategory) => void;
   showLabels?: boolean;
   showAreas?: boolean;
   compareLabel?: string;
@@ -81,7 +87,9 @@ export function WheelOfLife({
     const { cat, value, dist } = fromPointer(e);
     if (dist > R * 1.15) { setHover(null); return; }
     setHover(cat);
-    if (commit) onChange!(cat, value);
+    if (!commit) return;
+    if (locked.includes(cat)) onLocked?.(cat);
+    else onChange!(cat, value);
   };
 
   const onKey = (e: KeyboardEvent<SVGPathElement>, c: CareCategory) => {
@@ -91,7 +99,8 @@ export function WheelOfLife({
       : e.key === 'Home' ? 0 : e.key === 'End' ? 10 : null;
     if (next == null) return;
     e.preventDefault();
-    if (next !== v) onChange!(c, next);
+    if (locked.includes(c)) onLocked?.(c);
+    else if (next !== v) onChange!(c, next);
   };
 
   return (
@@ -99,7 +108,7 @@ export function WheelOfLife({
       ref={ref}
       viewBox={`0 0 ${size} ${size}`}
       width="100%"
-      style={{ maxWidth: size, display: 'block', margin: '0 auto', overflow: 'visible', touchAction: interactive ? 'pan-y pinch-zoom' : undefined, cursor: interactive ? 'crosshair' : undefined, userSelect: 'none' }}
+      style={{ maxWidth: size, display: 'block', margin: '0 auto', overflow: 'visible', touchAction: interactive ? 'pan-y pinch-zoom' : undefined, cursor: interactive ? (hover && locked.includes(hover) ? 'not-allowed' : 'crosshair') : undefined, userSelect: 'none' }}
       role={interactive ? 'group' : 'img'}
       aria-label={`CARE wheel: ${ORDER.map((c) => `${CATEGORY_META[c].label} ${values[c] ?? '—'}`).join(', ')}`}
       onPointerDown={(e) => {
@@ -197,6 +206,7 @@ export function WheelOfLife({
             aria-valuemax={10}
             aria-valuenow={values[c] ?? undefined}
             aria-valuetext={values[c] == null ? 'Not rated' : `${values[c]} out of 10`}
+            aria-disabled={locked.includes(c) || undefined}
             onKeyDown={(e) => onKey(e, c)}
           />
         ))}

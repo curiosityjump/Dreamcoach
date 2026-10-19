@@ -287,13 +287,21 @@ function EntryRow({ entry, cellTaken }: { entry: RatingEntry; cellTaken: boolean
   const update = useUpdateRating('me');
   const remove = useDeleteRating('me');
   // The editor's draft is kept by the page, so it is still here after the list loads again (hiding private entries).
-  const { draft, setDraft, patchDraft, covered } = useKeptDraft<EntryDraft>(`rating-${entry.id}`, draftPrivate);
+  const { draft, setDraft, patchDraft, covered: keptCovered } = useKeptDraft<EntryDraft>(`rating-${entry.id}`, draftPrivate);
   const editing = draft !== null;
-  // Private entries were shown while editing, so a note that was hidden is here now: start from it (and its
-  // privacy), keeping anything typed meanwhile below it. Saving can then never overwrite a note unseen.
-  if (draft && !covered && entry.note?.id !== draft.seenNote?.id) {
-    const typed = draft.note.trim() !== (draft.seenNote?.body ?? '') ? draft.note.trim() : '';
-    setDraft({ ...draft, seenNote: entry.note, note: [entry.note?.body, typed].filter(Boolean).join('\n\n'), notePriv: entry.note?.isPrivate ?? false });
+  // The note the draft started from is out of view while private entries are hidden: it may have been made private
+  // meanwhile (in another tab, say), so what's typed, its words among them, waits covered until they're shown.
+  const covered = keptCovered || (!!draft && !auth?.privateUnlocked && !!draft.seenNote && !entry.note);
+  if (draft && !covered && entry.note) {
+    if (entry.note.id === draft.seenNote?.id) {
+      // Its note was made private (or shared) since: the draft follows, unless its own switch was changed.
+      if (entry.note.isPrivate !== draft.seenNote.isPrivate) setDraft({ ...draft, seenNote: entry.note, notePriv: draft.notePriv === draft.seenNote.isPrivate ? entry.note.isPrivate : draft.notePriv });
+    } else {
+      // Private entries were shown while editing, so a note that was hidden is here now: start from it (and its
+      // privacy), keeping anything typed meanwhile below it. Saving can then never overwrite a note unseen.
+      const typed = draft.note.trim() !== (draft.seenNote?.body ?? '') ? draft.note.trim() : '';
+      setDraft({ ...draft, seenNote: entry.note, note: [entry.note.body, typed].filter(Boolean).join('\n\n'), notePriv: entry.note.isPrivate });
+    }
   }
   const [editError, setEditError] = useState<EditError | null>(null);
   const [unlocking, setUnlocking] = useState(false);

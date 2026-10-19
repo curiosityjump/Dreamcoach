@@ -6,9 +6,11 @@
  *  - row editors keep their drafts in the page (`KeepDrafts`, `useKeptDraft`) while their list reloads, and find
  *    them again when the row is back;
  *  - a draft that was private when private entries went out of view stays, covered by a short notice
- *    (`useCoveredParts`, `CoveredDraft`), until they are shown again.
+ *    (`useCoveredParts`, `CoveredDraft`), until they are shown again;
+ *  - a form that closes once its entry is added waits a moment, and stays open if the next one is being typed
+ *    (`useCloseAfterAdd`).
  */
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from '@/auth/AuthContext';
 import { Button } from '@/components/ui';
 import { IconLock, IconUnlock } from '@/components/icons';
@@ -82,6 +84,27 @@ export function CoveredDraft({ onShowPrivate, testId = 'covered-draft' }: { onSh
       )}
     </div>
   );
+}
+
+/** How long a form that closes once its entry is added stays open for the next one to be typed. */
+const CLOSE_AFTER_ADD_MS = 1500;
+
+/**
+ * For a form that closes once its entry is added (an action composer, whose next entry is often typed straight
+ * away): `added(typing)` closes it after a moment unless something is being typed by then, and `typed()` — from
+ * the form's input events — keeps it open. So it never closes on what is being typed.
+ */
+export function useCloseAfterAdd(close: () => void): { added: (typing: boolean) => void; typed: () => void } {
+  const timer = useRef<number | undefined>(undefined);
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  const typed = useCallback(() => window.clearTimeout(timer.current), []);
+  const added = useCallback((typing: boolean) => {
+    window.clearTimeout(timer.current);
+    if (!typing) timer.current = window.setTimeout(() => closeRef.current(), CLOSE_AFTER_ADD_MS);
+  }, []);
+  useEffect(() => typed, [typed]);
+  return { added, typed };
 }
 
 const Kept = createContext<Map<string, unknown> | null>(null);

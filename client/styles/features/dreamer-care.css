@@ -148,6 +148,8 @@
 /* A private draft, covered while private entries are hidden (drafts.tsx); used on every dreamer page. */
 .dc-covered-body { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .dc-covered-body .btn svg { width: 16px; height: 16px; margin-top: 0; }
+/* A press on a wheel area whose private draft is covered: the wheel leaves it as it is and says why. */
+.dc-wheel-locked { margin-top: 12px; }
 /* Phones: the menu sits in the top-right corner, so the meta line wraps beside it and notes keep the full width. */
 @media (max-width: 480px) {
   .dc-entry { position: relative; grid-template-columns: 40px minmax(0, 1fr); padding: 12px 12px; }

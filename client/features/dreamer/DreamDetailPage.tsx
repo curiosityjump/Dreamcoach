@@ -20,7 +20,7 @@ import type { ActionItem, Dream, DreamHistory, JournalEntry, ProgressEntry } fro
 import { DREAM_COLOR, DreamsProgressDialog, privacyToast } from './DreamsProgressDialog';
 import { DreamsEditForm } from './DreamsEditDialog';
 import { AchievedChip, SessionDelta, dreamBaseline } from './HomePage';
-import { CoveredDraft, KeepDrafts, useCovered, useKeptDraft, useLastKnown, useLoadedOnce } from './drafts';
+import { CoveredDraft, KeepDrafts, useCloseAfterAdd, useCovered, useKeptDraft, useLastKnown, useLoadedOnce } from './drafts';
 
 const NO_ENTRIES: ProgressEntry[] = [];
 const NO_ACTIONS: ActionItem[] = [];
@@ -80,6 +80,7 @@ function DreamDetail({ history, dream: known, dreams, guidance }: { history: Dre
   const [updating, setUpdating] = useState(false);
   const [actionFilter, setActionFilter] = useState<'active' | 'completed' | 'all'>('active');
   const [composing, setComposing] = useState(false);
+  const afterAdd = useCloseAfterAdd(() => setComposing(false));
   const sessions = useSessions('me');
 
   const sorted = useMemo(() => [...dreams].sort((a, b) => a.slot - b.slot), [dreams]);
@@ -222,8 +223,9 @@ function DreamDetail({ history, dream: known, dreams, guidance }: { history: Dre
             />
             <div className="stack">
               {composing ? (
-                <div className="dd-composer-wrap" data-testid="dream-action-composer">
-                  <ActionComposer dreamerRef="me" dreams={dreamRefs} mode="dreamer" defaultDreamId={dream.id} autoFocus onDone={() => { setComposing(false); }} onCancel={() => setComposing(false)} />
+                // Added with the next one being typed, it stays open for that one.
+                <div className="dd-composer-wrap" onInput={afterAdd.typed} data-testid="dream-action-composer">
+                  <ActionComposer dreamerRef="me" dreams={dreamRefs} mode="dreamer" defaultDreamId={dream.id} autoFocus onDone={(_, typing) => afterAdd.added(typing)} onCancel={() => { afterAdd.typed(); setComposing(false); }} />
                 </div>
               ) : (
                 <Button variant="secondary" size="sm" onClick={() => setComposing(true)} data-testid="dream-add-action"><IconPlus /> Add an action for this dream</Button>
@@ -304,15 +306,23 @@ function ProgressRow({ entry, previous, cellTaken }: { entry: ProgressEntry; pre
   const remove = useDeleteProgress('me');
   const [confirmHide, setConfirmHide] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const { draft, setDraft, patchDraft, covered } = useKeptDraft<EditDraft>(`progress-${entry.id}`, editDraftPrivate);
+  const { draft, setDraft, patchDraft, covered: keptCovered } = useKeptDraft<EditDraft>(`progress-${entry.id}`, editDraftPrivate);
   const [unlocking, setUnlocking] = useState(false);
   const editingNote = draft !== null && !unlocking;
-  // Private entries were shown from the editor, so a note that was hidden is in view now: start from it (and its
-  // privacy), keeping anything typed below it. Saving can then never write over a note unseen. A note going out of
-  // view while the draft isn't covered takes its text with it, since it may hold its words.
-  if (draft && !covered && entry.note?.id !== draft.seenNote?.id) {
-    const typed = entry.note && draft.note.trim() !== (draft.seenNote?.body ?? '') ? draft.note.trim() : '';
-    setDraft({ ...draft, seenNote: entry.note, note: [entry.note?.body, typed].filter(Boolean).join('\n\n'), notePrivate: entry.note?.isPrivate ?? false, merged: !!typed });
+  const unlocked = !!auth?.privateUnlocked;
+  // The note the draft started from is out of view while private entries are hidden: it may have been made private
+  // meanwhile (in another tab, say), so what's typed, its words among them, waits covered until they're shown.
+  const covered = keptCovered || (!!draft && !unlocked && !!draft.seenNote && !entry.note);
+  if (draft && !covered && entry.note) {
+    if (entry.note.id === draft.seenNote?.id) {
+      // Its note was made private (or shared) since: the draft follows, unless its own switch was changed.
+      if (entry.note.isPrivate !== draft.seenNote.isPrivate) setDraft({ ...draft, seenNote: entry.note, notePrivate: draft.notePrivate === draft.seenNote.isPrivate ? entry.note.isPrivate : draft.notePrivate });
+    } else {
+      // Private entries were shown from the editor, so a note that was hidden is in view now: start from it (and its
+      // privacy), keeping anything typed below it. Saving can then never write over a note unseen.
+      const typed = draft.note.trim() !== (draft.seenNote?.body ?? '') ? draft.note.trim() : '';
+      setDraft({ ...draft, seenNote: entry.note, note: [entry.note.body, typed].filter(Boolean).join('\n\n'), notePrivate: entry.note.isPrivate, merged: !!typed });
+    }
   }
   const isSession = entry.source === 'session';
   // A private session value whose session was later deleted: it belongs to no session any more.
@@ -320,7 +330,6 @@ function ProgressRow({ entry, previous, cellTaken }: { entry: ProgressEntry; pre
   // A hidden session value can be shared back only while its session has no shared value for this dream (DECISIONS #14).
   const shareBlocked = isSession && entry.isPrivate && (detached || cellTaken);
   const delta = previous ? entry.value - previous.value : null;
-  const unlocked = !!auth?.privateUnlocked;
   // Private session values (and detached ones) are the dreamer's to remove: staff can't see them.
   const canDelete = !isSession || entry.isPrivate;
 
@@ -493,7 +502,7 @@ function EntryEditDialog({ entry, draft, onChange, covered, onClose, onShowPriva
     <Modal
       open
       onClose={onClose}
-      title={isSession ? (entry.note ? 'Edit note' : 'Add a note') : 'Edit update'}
+      title={isSession ? (entry.note ?? draft.seenNote ? 'Edit note' : 'Add a note') : 'Edit update'}
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={update.isPending}>Cancel</Button>

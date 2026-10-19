@@ -35,7 +35,10 @@ function ProgressDialogInner({ dream, refreshing, onClose, onSaved }: { dream: D
   const { auth, unlockPrivate } = useAuth();
   const { toast } = useToast();
   const create = useCreateCheckIn('me');
-  const [value, setValue] = useState<number>(dream.progress ?? 0);
+  // Until the dreamer moves it, the value is the dream's progress as shown right now: hiding or showing private
+  // entries moves it too, so it never holds a private value out of view (null while the dream loads again).
+  const [chosen, setValue] = useState<number | null>(null);
+  const value = chosen ?? (refreshing ? null : dream.progress ?? 0);
   const [note, setNote] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [notePrivate, setNotePrivate] = useState(false);
@@ -44,11 +47,14 @@ function ProgressDialogInner({ dream, refreshing, onClose, onSaved }: { dream: D
   const hasNote = note.trim().length > 0;
   // A private update (or a private note) stays here, covered, while private entries are hidden.
   const [covered] = useCoveredParts(isPrivate ? ['all'] : hasNote && notePrivate ? ['note'] : []);
-  const delta = refreshing || dream.progress == null ? null : value - dream.progress;
+  const delta = refreshing || value == null || dream.progress == null ? null : value - dream.progress;
   // "Achieved" comes from shared progress only, so only a shared 100% can mark the dream achieved.
-  const reachesHundred = value >= 100 && !dream.achievedAt;
+  const reachesHundred = value != null && value >= 100 && !dream.achievedAt;
+  // Starting from a private update, a shared one takes a number the dreamer chose: saving never shares it unasked.
+  const mustChoose = chosen == null && !isPrivate && !refreshing && !!dream.progressIsPrivate;
 
   const save = async () => {
+    if (value == null || mustChoose) return;
     setError(null);
     try {
       await create.mutateAsync({ progress: [{ dreamId: dream.id, value, isPrivate, note: hasNote ? note.trim() : undefined, notePrivate: hasNote ? notePrivate || isPrivate : undefined }] });
@@ -79,7 +85,7 @@ function ProgressDialogInner({ dream, refreshing, onClose, onSaved }: { dream: D
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={create.isPending} data-testid="progress-cancel">Cancel</Button>
-          <Button variant="primary" onClick={() => void save()} loading={create.isPending} data-testid="progress-save">Save update</Button>
+          <Button variant="primary" onClick={() => void save()} disabled={value == null || mustChoose} loading={create.isPending} data-testid="progress-save">Save update</Button>
         </>
       }
     >
@@ -92,13 +98,14 @@ function ProgressDialogInner({ dream, refreshing, onClose, onSaved }: { dream: D
           <>
             <Field label="How far along are you?" hint={refreshing ? undefined : dream.progress == null ? 'This is the first progress you record for this dream.' : `Last recorded at ${dream.progress}%${dream.progressIsPrivate ? ' (private)' : ''}.`}>
               <div className="dd-pct-row">
-                <PercentInput value={value} onChange={setValue} color={DREAM_COLOR} label="Progress" />
+                <PercentInput value={value} onChange={setValue} color={DREAM_COLOR} label="Progress" disabled={value == null} />
               </div>
               <div className="row dd-pct-summary">
-                <span className="dd-pct-big tnum" data-testid="progress-dialog-value">{value}%</span>
+                <span className="dd-pct-big tnum" data-testid="progress-dialog-value">{value == null ? '…' : `${value}%`}</span>
                 {delta != null && delta !== 0 && <Delta value={delta} digits={0} suffix=" pts" />}
-                {delta === 0 && <span className="muted small">Same as last time — that’s fine too.</span>}
+                {delta === 0 && !mustChoose && <span className="muted small">Same as last time — that’s fine too.</span>}
               </div>
+              {mustChoose && <div className="muted small" data-testid="progress-dialog-choose">Your latest update is private. Choose the number to share — or make this update private.</div>}
             </Field>
             {reachesHundred && (isPrivate ? (
               <div className="callout callout-private" data-testid="progress-dialog-celebrate">

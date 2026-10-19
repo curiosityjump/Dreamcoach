@@ -8,7 +8,7 @@
  * the two sources never blur together. The server already returns only what the
  * viewer may see, so an empty cell is simply an empty cell.
  */
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, PROGRESS_MAX, PROGRESS_MIN, RATING_MAX, RATING_MIN, type RatingCategory } from '@shared/care';
 import type { CoachingSession, SessionGrid } from '@shared/types';
 import { CategoryChip, PrivateChip } from '@/components/ui';
@@ -309,6 +309,29 @@ export function SessionGridView({ grid, currentSessionId, editable, onRating, on
     return () => ro?.disconnect();
   }, [sessions.length]);
 
+  // Which sides have more months to scroll to, so a soft edge can say so (on a phone only the newest two or
+  // three months fit, and nothing else would hint at the rest). As with the director tables.
+  const [more, setMore] = useState({ start: false, end: false });
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const update = () => {
+      const start = wrap.scrollLeft > 1;
+      const end = wrap.scrollWidth - wrap.clientWidth - wrap.scrollLeft > 1;
+      setMore((m) => (m.start === start && m.end === end ? m : { start, end }));
+    };
+    update();
+    wrap.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(wrap);
+    const table = wrap.querySelector('table');
+    if (table) ro?.observe(table);
+    return () => {
+      wrap.removeEventListener('scroll', update);
+      ro?.disconnect();
+    };
+  }, [sessions.length]);
+
   // When another session is selected (e.g. a column header was picked), scroll only as far as needed
   // to show its column — re-snapping would pull the column the coach just clicked out from under them.
   const firstTarget = useRef(true);
@@ -391,8 +414,10 @@ export function SessionGridView({ grid, currentSessionId, editable, onRating, on
   };
 
   const cls = ['cs-grid-wrap', compact && 'cs-compact', canEdit && 'cs-editing'].filter(Boolean).join(' ');
+  const frameCls = ['cs-grid-frame', more.start && 'has-more-start', more.end && 'has-more-end'].filter(Boolean).join(' ');
 
   return (
+    <div className={frameCls}>
     <div className={cls} ref={wrapRef} data-testid="session-grid">
       <table className="cs-grid">
         <thead>
@@ -454,6 +479,7 @@ export function SessionGridView({ grid, currentSessionId, editable, onRating, on
           ))}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }

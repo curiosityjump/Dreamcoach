@@ -13,7 +13,8 @@ import { useToast } from '@/components/toast';
 import { Button, Card, CardHead, CategoryChip, EmptyState, LoadingPage, PageHeader, PrivacyToggle, PrivateChip, RatingInput, Segmented, SourceChip, Spinner, TextArea } from '@/components/ui';
 import { MultiTrendChart, Sparkline } from '@/components/charts';
 import { WheelOfLife, type WheelValues } from '@/components/WheelOfLife';
-import { IconArrowRight, IconChart, IconInfo, IconSparkle, IconWheel } from '@/components/icons';
+import { IconArrowRight, IconChart, IconInfo, IconLock, IconSparkle, IconUnlock, IconWheel } from '@/components/icons';
+import { UnlockDialog } from '@/features/shared/PrivacyControl';
 import { CARE_CATEGORIES, CATEGORY_META, PROGRAM_CATEGORIES, type CareCategory, type ProgramCategory } from '@shared/care';
 import type { CheckInInput, CoachingSession, LatestRating, RatingEntry, Snapshot } from '@shared/types';
 import { fmtDate, plural, relativeTime } from '@/lib/format';
@@ -118,6 +119,15 @@ function WheelSection({ latest, lastSession }: { latest: Snapshot['latest']; las
   const rated = CARE_CATEGORIES.filter((c) => pending[c] != null);
   // Ratings (or notes) that were private when private entries went out of view stay pending, covered, until shown again.
   const [covered, uncover] = useCoveredParts(rated.flatMap((c) => (priv[c] ? [c] : notePriv[c] && notes[c]?.trim() ? [`${c}-note`] : [])));
+  // An area whose rating is covered is locked on the wheel: a press there must not change the value out of sight.
+  const locked = useMemo(() => CARE_CATEGORIES.filter((c) => covered.has(c)), [covered]);
+  const [lockedPress, setLockedPress] = useState<CareCategory | null>(null);
+  const lockedHint = lockedPress && locked.includes(lockedPress) ? lockedPress : null;
+  useEffect(() => {
+    if (!lockedHint) return;
+    const t = setTimeout(() => setLockedPress(null), 8000);
+    return () => clearTimeout(t);
+  }, [lockedHint]);
   const latestValues = useMemo<WheelValues>(() => Object.fromEntries(CARE_CATEGORIES.map((c) => [c, latest[c]?.value ?? null])) as WheelValues, [latest]);
   const wheelValues = useMemo<WheelValues>(() => ({ ...latestValues, ...Object.fromEntries(Object.entries(pending).filter(([c]) => !covered.has(c))) }), [latestValues, pending, covered]);
 
@@ -136,7 +146,9 @@ function WheelSection({ latest, lastSession }: { latest: Snapshot['latest']; las
   }, [lastSession]);
 
   const setValue = (c: CareCategory, v: number) => {
+    if (covered.has(c)) { setLockedPress(c); return; }
     setError(null);
+    setLockedPress(null);
     setPending((p) => ({ ...p, [c]: v }));
   };
   // Taking an area off the list drops its note and privacy with it, so rating it again starts afresh (in view).
@@ -186,11 +198,14 @@ function WheelSection({ latest, lastSession }: { latest: Snapshot['latest']; las
             compare={compare ? compareValues : null}
             size={narrow ? 300 : 380}
             onChange={setValue}
+            locked={locked}
+            onLocked={setLockedPress}
             showAreas={!narrow}
             valueLabel={compare && compareValues ? 'Now' : undefined}
             compareLabel={lastSession ? `Session ${lastSession.number} · ${fmtDate(lastSession.occurredAt)}` : undefined}
           />
         </div>
+        {lockedHint && <LockedAreaHint category={lockedHint} />}
         {narrow && (
           <ul className="dc-areas" aria-label="CARE sub-areas">
             {CARE_CATEGORIES.map((c) => (
@@ -297,6 +312,22 @@ function WheelSection({ latest, lastSession }: { latest: Snapshot['latest']; las
           </Card>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Said when a press lands on an area whose private draft is covered: the wheel leaves it as it is. */
+function LockedAreaHint({ category }: { category: CareCategory }) {
+  const { unlockPrivate } = useAuth();
+  const [asking, setAsking] = useState(false);
+  return (
+    <div className="callout callout-private dc-covered dc-wheel-locked" role="status" data-testid="care-wheel-locked">
+      <IconLock />
+      <div className="dc-covered-body">
+        <span>{CATEGORY_META[category].label} has a private draft that’s hidden right now — show private entries to change it.</span>
+        <Button variant="secondary" size="sm" onClick={() => setAsking(true)} data-testid="care-wheel-locked-show"><IconUnlock /> Show private entries</Button>
+      </div>
+      <UnlockDialog open={asking} onClose={() => setAsking(false)} onUnlock={unlockPrivate} />
     </div>
   );
 }

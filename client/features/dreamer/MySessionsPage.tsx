@@ -64,6 +64,9 @@ function SessionsIndex({ sessions, dreams, coachName, openSessionId }: { session
   const sorted = useMemo(() => [...sessions].sort(newestFirst), [sessions]);
   const who = coachName ? firstName(coachName) : 'your coach';
   const completed = sessions.filter((s) => s.status === 'completed').length;
+  // The coaches who ran these sessions, first to latest: a session stays with whoever ran it after a change of coach.
+  const ranBy = [...new Set([...sorted].reverse().map((s) => s.coach.name))];
+  const withWhom = ranBy.length <= 2 ? ranBy.join(' and ') : `${ranBy.slice(0, -1).join(', ')} and ${ranBy[ranBy.length - 1]}`;
 
   return (
     <div className="page dh-sessions" data-testid="sessions-page">
@@ -71,7 +74,7 @@ function SessionsIndex({ sessions, dreams, coachName, openSessionId }: { session
         eyebrow="Coaching"
         title="My coaching sessions"
         lead={sessions.length
-          ? `Your conversations with ${coachName ?? 'your coach'}, side by side: the ratings and dream progress you recorded together, the notes and focus from each one, and the actions you chose.`
+          ? `Your conversations with ${withWhom}, side by side: the ratings and dream progress you recorded together, the notes and focus from each one, and the actions you chose.`
           : `Your conversations with ${who} will live here.`}
       />
 

@@ -15,6 +15,14 @@
 .cs-sticky { position: sticky; left: 0; z-index: 2; background: var(--surface); text-align: left; font-weight: 500; }
 .cs-grid thead .cs-sticky { background: var(--surface-2); z-index: 3; }
 .cs-sticky::after { content: ''; position: absolute; top: 0; bottom: 0; right: -1px; width: 1px; background: var(--border); }
+/* More months than fit (on a phone, all but the newest two or three): a soft edge marks each side there is
+   more to scroll to, as on the director tables — beside the sticky labels for earlier months, at the far
+   edge for later ones. Gradients, not box-shadow, which Chromium doesn't paint on sticky table cells. */
+.cs-grid-frame { position: relative; min-width: 0; }
+.cs-sticky::before, .cs-grid-frame::after { content: ''; position: absolute; width: 12px; pointer-events: none; opacity: 0; transition: opacity 0.15s; }
+.cs-sticky::before { top: 0; bottom: 0; left: calc(100% + 1px); background: linear-gradient(to right, rgba(31, 35, 40, 0.1), transparent); }
+.cs-grid-frame::after { top: 1px; bottom: 1px; right: 1px; z-index: 4; border-radius: 0 var(--r-md) var(--r-md) 0; background: linear-gradient(to left, rgba(31, 35, 40, 0.1), transparent); }
+.cs-grid-frame.has-more-start .cs-sticky::before, .cs-grid-frame.has-more-end::after { opacity: 1; }
 .cs-corner { min-width: 168px; }
 .cs-label { padding: 0 12px !important; min-width: 168px; max-width: 220px; height: 44px; }
 .cs-label .chip { font-size: 12.5px; }
@@ -66,6 +74,8 @@
 /* The range hint floats above the cell instead of widening the column (which would push it out of the grid's view); above, because the grid scrolls and would clip it below its last row. */
 .cs-cell-edit.is-out-of-range { position: relative; }
 .cs-cell-range { position: absolute; left: 50%; bottom: calc(100% + 3px); transform: translateX(-50%); z-index: 3; padding: 1px 6px; border-radius: 6px; background: var(--surface); box-shadow: var(--shadow-sm); border: 1px solid var(--warning); font-size: 11px; font-weight: 600; line-height: 1.3; color: var(--warning); white-space: nowrap; cursor: help; }
+/* Completing points back at a cell out of range: scrolled to, it clears the top bar (and its hint above it) and the bottom bar and toasts. */
+.cs-input { scroll-margin-top: calc(var(--nav-h) + 28px); scroll-margin-bottom: 96px; }
 .cs-editing .cs-cell.cs-cur { padding: 0 6px !important; }
 
 /* compact */

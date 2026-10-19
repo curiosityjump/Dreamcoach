@@ -127,19 +127,17 @@ export function ActionsPage() {
             </div>
           )}
 
-          {tab === 'active' && (
-            <Card className="da-composer-card" data-testid="actions-composer">
-              <CardHead title="Add an action" sub={dreamFilter != null || categoryFilter ? 'Linked to what you’re looking at — change it if you like.' : 'Something small you could do this week.'} />
-              <ActionComposer
-                key={`${dreamFilter ?? 'none'}-${categoryFilter ?? 'none'}`}
-                dreamerRef="me"
-                dreams={dreamList}
-                mode="dreamer"
-                defaultDreamId={dreamFilter}
-                defaultCategory={categoryFilter}
-              />
-            </Card>
-          )}
+          {/* Only on the Active tab, but kept (with what's typed) through the other tabs; a filter links an empty form. */}
+          <Card className="da-composer-card" hidden={tab !== 'active'} data-testid="actions-composer">
+            <CardHead title="Add an action" sub={dreamFilter != null || categoryFilter ? 'Linked to what you’re looking at — change it if you like.' : 'Something small you could do this week.'} />
+            <ActionComposer
+              dreamerRef="me"
+              dreams={dreamList}
+              mode="dreamer"
+              defaultDreamId={dreamFilter}
+              defaultCategory={categoryFilter}
+            />
+          </Card>
 
           <KeepDrafts>
             <Card data-testid="actions-list-card">

@@ -85,8 +85,13 @@ why, and what was traded off.
     survive Hide private and the automatic re-hide (including an open edit of an
     action); a draft marked private stays but its text is covered until private
     entries are shown again. Taking a pending area off the CARE wheel discards its
-    note and privacy too, so rating it again starts fresh; a half-typed check-in
-    date is saved as "now", as the page says.
+    note and privacy too, so rating it again starts fresh; a covered area on the
+    wheel is locked until private entries are shown; a half-typed check-in date is
+    saved as "now", as the page says. A progress draft the dreamer hasn't touched
+    follows the progress they can currently see, and a number that came from a
+    private update can't be saved as shared until they change it or keep the
+    update private — software never shares a private value on the dreamer's
+    behalf.
 
     **The dreamer can create private entries while private is hidden.** The entry
     simply disappears from view and a toast explains why. Requiring an unlock to
@@ -111,7 +116,8 @@ why, and what was traded off.
     dropped silently: completing the session asks whether to add it. A grid value
     that fails to save stays marked on its cell and is retried, and completing
     waits until everything has saved. Grid cells take digits only — no scroll-wheel
-    or arrow-key stepping — and a value out of range is refused, never clamped.
+    or arrow-key stepping — and a value out of range is refused, never clamped
+    (completing waits until it is fixed or cleared).
 
 14. **Session entries are upserts keyed by (session, category) / (session,
     dream) among *shared* rows.** Correcting a number during a conversation never

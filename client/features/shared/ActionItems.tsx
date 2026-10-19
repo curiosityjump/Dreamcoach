@@ -64,11 +64,14 @@ export interface ActionComposerProps {
   dreams: DreamRef[];
   mode: ActionMode;
   sessionId?: number | null;
-  /** Preselect a dream or category (e.g. from a dream detail page). */
+  /** Preselect a dream or category (e.g. from a dream detail page). A change applies while nothing is typed. */
   defaultDreamId?: number | null;
   defaultCategory?: ActionItem['category'];
-  /** Called once the action is saved (the reply is null for a private action while private entries are hidden). */
-  onDone?: (action: ActionItem | null) => void;
+  /**
+   * Called once the action is saved (the reply is null for a private action while private entries are hidden).
+   * `typing`: the next action is being typed by then, so a page that closes the form on success leaves it open.
+   */
+  onDone?: (action: ActionItem | null, typing: boolean) => void;
   onCancel?: () => void;
   autoFocus?: boolean;
   /** Told whenever the typed title changes, so a page can tell when an action is typed but not yet added. */
@@ -206,8 +209,19 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
 
   const trimmed = title.trim();
   const canSubmit = trimmed.length > 0;
+  const typing = trimmed !== '' || details.trim() !== '';
+  // Read when a save comes back: whether the next action is being typed by then.
+  const typingRef = useRef(typing);
+  typingRef.current = typing;
   // A private draft goes under cover when private entries are hidden (it can still be added) and comes back when shown.
-  const [covered, uncover] = useCovered(mode === 'dreamer' && isPrivate && (title.trim() !== '' || details.trim() !== ''));
+  const [covered, uncover] = useCovered(mode === 'dreamer' && isPrivate && typing);
+
+  // The page's preselection changed (a filter, say): an empty form takes it; one being typed keeps its own links.
+  const [defaults, setDefaults] = useState({ dreamId: defaultDreamId ?? null, category: defaultCategory ?? null });
+  if (defaults.dreamId !== (defaultDreamId ?? null) || defaults.category !== (defaultCategory ?? null)) {
+    setDefaults({ dreamId: defaultDreamId ?? null, category: defaultCategory ?? null });
+    if (!typing) { setDreamId(defaultDreamId ?? null); setCategory(defaultCategory ?? null); }
+  }
 
   const onDraftRef = useRef(onDraftChange);
   onDraftRef.current = onDraftChange;
@@ -243,7 +257,7 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
           if (mode === 'dreamer' && draft.isPrivate) toast(auth?.privateUnlocked ? 'Added as a private action — only you can see it.' : PRIVATE_HIDDEN_MSG, 'private');
           else if (quiet) setAnnounce(`Added “${name}”.`);
           else toast('Action added.');
-          onDone?.(action);
+          onDone?.(action, typingRef.current);
           return true;
         },
         (err) => {
@@ -315,6 +329,7 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
           <IconPlus /> Add
         </Button>
       </div>
+      {/* Covered, a private draft shows nothing of itself: not its details, nor what it is linked to. */}
       {showDetails && !covered && (
         <TextArea
           value={details}
@@ -329,12 +344,12 @@ export function ActionComposer({ dreamerRef, dreams, mode, sessionId, defaultDre
         />
       )}
       <div className="da-composer-options">
-        {!showDetails && (
+        {!showDetails && !covered && (
           <button type="button" className="da-text-btn" onClick={() => setShowDetails(true)} data-testid="action-details-toggle">
             <IconPlus /> Add details
           </button>
         )}
-        <LinkSelects dreams={sorted} labels={labels} dreamId={dreamId} category={category} onDreamId={setDreamId} onCategory={setCategory} compact idPrefix={`${id}-link`} />
+        {!covered && <LinkSelects dreams={sorted} labels={labels} dreamId={dreamId} category={category} onDreamId={setDreamId} onCategory={setCategory} compact idPrefix={`${id}-link`} />}
         {mode === 'dreamer' && !covered && (
           <span data-testid="action-privacy-toggle"><PrivacyToggle value={isPrivate} onChange={setIsPrivate} size="sm" /></span>
         )}

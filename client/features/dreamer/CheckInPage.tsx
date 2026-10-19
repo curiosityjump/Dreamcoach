@@ -18,9 +18,19 @@ import { NotePrivateWith, catVars, savedToast } from './CareShared';
 import { CoveredDraft, useCoveredParts, useLastKnown, useLoadedOnce } from './drafts';
 
 interface RatingDraft { value: number | null; note: string; isPrivate: boolean; notePrivate: boolean }
-interface ProgressDraft { value: number; note: string; isPrivate: boolean; notePrivate: boolean }
+/**
+ * `touched`: the dreamer moved the value. Until then it is the dream's progress as shown right now, so hiding or
+ * showing private entries moves it too, and saving never shares a private value the dreamer didn't choose.
+ */
+interface ProgressDraft { value: number; touched: boolean; note: string; isPrivate: boolean; notePrivate: boolean }
 
 const emptyRating = (): RatingDraft => ({ value: null, note: '', isPrivate: false, notePrivate: false });
+const emptyProgress = (): ProgressDraft => ({ value: 0, touched: false, note: '', isPrivate: false, notePrivate: false });
+
+/** The value a progress draft holds: the dreamer's own, or the dream's shown progress (null while it loads again). */
+const progressValue = (d: ProgressDraft, dream: Dream, refreshing: boolean): number | null => (d.touched ? d.value : refreshing ? null : dream.progress ?? 0);
+/** An untouched value taken from a private update, about to be saved as a shared one: the dreamer chooses first. */
+const needsChoice = (d: ProgressDraft, dream: Dream, refreshing: boolean) => !d.touched && !d.isPrivate && !refreshing && !!dream.progressIsPrivate;
 
 /** The server takes dates up to a few minutes ahead (clocks differ); later ones are still to come. */
 const FUTURE_SLACK_MS = 5 * 60 * 1000;
@@ -77,7 +87,7 @@ function CheckInForm({ latest, dreams: current }: { latest: Partial<Record<Ratin
   const [progress, setProgress] = useState<Record<number, ProgressDraft>>(() => {
     const id = Number(params.get('dream'));
     const d = dreams.find((x) => x.id === id);
-    return d ? { [d.id]: { value: d.progress ?? 0, note: '', isPrivate: false, notePrivate: false } } : {};
+    return d ? { [d.id]: emptyProgress() } : {};
   });
   const [reflection, setReflection] = useState('');
   const [reflectionPrivate, setReflectionPrivate] = useState(false);
@@ -95,7 +105,7 @@ function CheckInForm({ latest, dreams: current }: { latest: Partial<Record<Ratin
   const toggleDream = (d: Dream) => {
     setError(null);
     setSelectedDreams((s) => (s.includes(d.id) ? s.filter((x) => x !== d.id) : [...s, d.id]));
-    setProgress((p) => (p[d.id] ? p : { ...p, [d.id]: { value: d.progress ?? 0, note: '', isPrivate: false, notePrivate: false } }));
+    setProgress((p) => (p[d.id] ? p : { ...p, [d.id]: emptyProgress() }));
   };
   const setRating = (c: RatingCategory, patch: Partial<RatingDraft>) => setRatings((r) => ({ ...r, [c]: { ...(r[c] ?? emptyRating()), ...patch } }));
   const setProg = (id: number, patch: Partial<ProgressDraft>) => setProgress((p) => ({ ...p, [id]: { ...p[id]!, ...patch } }));
@@ -104,6 +114,10 @@ function CheckInForm({ latest, dreams: current }: { latest: Partial<Record<Ratin
   const completeRatings = orderedSelected.filter((c) => ratings[c]?.value != null);
   const incompleteRatings = orderedSelected.filter((c) => ratings[c]?.value == null);
   const chosenDreams = sortedDreams.filter((d) => selectedDreams.includes(d.id));
+  // A dream update that follows the dream's progress waits for it to load again; one starting from a private
+  // update waits for the dreamer to choose its number (or make it private) before it is shared.
+  const waitingDreams = chosenDreams.filter((d) => progressValue(progress[d.id]!, d, refreshing) == null);
+  const choosingDreams = chosenDreams.filter((d) => needsChoice(progress[d.id]!, d, refreshing));
   const reflectionText = reflection.trim();
   // A cleared or half-typed date means "now"; one that can't be read, or is still to come, is pointed out.
   const whenTime = showDate && when ? new Date(when).getTime() : NaN;
@@ -113,12 +127,13 @@ function CheckInForm({ latest, dreams: current }: { latest: Partial<Record<Ratin
     : null;
   const dateChanged = showDate && !dateProblem && !Number.isNaN(whenTime) && when !== toLocalInputValue(new Date().toISOString());
   const hasContent = completeRatings.length > 0 || chosenDreams.length > 0 || reflectionText.length > 0;
-  const canSave = hasContent && !dateProblem && !create.isPending;
+  const canSave = hasContent && !dateProblem && !waitingDreams.length && !choosingDreams.length && !create.isPending;
 
-  // Parts that were private when private entries went out of view stay here, covered, until they're shown again.
+  // Parts that were private when private entries went out of view stay here, covered, until they're shown again —
+  // the drafts of cards taken off meanwhile too, since putting a card back brings its draft back.
   const [covered] = useCoveredParts([
-    ...selected.flatMap((c) => privatePart(`rating-${c}`, ratings[c], ratings[c]?.value != null)),
-    ...selectedDreams.flatMap((id) => privatePart(`dream-${id}`, progress[id], true)),
+    ...(Object.keys(ratings) as RatingCategory[]).flatMap((c) => privatePart(`rating-${c}`, ratings[c], ratings[c]?.value != null)),
+    ...Object.keys(progress).flatMap((id) => privatePart(`dream-${id}`, progress[Number(id)], true)),
     ...(reflectionPrivate && reflectionText ? ['reflection'] : []),
   ]);
 
@@ -146,7 +161,7 @@ function CheckInForm({ latest, dreams: current }: { latest: Partial<Record<Ratin
       input.progress = chosenDreams.map((d) => {
         const p = progress[d.id]!;
         const note = p.note.trim();
-        return { dreamId: d.id, value: p.value, isPrivate: p.isPrivate, ...(note ? { note, notePrivate: p.notePrivate || p.isPrivate } : {}) };
+        return { dreamId: d.id, value: progressValue(p, d, refreshing)!, isPrivate: p.isPrivate, ...(note ? { note, notePrivate: p.notePrivate || p.isPrivate } : {}) };
       });
     }
     if (reflectionText) input.reflection = { body: reflectionText, isPrivate: reflectionPrivate };
@@ -270,6 +285,10 @@ function CheckInForm({ latest, dreams: current }: { latest: Partial<Record<Ratin
             ? <>Saving {summaryLine}{dateChanged ? ` · dated ${fmtDate(new Date(whenTime).toISOString())}` : ''}{incompleteRatings.length ? ` · ${incompleteRatings.map((c) => CATEGORY_META[c].label).join(', ')} still need${incompleteRatings.length === 1 ? 's' : ''} a number` : ''}</>
             : hasContent && dateProblem
               ? <>Check the date to save</>
+              : choosingDreams.length
+                ? <>Choose the progress for {choosingDreams.map((d) => d.title).join(', ')} to share it, or make it private</>
+              : hasContent && waitingDreams.length
+                ? <>Loading your dreams…</>
               : incompleteRatings.length
                 ? <>Choose a number for {incompleteRatings.map((c) => CATEGORY_META[c].label).join(', ')} to save</>
                 : <>Nothing to save yet</>}
@@ -356,7 +375,8 @@ function ProgressCard({ dream, draft, refreshing, covered, noteCovered, onChange
   disabled: boolean;
 }) {
   const hasNote = draft.note.trim().length > 0;
-  const diff = !refreshing && dream.progress != null ? draft.value - dream.progress : null;
+  const value = progressValue(draft, dream, refreshing);
+  const diff = value != null && !refreshing && dream.progress != null ? value - dream.progress : null;
   return (
     <Card className="dci-card dci-dream" data-testid={`checkin-dream-${dream.id}`}>
       <div className="dci-card-head">
@@ -372,10 +392,11 @@ function ProgressCard({ dream, draft, refreshing, covered, noteCovered, onChange
       </div>
       {covered ? <CoveredDraft testId={`checkin-dream-covered-${dream.id}`} /> : (
         <>
-          <Bar value={draft.value} large label={`${dream.title} progress`} />
-          <PercentInput value={draft.value} onChange={(v) => onChange({ value: v })} label={`${dream.title} progress`} disabled={disabled} />
+          <Bar value={value} large label={`${dream.title} progress`} />
+          <PercentInput value={value} onChange={(v) => onChange({ value: v, touched: true })} label={`${dream.title} progress`} disabled={disabled || value == null} />
           <div className="row-wrap dci-under">
-            <span className="small tnum"><b>{draft.value}%</b>{diff != null && <span className="muted"> · {diff === 0 ? 'same as before' : `${diff > 0 ? '+' : '−'}${plural(Math.abs(diff), 'pt')}`}</span>}</span>
+            <span className="small tnum"><b>{value == null ? '…' : `${value}%`}</b>{diff != null && <span className="muted"> · {diff === 0 ? 'same as before' : `${diff > 0 ? '+' : '−'}${plural(Math.abs(diff), 'pt')}`}</span>}</span>
+            {needsChoice(draft, dream, refreshing) && <span className="muted small" data-testid={`checkin-dream-choose-${dream.id}`}>Your latest update is private — choose the number to share, or make this update private.</span>}
           </div>
           {noteCovered ? <CoveredDraft testId={`checkin-dream-covered-note-${dream.id}`} /> : <TextArea value={draft.note} onChange={(e) => onChange({ note: e.target.value })} placeholder="What moved, or what got in the way? (optional)" aria-label={`${dream.title} note`} rows={2} maxLength={4000} disabled={disabled} data-testid={`checkin-dream-note-${dream.id}`} />}
           <div className="row-wrap dc-privacy-row">

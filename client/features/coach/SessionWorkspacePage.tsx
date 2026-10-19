@@ -8,10 +8,10 @@
  * Staff page: numeric dreamer id from the route; the server returns only what the
  * coach may see, so nothing here filters or mentions privacy.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Link, useBlocker, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { CARE_CATEGORIES, CATEGORY_META, type RatingCategory } from '@shared/care';
+import { CARE_CATEGORIES, CATEGORY_META, PROGRESS_MAX, PROGRESS_MIN, RATING_MAX, RATING_MIN, type RatingCategory } from '@shared/care';
 import type { ActionItem, CheckIn, CoachingSession, JournalEntry, SessionGrid } from '@shared/types';
 import { useActions, useCheckIns, useDeleteSession, useDreams, useGrid, useJournal, useOverview, useSession, useSetSessionProgress, useSetSessionRating, useUpdateSession } from '@/api/hooks';
 import { errorMessage } from '@/api/client';
@@ -186,9 +186,13 @@ export function SessionWorkspacePage() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  // While the session is being deleted the page stops watching it (the click renders before the delete
+  // lands), so the refetch that follows every write never asks for a session that's gone; it keeps
+  // showing what it had until it leaves, and the session is then dropped from the cache.
+  const [deleting, setDeleting] = useState(false);
   const overview = useOverview(id, { enabled: valid });
   const grid = useGrid(id);
-  const session = useSession(id, valid ? sid : null);
+  const session = useSession(id, valid && !deleting ? sid : null);
   const actions = useActions(id, 'all');
   const dreams = useDreams(id);
   const checkIns = useCheckIns(id);
@@ -212,7 +216,9 @@ export function SessionWorkspacePage() {
   const reviewRef = useRef<HTMLDivElement>(null);
   const newRef = useRef<HTMLDivElement>(null);
 
-  const s = session.data;
+  const lastSession = useRef<CoachingSession | undefined>(undefined);
+  if (session.data) lastSession.current = session.data;
+  const s = deleting ? lastSession.current : session.data;
 
   // Put the server's answer straight into the cache so the checklist and grid update at once.
   const applySession = useCallback((data: CoachingSession) => {
@@ -393,10 +399,30 @@ export function SessionWorkspacePage() {
   const nothingRecorded = !!s && recordedNothing(s) && gridUnsaved === 0 && gridStatus !== 'saving';
   const isEmpty = nothingRecorded && !draftTitle;
 
+  // A number out of range is never sent, so completing would quietly leave it out. Pressing Complete isn't
+  // moving on from its cell (which would put the last value back): the cell keeps the number and its hint,
+  // and completing waits while a toast says which cell to fix.
+  const outOfRangeCell = () => gridRef.current?.querySelector<HTMLInputElement>('input[data-out-of-range]') ?? null;
+  const keepOutOfRange = (e: MouseEvent) => { const cell = outOfRangeCell(); if (cell && cell === document.activeElement) e.preventDefault(); };
+  const refuseOutOfRange = () => {
+    const cell = outOfRangeCell();
+    if (!cell) return false;
+    const key = cell.dataset.csCell ?? '';
+    const rating = key.startsWith('rating-') ? (key.slice('rating-'.length) as RatingCategory) : null;
+    const name = rating ? CATEGORY_META[rating]?.label : dreamList.find((d) => key === `progress-${d.id}`)?.title;
+    const range = rating ? `${RATING_MIN}–${RATING_MAX}` : `${PROGRESS_MIN}–${PROGRESS_MAX}`;
+    toast(`${name ?? 'A value in the grid'}: enter ${range}, or clear it.`, 'error');
+    cell.focus({ preventScroll: true });
+    cell.select();
+    cell.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    return true;
+  };
+
   const [finishing, setFinishing] = useState(false);
   const finishingRef = useRef(false);
   const complete = async ({ anyway = false, typed }: { anyway?: boolean; typed?: 'save' | 'discard' } = {}) => {
     if (!s || finishingRef.current) return;
+    if (refuseOutOfRange()) return;
     if (hasTyped()) {
       if (!typed) { setTypedAsk(true); return; }
       if (typed === 'save') {
@@ -455,9 +481,13 @@ export function SessionWorkspacePage() {
     });
   };
   const remove = () => {
+    setDeleting(true);
     deleteSession.mutate(sid, {
-      onSuccess: () => { setConfirmDelete(false); setConfirmEmpty(false); toast('Session deleted.', 'info'); leave(staffDreamerPath(id)); },
-      onError: (e) => { setConfirmDelete(false); setConfirmEmpty(false); toast(errorMessage(e), 'error'); },
+      onSuccess: () => {
+        setConfirmDelete(false); setConfirmEmpty(false); toast('Session deleted.', 'info'); leave(staffDreamerPath(id));
+        qc.removeQueries({ queryKey: ['dreamer', id, 'session', sid], exact: true });
+      },
+      onError: (e) => { setDeleting(false); setConfirmDelete(false); setConfirmEmpty(false); toast(errorMessage(e), 'error'); },
     });
   };
 
@@ -637,7 +667,7 @@ export function SessionWorkspacePage() {
             {isCompleted ? (
               <Button variant="secondary" onClick={reopen} loading={updateSession.isPending} data-testid="session-reopen"><IconRotate /> Reopen</Button>
             ) : (
-              <Button variant="primary" onClick={() => void complete()} loading={finishing || updateSession.isPending} data-testid="session-complete"><IconCheck /> Complete session</Button>
+              <Button variant="primary" onMouseDown={keepOutOfRange} onClick={() => void complete()} loading={finishing || updateSession.isPending} data-testid="session-complete"><IconCheck /> Complete session</Button>
             )}
             {!isCompleted && isEmpty && (
               <Button variant="ghost" icon onClick={() => setConfirmDelete(true)} aria-label="Delete this empty session" title="Delete this empty session" data-testid="session-delete"><IconTrash /></Button>
@@ -801,7 +831,7 @@ export function SessionWorkspacePage() {
             {/* The conversation ends here, far below the header's button. */}
             {!isCompleted && (
               <div className="cs-notes-foot">
-                <Button variant="primary" onClick={() => void complete()} loading={finishing || updateSession.isPending} data-testid="session-complete-end"><IconCheck /> Complete session</Button>
+                <Button variant="primary" onMouseDown={keepOutOfRange} onClick={() => void complete()} loading={finishing || updateSession.isPending} data-testid="session-complete-end"><IconCheck /> Complete session</Button>
               </div>
             )}
           </Card>

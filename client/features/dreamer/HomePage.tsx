@@ -3,7 +3,7 @@
  * progress, the latest CARE snapshot, active actions, the last coaching session
  * and recent activity. Everything here is the dreamer's own data (`'me'`).
  */
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
 import { useAuth } from '@/auth/AuthContext';
 import { useActions, useOverview, useSessions } from '@/api/hooks';
@@ -11,13 +11,13 @@ import { errorMessage } from '@/api/client';
 import { Avatar, Bar, Button, Card, CardHead, Chip, Delta, EmptyState, LoadingPage, PageHeader, PrivateChip, Skeleton, Stat } from '@/components/ui';
 import { WheelOfLife, type WheelValues } from '@/components/WheelOfLife';
 import { IconArrowRight, IconCheck, IconEye, IconInfo, IconList, IconMessage, IconPen, IconPlus, IconSparkle, IconStar } from '@/components/icons';
-import { ActionComposer, ActionList } from '@/features/shared/ActionItems';
+import { ActionComposer, ActionList, type ActionComposerHandle } from '@/features/shared/ActionItems';
 import { TimelineFeed } from '@/features/shared/Timeline';
 import { CARE_CATEGORIES, CATEGORY_META, type CareCategory } from '@shared/care';
 import type { CoachingSession, Dream, DreamerOverview, LatestRating, Snapshot } from '@shared/types';
 import { dayKey, firstName, fmtDate, fmtDateLong, plural, relativeTime } from '@/lib/format';
 import { sessionBaseline } from '@/lib/sessionDelta';
-import { KeepDrafts, useLastKnown, useLoadedOnce } from './drafts';
+import { KeepDrafts, useCloseAfterAdd, useLastKnown, useLoadedOnce } from './drafts';
 
 /* ---------- Small helpers ---------- */
 
@@ -35,20 +35,30 @@ function whenPhrase(iso: string): string {
   return days < 7 ? relativeTime(iso) : `on ${fmtDate(iso)}`;
 }
 
-function contextLine(snapshot: Snapshot, coachName: string | null): string {
+/**
+ * The coach who ran a session (null until the sessions have loaded). A session stays theirs after the dreamer
+ * moves to another coach, so sentences about past sessions name them, never the coach of today.
+ */
+const ranBy = (sessions: CoachingSession[] | undefined, id: number): string | null => sessions?.find((s) => s.id === id)?.coach.name ?? null;
+
+function contextLine(snapshot: Snapshot, coachName: string | null, sessions: CoachingSession[] | undefined): string {
   const who = coachName ? firstName(coachName) : 'your coach';
-  if (snapshot.openSession) return `A session with ${who} is in progress.`;
+  if (snapshot.openSession) {
+    const ran = ranBy(sessions, snapshot.openSession.id);
+    return `A session with ${ran ? firstName(ran) : who} is in progress.`;
+  }
   const last = snapshot.lastSession;
   if (!last) {
     return coachName
       ? `Your first conversation with ${who} will start wherever you'd like to begin. Until then, this is your space.`
       : 'This is your space for dreams, actions and reflections.';
   }
-  return `Session ${last.number} with ${who} was ${whenPhrase(last.occurredAt)}. Your next conversation will pick up where you left off.`;
+  const ran = ranBy(sessions, last.id);
+  return `Session ${last.number}${ran ? ` with ${firstName(ran)}` : ''} was ${whenPhrase(last.occurredAt)}. Your next conversation will pick up where you left off.`;
 }
 
 /** One line describing where the latest CARE values came from. */
-function latestSummary(latest: Snapshot['latest'], coachName: string | null): string | null {
+function latestSummary(latest: Snapshot['latest'], sessions: CoachingSession[]): string | null {
   const entries = CARE_CATEGORIES.map((c) => latest[c]).filter((x): x is LatestRating => !!x);
   if (!entries.length) return null;
   const newest = entries.reduce((a, b) => (a.occurredAt > b.occurredAt ? a : b));
@@ -56,7 +66,10 @@ function latestSummary(latest: Snapshot['latest'], coachName: string | null): st
   if (entries.some((e) => e.source !== newest.source)) return `A mix of session and self check-in values · most recent ${when}`;
   // One source: one session or check-in when they all fall on the same (local) day, several otherwise.
   const oneDay = entries.every((e) => dayKey(e.occurredAt) === dayKey(newest.occurredAt));
-  const coach = coachName ? ` with ${firstName(coachName)}` : '';
+  // Session values take their session's date. Named after the coach who ran those sessions, when that is one coach.
+  const ran = new Set(entries.map((e) => sessions.find((s) => s.occurredAt === e.occurredAt)?.coach.name ?? null));
+  const only = ran.size === 1 ? [...ran][0] : null;
+  const coach = only ? ` with ${firstName(only)}` : '';
   if (newest.source === 'session') return oneDay ? `From your session${coach} ${when}` : `From your sessions${coach} · most recent ${when}`;
   return oneDay ? `From your self check-in ${when}` : `From your self check-ins · most recent ${when}`;
 }
@@ -95,6 +108,7 @@ export function SessionDelta({ value, base, suffix }: { value: number; base: Bas
 export function HomePage() {
   const { auth } = useAuth();
   const overview = useOverview('me');
+  const sessions = useSessions('me');
   // Hiding private entries loads the overview again. The page stays meanwhile, so an action being added keeps what's
   // typed: the greeting and the coaching card (never private) show what was there, the rest waits for fresh data.
   const loaded = useLoadedOnce(!!overview.data);
@@ -122,7 +136,7 @@ export function HomePage() {
         title={<span data-testid="home-greeting">{greeting()}, {name}</span>}
         lead={
           <>
-            <span data-testid="home-context">{contextLine(snapshot, coachName)}</span>
+            <span data-testid="home-context">{contextLine(snapshot, coachName, sessions.data)}</span>
             {auth?.privateUnlocked && (
               <span className="dh-private-hint"><IconEye /> Private entries are showing on this device.</span>
             )}
@@ -143,7 +157,7 @@ export function HomePage() {
             <ActionsCard dreams={snapshot.dreams} />
           </div>
           <div className="dh-col">
-            {fresh ? <CareCard snapshot={fresh.snapshot} coachName={coachName} /> : <CardSkeleton />}
+            {fresh ? <CareCard snapshot={fresh.snapshot} /> : <CardSkeleton />}
             <CoachingCard snapshot={snapshot} coachName={coachName} />
           </div>
         </div>
@@ -218,11 +232,11 @@ export function AchievedChip({ achievedAt, compact }: { achievedAt: string; comp
 
 /* ---------- CARE right now ---------- */
 
-function CareCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: string | null }) {
+function CareCard({ snapshot }: { snapshot: Snapshot }) {
   const sessions = useSessions('me').data ?? [];
   const latest = snapshot.latest;
   const wheel = useMemo<WheelValues>(() => Object.fromEntries(CARE_CATEGORIES.map((c) => [c, latest[c]?.value ?? null])) as WheelValues, [latest]);
-  const summary = latestSummary(latest, coachName);
+  const summary = latestSummary(latest, sessions);
   const anyRated = CARE_CATEGORIES.some((c) => latest[c]);
   return (
     <Card data-testid="home-care">
@@ -278,12 +292,21 @@ const HOME_ACTION_LIMIT = 5;
 
 function ActionsCard({ dreams }: { dreams: Dream[] }) {
   const actions = useActions('me', 'active');
+  const composer = useRef<ActionComposerHandle>(null);
+  // Opened with Add, or by typing into the empty list's form: it then stays open, whatever the list shows
+  // meanwhile (it empties or fills as private entries hide or show), until it is closed or an action is added
+  // with nothing new typed.
   const [composing, setComposing] = useState(false);
   const active = actions.data ?? [];
   const shown = active.slice(0, HOME_ACTION_LIMIT);
   // While the list loads again (hiding private entries) an empty list stays empty, and its composer stays put.
   const wasEmpty = useLastKnown(actions.data ? actions.data.length === 0 : undefined);
+  const failed = !!actions.error && !actions.data;
   const isEmpty = !actions.error && (actions.data ? active.length === 0 : !!wasEmpty);
+  const open = composing || isEmpty;
+  const afterAdd = useCloseAfterAdd(() => setComposing(false));
+  // Closing lets go of what's typed, as Cancel always has.
+  const close = () => { afterAdd.typed(); composer.current?.discard(); setComposing(false); };
 
   return (
     <Card data-testid="home-actions">
@@ -293,7 +316,7 @@ function ActionsCard({ dreams }: { dreams: Dream[] }) {
         actions={
           <>
             {!isEmpty && (
-              <Button size="sm" variant="secondary" onClick={() => setComposing((v) => !v)} aria-expanded={composing} data-testid="home-add-action">
+              <Button size="sm" variant="secondary" onClick={() => (composing ? close() : setComposing(true))} aria-expanded={composing} data-testid="home-add-action">
                 <IconPlus /> {composing ? 'Close' : 'Add'}
               </Button>
             )}
@@ -301,26 +324,28 @@ function ActionsCard({ dreams }: { dreams: Dream[] }) {
           </>
         }
       />
-      {/* Stays open if the list empties meanwhile (its Cancel closes it), so what's typed is never dropped. */}
-      {composing && (
-        <div className="dh-composer" data-testid="home-composer">
-          <ActionComposer dreamerRef="me" dreams={dreams} mode="dreamer" autoFocus onDone={() => setComposing(false)} onCancel={() => setComposing(false)} />
+      {/* One form in one place (under the empty list's message, or above the list), so nothing the list does unmounts it. */}
+      {failed && <div className="callout callout-muted" role="alert"><IconInfo /><span>{errorMessage(actions.error)}</span></div>}
+      {!failed && isEmpty && (
+        <EmptyState icon={<IconList />} title="Nothing on your list right now">
+          Add a small step toward one of your dreams — or something you and your coach talked about.
+        </EmptyState>
+      )}
+      {open && (
+        // Typing anything (a title, details) into the empty list's form keeps it open from then on.
+        <div className="dh-composer" onInput={() => { afterAdd.typed(); setComposing(true); }} data-testid="home-composer">
+          <ActionComposer
+            ref={composer}
+            dreamerRef="me"
+            dreams={dreams}
+            mode="dreamer"
+            autoFocus={composing}
+            onDone={(_, typing) => afterAdd.added(typing)}
+            onCancel={composing ? close : undefined}
+          />
         </div>
       )}
-      {actions.error && !actions.data ? (
-        <div className="callout callout-muted" role="alert"><IconInfo /><span>{errorMessage(actions.error)}</span></div>
-      ) : isEmpty ? (
-        <>
-          <EmptyState icon={<IconList />} title="Nothing on your list right now">
-            Add a small step toward one of your dreams — or something you and your coach talked about.
-          </EmptyState>
-          {!composing && (
-            <div className="dh-composer" data-testid="home-composer">
-              <ActionComposer dreamerRef="me" dreams={dreams} mode="dreamer" />
-            </div>
-          )}
-        </>
-      ) : !actions.data ? (
+      {!failed && !isEmpty && (!actions.data ? (
         <div className="stack" aria-busy>
           <Skeleton h={22} /><Skeleton h={22} w="80%" /><Skeleton h={22} w="60%" />
         </div>
@@ -333,7 +358,7 @@ function ActionsCard({ dreams }: { dreams: Dream[] }) {
             </Link>
           )}
         </>
-      )}
+      ))}
     </Card>
   );
 }
@@ -348,6 +373,7 @@ function CoachingCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: 
     return done.reduce((a, b) => (a.occurredAt > b.occurredAt ? a : b));
   }, [sessions.data]);
   const who = coachName ? firstName(coachName) : 'your coach';
+  const openWith = snapshot.openSession ? ranBy(sessions.data, snapshot.openSession.id) : null;
   // The first two lines of the notes: the clamp then never lands just after a full stop ("84%.…"), and the
   // whole of them is one click away.
   const notes = lastCompleted ? lastCompleted.notes.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 2).join('\n') : '';
@@ -363,7 +389,7 @@ function CoachingCard({ snapshot, coachName }: { snapshot: Snapshot; coachName: 
         <div className="callout dh-open" data-testid="home-open-session">
           <IconMessage />
           <span>
-            A session with {who} is in progress — what you record together shows up as it's saved.{' '}
+            A session with {openWith ? firstName(openWith) : who} is in progress — what you record together shows up as it's saved.{' '}
             <Link to={`/sessions/${snapshot.openSession.id}`} className="dh-open-link" data-testid="home-open-session-link">Follow along <IconArrowRight /></Link>
           </span>
         </div>
