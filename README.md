@@ -34,7 +34,7 @@ click one to fill the form.
 
 | Role | Account | Notes |
 |---|---|---|
-| Director | `director@dreamcoach.demo` — Jordan Ellis | Oversees 4 coaches / 11 dreamers; also coaches Sam Whitaker directly |
+| Director | `director@dreamcoach.demo` — Jordan Ellis | Oversees 3 coaches / 11 dreamers; also coaches Sam Whitaker directly |
 | Dream Coach | `maya@dreamcoach.demo` — Maya Thompson | 5 dreamers (Alicia, Marcus, Tamsin, Owen, Lena) |
 | Dream Coach | `daniel@dreamcoach.demo` — Daniel Okafor | 3 dreamers (Darnell, Hana, Victor — paused) |
 | Dream Coach | `priya@dreamcoach.demo` — Priya Raman | 2 dreamers (Grace, Theo) |

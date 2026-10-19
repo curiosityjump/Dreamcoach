@@ -12,7 +12,7 @@ to fill the form.
 
 | Who | Account | Why they're interesting |
 |---|---|---|
-| Jordan Ellis — Director | director@dreamcoach.demo | Oversees 4 coaches and 11 dreamers; personally coaches Sam Whitaker |
+| Jordan Ellis — Director | director@dreamcoach.demo | Oversees 3 coaches and 11 dreamers; personally coaches Sam Whitaker |
 | Maya Thompson — Coach | maya@dreamcoach.demo | Largest caseload (5): Alicia, Marcus, Tamsin, Owen, Lena |
 | Daniel Okafor — Coach | daniel@dreamcoach.demo | 3 dreamers incl. Victor (paused) and Darnell |
 | Priya Raman — Coach | priya@dreamcoach.demo | 2 dreamers: Grace, Theo |
@@ -26,7 +26,7 @@ to fill the form.
 ## Tour 1 — the dreamer (sign in as Alicia)
 
 1. **Home** — greeting, the four dreams with progress and how far each has moved
-   since a coaching session (labelled, e.g. "▲ 6 pts since S9"), the CARE wheel
+   since a coaching session (labelled, e.g. "▲ 6 pts vs S8"; after a newer self update it reads "since S9"), the CARE wheel
    from her latest readings, active actions (check one off right here), the last
    coaching session with Maya's focus and notes, and a recent activity feed.
 2. **Dreams** — open *Run the Riverfront Half Marathon*. Edit the title or
@@ -47,7 +47,7 @@ to fill the form.
    and every entry with its note and the reflections written alongside it. From
    the ⋯ menu: edit or delete your own self entries, add your own note to a value
    Maya recorded in a session, or make any entry private.
-6. **Check in** (top-right) — pick any subset of areas and dreams, rate them, add
+6. **Check in** (the button at the top of Home, or *Full check-in* on CARE) — pick any subset of areas and dreams, rate them, add
    notes, write a reflection; every piece has its own privacy switch. Save.
 7. **Journal** — write a reflection (tag it with a dream or area), switch between
    *Reflections* and *Everything*, search and filter.
@@ -69,14 +69,14 @@ to fill the form.
   with a short notice. Hiding in one tab hides every open tab.
 - Try making something private while private entries are hidden: it simply
   disappears from view with a toast. If a shared rating already carries a
-  private note you can't currently see, *Add a note* asks you to show private
-  entries first rather than overwrite it.
+  private note you can't currently see, adding a note (*Add a note* or *Edit value
+  or note*) asks you to show private entries first rather than overwrite it.
 
 ## Tour 2 — the coach (sign in as Maya)
 
 1. **My dreamers** — the caseload at a glance: last session, last self activity,
    CARE average with the four values, dream progress, active actions.
-2. Open **Alicia Moreno** — Overview (dreams, wheel now vs last session, latest
+2. Open **Alicia Moreno** — Overview (dreams, the wheel for her latest session against the one before, latest
    ratings, facts about engagement, recent shared activity), **Sessions** (the
    spreadsheet-style grid), **Actions**, **History** (any area or dream, with the
    shared notes), **Reflections** (shared only). You will find no trace of her
@@ -92,7 +92,7 @@ to fill the form.
    reflections since last time.
 4. **Present** — opens a clean screen-share view in a new tab: wheel today vs last
    session, dream progress with deltas, CARE over the program, commitment and
-   satisfaction. It updates live as you type in the workspace tab.
+   satisfaction. It catches up within a few seconds as you type in the workspace tab.
 5. **Complete session** — the record is final (reopen or *Edit values* if needed;
    an empty session asks before completing and offers *Delete* instead). Sign in
    as Alicia: Home and History already show the new values with a "Coaching
