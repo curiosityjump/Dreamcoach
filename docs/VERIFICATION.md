@@ -127,3 +127,4 @@ server behaviour got an API test.
 | 1 | 41 distinct, plus 14 whose verification was cut short (reproduced and fixed in the first fix pass) | 2 | 25 |
 | 2 | 99 | 2 | 21 |
 | 3 | 40 | 0 | 13 |
+| 4 | 36 | 2 | 10 |

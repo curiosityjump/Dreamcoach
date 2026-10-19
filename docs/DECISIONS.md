@@ -63,19 +63,29 @@ why, and what was traded off.
 
 10. **Dream "achieved" is derived from shared progress only.** A private 100% is
     visible to the dreamer as 100% but does not flip the shared achieved badge
-    (otherwise staff could infer the private entry).
+    (otherwise staff could infer the private entry). It is a fact about the shared
+    history — achieved once any shared update reaches 100%, dated by the earliest
+    one — so it never depends on the order things were written, and hiding and
+    re-sharing an entry leaves it exactly as it was.
 
 11. **Unlock state lives on the server session, slides with real activity, and
     expires after 30 idle minutes.** "Activity" means the person touched the page:
     polling, focus refetches and expiry checks don't count, so a live page left
     open still re-hides — while someone reading or typing without saving keeps
-    it alive (the browser checks in just before the window closes). If the Hide
+    it alive (the browser checks in just before the window closes). The browser
+    times this from the server's "minutes left", not its own clock, and if it
+    can't confirm the unlock once the time is up it hides private entries
+    anyway. If the Hide
     request can't reach the server, the screen stays hidden and keeps retrying
     rather than showing private entries again. Sign-in always starts hidden;
     sign-out destroys the session; switching accounts therefore starts hidden. Wrong-password attempts
     on unlock are rate-limited like logins (5 → 60s lockout).
 
-12. **The dreamer can create private entries while private is hidden.** The entry
+12. **Hiding private entries never costs the dreamer their unsaved work.** Drafts
+    survive Hide private and the automatic re-hide; a draft marked private stays
+    but its text is covered until private entries are shown again.
+
+    **The dreamer can create private entries while private is hidden.** The entry
     simply disappears from view and a toast explains why. Requiring an unlock to
     write a private note felt like a barrier to honest reflection. The one thing
     hidden mode never does is change a private entry blindly: if a shared rating
@@ -96,7 +106,9 @@ why, and what was traded off.
     (its window ends where the next session began) — and the previous session's
     focus and notes sit above it. An action typed but not yet added is never
     dropped silently: completing the session asks whether to add it. A grid value
-    that fails to save stays marked on its cell and is retried.
+    that fails to save stays marked on its cell and is retried, and completing
+    waits until everything has saved. Grid cells take digits only — no scroll-wheel
+    or arrow-key stepping — and a value out of range is refused, never clamped.
 
 14. **Session entries are upserts keyed by (session, category) / (session,
     dream) among *shared* rows.** Correcting a number during a conversation never

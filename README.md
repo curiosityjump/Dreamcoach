@@ -42,7 +42,7 @@ click one to fill the form.
 | Dreamer | `darnell@dreamcoach.demo` — Darnell Price | Engaged; has the Energy 4 → 8 journal story |
 | Dreamer | `grace@dreamcoach.demo` — Grace Oyelaran | Engaged; many reflections, several private |
 | Dreamer | `marcus@dreamcoach.demo` — Marcus Bell | Moderate; one dream achieved |
-| Dreamer | `tamsin@dreamcoach.demo` — Tamsin Reyes | Light user; missed two sessions |
+| Dreamer | `tamsin@dreamcoach.demo` — Tamsin Reyes | Light user: the odd check-in, and no session for the last couple of months |
 | Dreamer | `lena@dreamcoach.demo` — Lena Hoffmann | Joined two months ago |
 
 All people and data are fictional. Private entries in the seed belong to dreamers

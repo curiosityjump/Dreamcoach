@@ -20,7 +20,7 @@ to fill the form.
 | Darnell Price — Dreamer | darnell@dreamcoach.demo | The Energy 4 → 8 journal story from the brief (August) |
 | Grace Oyelaran — Dreamer | grace@dreamcoach.demo | Many reflections, several private |
 | Marcus Bell — Dreamer | marcus@dreamcoach.demo | Achieved his program dream (camping every month) |
-| Tamsin Reyes — Dreamer | tamsin@dreamcoach.demo | Light user: sessions only, two months missed |
+| Tamsin Reyes — Dreamer | tamsin@dreamcoach.demo | Light user: the odd check-in (some private), and no session for the last couple of months — see how gaps look without guilt |
 | Lena Hoffmann — Dreamer | lena@dreamcoach.demo | Joined two months ago |
 
 ## Tour 1 — the dreamer (sign in as Alicia)
